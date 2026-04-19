@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lazer Kesim Yönetim Sistemi</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <!-- FontAwesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <i class="fa-solid fa-bolt logo-icon"></i>
+                <h2>ProLazer ERP</h2>
+            </div>
+            <ul class="nav-menu">
+                <li class="nav-item active" data-target="dashboard">
+                    <i class="fa-solid fa-chart-pie"></i>
+                    <span>Gösterge Paneli</span>
+                </li>
+                <li class="nav-item" data-target="quotation">
+                    <i class="fa-solid fa-file-invoice-dollar"></i>
+                    <span>Teklif Motoru</span>
+                </li>
+                <li class="nav-item" data-target="accounts">
+                    <i class="fa-solid fa-users"></i>
+                    <span>Cari Hesaplar</span>
+                </li>
+                <li class="nav-item" data-target="inventory">
+                    <i class="fa-solid fa-boxes-stacked"></i>
+                    <span>Stok / Malzeme</span>
+                </li>
+                <li class="nav-item" data-target="expenses">
+                    <i class="fa-solid fa-money-bill-wave"></i>
+                    <span>Giderler</span>
+                </li>
+            </ul>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="top-header">
+                <div class="header-title" id="page-title">Gösterge Paneli</div>
+                <div class="header-actions">
+                    <button class="btn btn-outline"><i class="fa-solid fa-bell"></i></button>
+                    <div class="user-profile" id="btn-user-profile" style="cursor: pointer; display: flex; align-items: center;" onclick="openAyarlarModal()">
+                        <img id="header-avatar" src="https://ui-avatars.com/api/?name=Firma&background=E63946&color=fff" alt="User">
+                        <span id="header-firma-adi" style="margin-left: 10px; font-weight: 500; font-size: 14px; color: var(--text-primary);">Firma Adı</span>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Views -->
+            <div class="view-container">
+                <!-- Dashboard View -->
+                <div id="view-dashboard" class="view active">
+                    <div class="flex-between mb-4">
+                        <h3 style="color:var(--primary); font-size:18px;">Finansal Özet</h3>
+                        <button class="btn btn-outline" id="btn-toggle-stats"><i class="fa-solid fa-eye-slash"></i> Göster</button>
+                    </div>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon"><i class="fa-solid fa-wallet"></i></div>
+                            <div class="stat-details">
+                                <h3>Toplam Gelir</h3>
+                                <div class="stat-value">₺125,400.00</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon alert"><i class="fa-solid fa-hand-holding-dollar"></i></div>
+                            <div class="stat-details">
+                                <h3>Bekleyen Alacaklar</h3>
+                                <div class="stat-value text-alert">₺45,200.00</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon success"><i class="fa-solid fa-check-double"></i></div>
+                            <div class="stat-details">
+                                <h3>Onaylanan Teklifler</h3>
+                                <div class="stat-value">24</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-widgets">
+                        <div class="widget">
+                            <h3>Son İşlemler</h3>
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Tarih</th>
+                                        <th>Firma / Müşteri</th>
+                                        <th>İşlem Tipi</th>
+                                        <th>Tutar</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td>19.04.2026</td>
+                                        <td>ABC Makine Sanayi</td>
+                                        <td><span class="badge success">Tahsilat</span></td>
+                                        <td>₺15,000.00</td>
+                                    </tr>
+                                    <tr>
+                                        <td>18.04.2026</td>
+                                        <td>Çelik Otomotiv</td>
+                                        <td><span class="badge warning">Fatura Kesildi</span></td>
+                                        <td>₺8,450.00</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quotation View -->
+                <div id="view-quotation" class="view">
+                    <div class="quotation-layout">
+                        <div class="quotation-form glass-panel">
+                            <h3>Yeni Teklif Hazırla</h3>
+                            <div class="form-group">
+                                <label>Müşteri</label>
+                                <select id="quote-customer" class="form-control">
+                                    <option value="">Seçiniz...</option>
+                                    <option value="ABC Makine">ABC Makine Sanayi</option>
+                                    <option value="Çelik Oto">Çelik Otomotiv</option>
+                                </select>
+                            </div>
+                            
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Kesim Süresi (Dakika)</label>
+                                    <input type="number" id="quote-minutes" class="form-control" placeholder="Örn: 45">
+                                </div>
+                                <div class="form-group">
+                                    <label>Dakika Ücreti (₺)</label>
+                                    <input type="number" id="quote-rate" class="form-control" value="120">
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Malzeme (Sac vs.)</label>
+                                <select id="quote-material" class="form-control">
+                                    <option value="0">Malzeme Müşteriden (Sıfır Maliyet)</option>
+                                    <option value="500">2mm DKP Sac - ₺500/plaka</option>
+                                    <option value="1200">5mm Paslanmaz - ₺1200/plaka</option>
+                                    <option value="800">3mm Alüminyum - ₺800/plaka</option>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>Malzeme Adedi / Miktarı</label>
+                                <input type="number" id="quote-material-qty" class="form-control" value="1">
+                            </div>
+
+                            <button id="btn-calculate" class="btn btn-primary w-100">Hesapla</button>
+                        </div>
+
+                        <div class="quotation-preview glass-panel">
+                            <h3>Teklif Özeti</h3>
+                            <div class="quote-summary">
+                                <div class="summary-item">
+                                    <span>Kesim Bedeli:</span>
+                                    <span id="summary-cut">₺0.00</span>
+                                </div>
+                                <div class="summary-item">
+                                    <span>Malzeme Bedeli:</span>
+                                    <span id="summary-mat">₺0.00</span>
+                                </div>
+                                <hr>
+                                <div class="summary-item total">
+                                    <span>Ara Toplam:</span>
+                                    <span id="summary-sub">₺0.00</span>
+                                </div>
+                                <div class="summary-item">
+                                    <span>KDV (%20):</span>
+                                    <span id="summary-tax">₺0.00</span>
+                                </div>
+                                <div class="summary-item grand-total text-primary">
+                                    <span>Genel Toplam:</span>
+                                    <span id="summary-total">₺0.00</span>
+                                </div>
+                            </div>
+                            <div class="quote-actions mt-4">
+                                <button class="btn btn-primary"><i class="fa-solid fa-print"></i> Yazdır / PDF Al</button>
+                                <button class="btn btn-success"><i class="fa-solid fa-save"></i> Kaydet</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Accounts View -->
+                <div id="view-accounts" class="view">
+                    <div class="glass-panel">
+                        <div class="flex-between mb-4">
+                            <h3>Cari Hesaplar</h3>
+                            <button class="btn btn-primary">+ Yeni Cari Ekle</button>
+                        </div>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Cari Kodu</th>
+                                    <th>Firma Adı</th>
+                                    <th>Telefon</th>
+                                    <th>Bakiye</th>
+                                    <th>Durum</th>
+                                    <th>İşlem</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>C-001</td>
+                                    <td>ABC Makine Sanayi</td>
+                                    <td>0532 111 2233</td>
+                                    <td class="text-alert">-₺45,200.00</td>
+                                    <td><span class="badge warning">Borçlu</span></td>
+                                </tr>
+                                <tr>
+                                    <td>C-002</td>
+                                    <td>Çelik Otomotiv</td>
+                                    <td>0555 999 8877</td>
+                                    <td class="text-success">₺0.00</td>
+                                    <td><span class="badge success">Temiz</span></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Inventory View -->
+                <div id="view-inventory" class="view">
+                    <div class="glass-panel">
+                        <div class="flex-between mb-4">
+                            <h3>Stok / Malzeme Durumu</h3>
+                            <button class="btn btn-primary">+ Yeni Malzeme Girişi</button>
+                        </div>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Malzeme Kodu</th>
+                                    <th>Cinsi</th>
+                                    <th>Miktar</th>
+                                    <th>Birim Maliyet</th>
+                                    <th>Durum</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>STK-01</td>
+                                    <td>2mm DKP Sac</td>
+                                    <td>45 Plaka</td>
+                                    <td>₺500.00</td>
+                                    <td><span class="badge success">Yeterli</span></td>
+                                </tr>
+                                <tr>
+                                    <td>STK-02</td>
+                                    <td>5mm Paslanmaz</td>
+                                    <td>2 Plaka</td>
+                                    <td>₺1200.00</td>
+                                    <td><span class="badge error">Kritik</span></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Expenses View -->
+                <div id="view-expenses" class="view">
+                    <!-- Summary Cards -->
+                    <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 24px;">
+                        <div class="stat-card">
+                            <div class="stat-icon"><i class="fa-solid fa-calendar-day"></i></div>
+                            <div>
+                                <div class="stat-label">Bu Ay Gider</div>
+                                <div class="stat-value" id="expense-stat-month">-</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon"><i class="fa-solid fa-users"></i></div>
+                            <div>
+                                <div class="stat-label">Personel Gideri</div>
+                                <div class="stat-value" id="expense-stat-personel">-</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon"><i class="fa-solid fa-receipt"></i></div>
+                            <div>
+                                <div class="stat-label">Toplam Gider</div>
+                                <div class="stat-value" id="expense-stat-total">-</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="glass-panel">
+                        <div class="flex-between mb-4">
+                            <h3>Gider Kayıtları</h3>
+                            <button class="btn btn-primary" id="btn-add-expense"><i class="fa-solid fa-plus"></i> Gider Ekle</button>
+                        </div>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Tarih</th>
+                                    <th>Kategori</th>
+                                    <th>Açıklama</th>
+                                    <th>Tutar</th>
+                                    <th>İşlem</th>
+                                </tr>
+                            </thead>
+                            <tbody id="expenses-tbody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Modals -->
+    <div id="modal-cari" class="modal-overlay">
+        <div class="modal-content glass-panel">
+            <div class="flex-between mb-4">
+                <h3>Yeni Cari Ekle</h3>
+                <button class="btn-close" onclick="closeModal('modal-cari')"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="form-group">
+                <label>Firma Adı</label>
+                <input type="text" id="input-cari-adi" class="form-control">
+            </div>
+            <div class="form-group">
+                <label>Telefon</label>
+                <input type="text" id="input-cari-tel" class="form-control">
+            </div>
+            <button class="btn btn-primary w-100 mt-4" onclick="saveCari()">Kaydet</button>
+        </div>
+    </div>
+
+    <div id="modal-stok" class="modal-overlay">
+        <div class="modal-content glass-panel">
+            <div class="flex-between mb-4">
+                <h3>Yeni Malzeme Girişi</h3>
+                <button class="btn-close" onclick="closeModal('modal-stok')"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="form-group">
+                <label>Malzeme Cinsi</label>
+                <input type="text" id="input-stok-cinsi" class="form-control">
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Miktar (Adet/Plaka)</label>
+                    <input type="number" id="input-stok-miktar" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label>Birim Maliyet (₺)</label>
+                    <input type="number" id="input-stok-maliyet" class="form-control">
+                </div>
+            </div>
+            <button class="btn btn-primary w-100 mt-4" onclick="saveStok()">Kaydet</button>
+        </div>
+    </div>
+
+    <div id="modal-islem" class="modal-overlay">
+        <div class="modal-content glass-panel">
+            <div class="flex-between mb-4">
+                <h3 id="modal-islem-title">İşlem Ekle</h3>
+                <button class="btn-close" onclick="closeModal('modal-islem')"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <input type="hidden" id="input-islem-cari-id">
+            <input type="hidden" id="input-islem-firma-adi">
+            <div class="form-group">
+                <label>İşlem Tipi</label>
+                <select id="input-islem-tipi" class="form-control">
+                    <option value="tahsilat">Tahsilat (Müşteriden Ödeme Aldık)</option>
+                    <option value="fatura_kes">Fatura Kestik (Müşteri Bize Borçlandı)</option>
+                    <option value="mal_alimi">Mal Alımı (Tedarikçiye Biz Borçlandık)</option>
+                    <option value="odeme_yaptik">Ödeme Yaptık (Tedarikçiye Para Gönderdik)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Tutar (₺)</label>
+                <input type="number" id="input-islem-tutar" class="form-control" placeholder="Örn: 5000">
+            </div>
+            <button class="btn btn-primary w-100 mt-4" onclick="saveIslem()">Kaydet</button>
+        </div>
+    </div>
+
+    <div id="modal-cari-detay" class="modal-overlay">
+        <div class="modal-content glass-panel" style="max-width: 700px;">
+            <div class="flex-between mb-4">
+                <h3 id="detay-title">Cari Hesap Ekstresi</h3>
+                <button class="btn-close" onclick="closeModal('modal-cari-detay')"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="mb-4">
+                <span style="color:var(--text-muted);">Güncel Bakiye: </span> <span id="detay-bakiye" style="font-size: 20px; font-weight: bold;"></span>
+            </div>
+            <div style="max-height: 400px; overflow-y: auto;">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Tarih / Saat</th>
+                            <th>İşlem Tipi</th>
+                            <th>Tutar</th>
+                        </tr>
+                    </thead>
+                    <tbody id="detay-tbody">
+                        <!-- JS fills this -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div id="modal-ayarlar" class="modal-overlay">
+        <div class="modal-content glass-panel">
+            <div class="flex-between mb-4">
+                <h3>Firma Ayarları</h3>
+                <button class="btn-close" onclick="closeModal('modal-ayarlar')"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="form-group">
+                <label>Firma Adı (Uygulama Sahibi)</label>
+                <input type="text" id="input-ayar-firma" class="form-control" placeholder="Örn: ProLazer Lazer Kesim">
+            </div>
+            <div class="form-group">
+                <label>Firma Telefonu</label>
+                <input type="text" id="input-ayar-tel" class="form-control" placeholder="Örn: 0555 123 4567">
+            </div>
+            <div class="form-group">
+                <label>Firma Adresi / Ek Bilgi</label>
+                <textarea id="input-ayar-adres" class="form-control" rows="3" placeholder="Fatura adresi veya notlar..."></textarea>
+            </div>
+            <button class="btn btn-primary w-100 mt-4" onclick="saveAyarlar()">Ayarları Kaydet</button>
+        </div>
+    </div>
+
+    <div id="modal-cari-duzenle" class="modal-overlay">
+        <div class="modal-content glass-panel">
+            <div class="flex-between mb-4">
+                <h3>Cari Hesap Düzenle</h3>
+                <button class="btn-close" onclick="closeModal('modal-cari-duzenle')"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <input type="hidden" id="input-duzenle-id">
+            <div class="form-group">
+                <label>Firma Adı</label>
+                <input type="text" id="input-duzenle-adi" class="form-control">
+            </div>
+            <div class="form-group">
+                <label>Telefon</label>
+                <input type="text" id="input-duzenle-tel" class="form-control">
+            </div>
+            <button class="btn btn-primary w-100 mt-4" onclick="updateCari()">Güncelle</button>
+        </div>
+    </div>
+
+    <div id="modal-gider" class="modal-overlay">
+        <div class="modal-content glass-panel">
+            <div class="flex-between mb-4">
+                <h3>Gider Ekle</h3>
+                <button class="btn-close" onclick="closeModal('modal-gider')"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="form-group">
+                <label>Kategori</label>
+                <select id="input-gider-kategori" class="form-control">
+                    <option value="Personel">Personel Maaşı</option>
+                    <option value="Elektrik">Elektrik Faturası</option>
+                    <option value="Su">Su Faturası</option>
+                    <option value="Doğalgaz">Doğalgaz Faturası</option>
+                    <option value="Kira">Kira</option>
+                    <option value="Muhasebe">Muhasebe / Danışmanlık</option>
+                    <option value="Yakıt">Yakıt</option>
+                    <option value="Bakım">Makine Bakım / Onarım</option>
+                    <option value="Vergi">Vergi / SGK</option>
+                    <option value="Diğer">Diğer</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Açıklama (İsteğe Bağlı)</label>
+                <input type="text" id="input-gider-aciklama" class="form-control" placeholder="Örn: Ahmet Usta - Nisan Maaşı">
+            </div>
+            <div class="form-group">
+                <label>Tutar (₺)</label>
+                <input type="number" id="input-gider-tutar" class="form-control" placeholder="Örn: 25000">
+            </div>
+            <button class="btn btn-primary w-100 mt-4" onclick="saveGider()">Kaydet</button>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
