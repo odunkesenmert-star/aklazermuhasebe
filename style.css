@@ -127,15 +127,19 @@ body {
     flex: 1;
     padding: 32px;
     overflow-y: auto;
+    min-height: 80vh;
 }
 
 .view {
     display: none;
-    animation: fadeIn 0.4s ease-in-out;
+    opacity: 1 !important;
+    visibility: visible !important;
 }
 
 .view.active {
-    display: block;
+    display: flex !important;
+    flex-direction: column;
+    animation: fadeIn 0.3s ease;
 }
 
 @keyframes fadeIn {
