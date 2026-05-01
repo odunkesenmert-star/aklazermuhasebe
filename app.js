@@ -14,8 +14,8 @@ const defaultDB = {
         { id: 2, kodu: 'C-002', adi: 'Çelik Otomotiv', tel: '0555 999 8877', bakiye: 0, durum: 'Temiz' }
     ],
     stoklar: [
-        { id: 1, kodu: 'STK-01', cinsi: '2mm DKP Sac', miktar: 45, maliyet: 500 },
-        { id: 2, kodu: 'STK-02', cinsi: '5mm Paslanmaz', miktar: 2, maliyet: 1200 }
+        { id: 1, kodu: 'STK-01', cinsi: '2mm DKP Sac', miktar: 45, maliyet: 500, sahibiTipi: 'biz' },
+        { id: 2, kodu: 'STK-02', cinsi: '5mm Paslanmaz', miktar: 2, maliyet: 1200, sahibiTipi: 'biz' }
     ],
     islemler: [
         { id: 1, tarih: '19.04.2026', firma: 'ABC Makine Sanayi', tip: 'Tahsilat', tutar: 15000, isSuccess: true },
@@ -34,37 +34,39 @@ try {
     db = JSON.parse(localStorage.getItem(DB_KEY));
     if (!db || typeof db !== 'object' || !db.cariler || !db.stoklar || !db.islemler || !db.teklifler) {
         db = defaultDB;
-        saveDB();
+        saveDB(true);
     }
     if (!db.ayarlar) {
         db.ayarlar = defaultDB.ayarlar;
-        saveDB();
+        saveDB(true);
     }
     if (!db.giderler) {
         db.giderler = [];
-        saveDB();
+        saveDB(true);
     }
     if (!db.isEmirleri) {
         db.isEmirleri = [];
-        saveDB();
+        saveDB(true);
     }
     if (!db.fireler) {
         db.fireler = [];
-        saveDB();
+        saveDB(true);
     }
 } catch (e) {
     db = defaultDB;
-    saveDB();
+    saveDB(true);
 }
 
-function saveDB() {
+function saveDB(skipRender = false) {
     try {
         localStorage.setItem(DB_KEY, JSON.stringify(db));
     } catch(e) {
         console.error('Storage error', e);
     }
     // Only render what is visible or common
-    renderAll();
+    if (!skipRender && typeof renderAll === 'function') {
+        renderAll();
+    }
 }
 
 // Global data guard
@@ -73,9 +75,9 @@ function getDBArray(key) {
     return Array.isArray(db[key]) ? db[key] : [];
 }
 
-const formatCurrency = (num) => {
+function formatCurrency(num) {
     return `₺${(num || 0).toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
-};
+}
 
 window.openModal = function(id) {
     const el = document.getElementById(id);
@@ -352,7 +354,30 @@ function renderFireler() {
         if (!tbody) return;
 
         const fireler = getDBArray('fireler');
-        tbody.innerHTML = fireler.length ? [...fireler].reverse().map(f => `
+        const reversedFireler = [...fireler].reverse();
+
+        // Sayfalama (Pagination) - Fireler
+        window.pageScraps = window.pageScraps || 1;
+        const itemsPerPage = 10;
+        const totalPages = Math.ceil(reversedFireler.length / itemsPerPage) || 1;
+        
+        if (window.pageScraps > totalPages) window.pageScraps = totalPages;
+        if (window.pageScraps < 1) window.pageScraps = 1;
+
+        const startIndex = (window.pageScraps - 1) * itemsPerPage;
+        const paginatedItems = reversedFireler.slice(startIndex, startIndex + itemsPerPage);
+
+        // Update pagination UI
+        const pageInfo = document.getElementById('scraps-page-info');
+        if (pageInfo) pageInfo.textContent = `Sayfa ${window.pageScraps} / ${totalPages} (${reversedFireler.length} Kayıt)`;
+
+        const btnPrev = document.getElementById('btn-scraps-prev');
+        const btnNext = document.getElementById('btn-scraps-next');
+        
+        if (btnPrev) btnPrev.disabled = window.pageScraps <= 1;
+        if (btnNext) btnNext.disabled = window.pageScraps >= totalPages;
+
+        tbody.innerHTML = paginatedItems.length ? paginatedItems.map(f => `
             <tr>
                 <td>${f.cinsi || '-'}</td>
                 <td>${f.mm || '-'} mm</td>
@@ -367,6 +392,18 @@ function renderFireler() {
     } catch(e) {
         console.error("renderFireler error:", e);
     }
+}
+
+window.prevScrapsPage = function() {
+    if (window.pageScraps > 1) {
+        window.pageScraps--;
+        renderFireler();
+    }
+}
+
+window.nextScrapsPage = function() {
+    window.pageScraps = (window.pageScraps || 1) + 1;
+    renderFireler();
 }
 
 window.openAyarlarModal = function() {
@@ -415,27 +452,31 @@ window.saveIslem = function() {
         let isGelir = false;
 
         if (tip === 'tahsilat') {
+            // Müşteri bize ödeme yaptı → borcu azalır
             tipText = 'Tahsilat (Gelen)';
             bakiyeArtisi = -tutar;
             isSuccess = true;
             isGelir = true;
         } else if (tip === 'fatura_kes') {
             tipText = `Fatura Kesildi (${faturaNo})`;
-            bakiyeArtisi = 0; // Fatura sadece evrak kaydı, borç zaten teslimatta eklendi
+            bakiyeArtisi = 0;
             isSuccess = false;
             isGelir = false;
         } else if (tip === 'mal_alimi') {
+            // Firmadan mal aldık → biz borçlandık
             tipText = 'Mal Alımı';
             bakiyeArtisi = -tutar;
             isSuccess = false;
             isGelir = false;
         } else if (tip === 'odeme_yaptik') {
+            // Firmaya ödeme yaptık → borcumuz azaldı
             tipText = 'Ödeme Yaptık (Çıkan)';
             bakiyeArtisi = tutar;
             isSuccess = true;
             isGelir = false;
         }
 
+        const eskiBakiye = cari.bakiye;
         cari.bakiye += bakiyeArtisi;
         
         if (cari.bakiye > 0) cari.durum = 'Müşteri Borçlu';
@@ -456,11 +497,23 @@ window.saveIslem = function() {
 
         saveDB();
         closeModal('modal-islem');
+
+        // Formu temizle
         const aciklamaEl = document.getElementById('input-islem-aciklama');
         if (aciklamaEl) aciklamaEl.value = '';
         const faturaNoEl = document.getElementById('input-islem-fatura-no');
         if (faturaNoEl) faturaNoEl.value = '';
         document.getElementById('input-islem-tutar').value = '';
+
+        // Sayfayı yenile — cari listesini ve detayı güncelle
+        renderCariler();
+        renderDashboard();
+
+        // Kullanıcıya bilgi ver
+        const yeniBakiye = cari.bakiye;
+        const bakiyeYon = yeniBakiye > 0 ? 'Müşteri Borçlu' : (yeniBakiye < 0 ? 'Biz Borçluyuz' : 'Temiz');
+        alert(`✅ ${tipText} kaydedildi!\n\nEski Bakiye: ${formatCurrency(eskiBakiye)}\nİşlem: ${bakiyeArtisi >= 0 ? '+' : ''}${formatCurrency(bakiyeArtisi)}\nYeni Bakiye: ${formatCurrency(yeniBakiye)}\nDurum: ${bakiyeYon}`);
+
     } catch(e) {
         alert("İşlem kaydedilirken hata oluştu: " + e.message);
     }
@@ -531,42 +584,92 @@ window.openDetayModal = function(id) {
 }
 
 window.openStatModal = function(type) {
+    window.currentStatType = type;
+    window.pageStatDetail = 1;
+
     const title = document.getElementById('stat-detail-title');
     const thead = document.getElementById('stat-detail-thead');
-    const tbody = document.getElementById('stat-detail-tbody');
-    if (!title || !thead || !tbody) return;
+    if (!title || !thead) return;
 
     if (type === 'gelir') {
         title.textContent = 'Toplam Gelir Detayları';
         thead.innerHTML = '<tr><th>Tarih</th><th>Firma</th><th>İşlem</th><th>Tutar</th></tr>';
-        const gelirler = (db.islemler || []).filter(i => i.isGelir).reverse();
-        tbody.innerHTML = gelirler.map(i => `
-            <tr><td>${i.tarih}</td><td>${i.firma}</td><td>${i.tip}</td><td class="text-info">${formatCurrency(i.tutar)}</td></tr>
-        `).join('') || '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">Gelir kaydı bulunamadı.</td></tr>';
+        window.currentStatData = (db.islemler || []).filter(i => i.isGelir).reverse();
     } else if (type === 'alacak') {
         title.textContent = 'Bekleyen Alacaklar Listesi';
         thead.innerHTML = '<tr><th>Müşteri Adı</th><th>Telefon</th><th>Borç Tutarı</th></tr>';
-        const borclular = (db.cariler || []).filter(c => c.bakiye < 0);
-        tbody.innerHTML = borclular.map(c => `
-            <tr><td>${c.adi}</td><td>${c.tel}</td><td class="text-alert">${formatCurrency(Math.abs(c.bakiye))}</td></tr>
-        `).join('') || '<tr><td colspan="3" style="text-align:center; color:var(--text-muted);">Bekleyen alacak bulunmuyor.</td></tr>';
+        window.currentStatData = (db.cariler || []).filter(c => c.bakiye < 0);
     } else if (type === 'teklif') {
         title.textContent = 'Onaylanan ve Bekleyen İşler';
         thead.innerHTML = '<tr><th>Müşteri</th><th>İş Tanımı</th><th>Tutar</th><th>Durum</th></tr>';
-        const aktifIsler = (db.isEmirleri || []).filter(o => o.durum !== 'Teslim Edildi').reverse();
-        tbody.innerHTML = aktifIsler.map(o => `
-            <tr><td>${o.customerName}</td><td>${o.description || '-'}</td><td>${formatCurrency(o.total)}</td><td><span class="badge warning">${o.durum}</span></td></tr>
-        `).join('') || '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">Aktif iş bulunmuyor.</td></tr>';
+        window.currentStatData = (db.isEmirleri || []).filter(o => o.durum !== 'Teslim Edildi').reverse();
     } else if (type === 'teslimat_hepsi') {
         title.textContent = 'Tüm Teslim Edilen İşler';
         thead.innerHTML = '<tr><th>Müşteri</th><th>İş Tanımı</th><th>Tarih</th><th>Tutar</th></tr>';
-        const teslimler = (db.isEmirleri || []).filter(o => o.durum === 'Teslim Edildi').reverse();
-        tbody.innerHTML = teslimler.map(o => `
-            <tr><td>${o.customerName}</td><td>${o.description || '-'}</td><td>${o.tarih}</td><td>${formatCurrency(o.total)}</td></tr>
-        `).join('') || '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">Henüz teslimat yapılmamış.</td></tr>';
+        window.currentStatData = (db.isEmirleri || []).filter(o => o.durum === 'Teslim Edildi').reverse();
     }
     
+    renderStatModal();
     openModal('modal-stat-detail');
+}
+
+window.renderStatModal = function() {
+    const tbody = document.getElementById('stat-detail-tbody');
+    const paginationContainer = document.getElementById('stat-detail-pagination-container');
+    if (!tbody || !window.currentStatData) return;
+
+    const itemsPerPage = 10;
+    const totalPages = Math.ceil(window.currentStatData.length / itemsPerPage) || 1;
+    
+    if (window.pageStatDetail > totalPages) window.pageStatDetail = totalPages;
+    if (window.pageStatDetail < 1) window.pageStatDetail = 1;
+
+    const startIndex = (window.pageStatDetail - 1) * itemsPerPage;
+    const paginatedItems = window.currentStatData.slice(startIndex, startIndex + itemsPerPage);
+
+    // Update UI
+    if (window.currentStatData.length > itemsPerPage) {
+        if(paginationContainer) paginationContainer.style.display = 'flex';
+        const pageInfo = document.getElementById('stat-detail-page-info');
+        if (pageInfo) pageInfo.textContent = `Sayfa ${window.pageStatDetail} / ${totalPages} (${window.currentStatData.length} Kayıt)`;
+
+        const btnPrev = document.getElementById('btn-stat-detail-prev');
+        const btnNext = document.getElementById('btn-stat-detail-next');
+        if (btnPrev) btnPrev.disabled = window.pageStatDetail <= 1;
+        if (btnNext) btnNext.disabled = window.pageStatDetail >= totalPages;
+    } else {
+        if(paginationContainer) paginationContainer.style.display = 'none';
+    }
+
+    if (window.currentStatType === 'gelir') {
+        tbody.innerHTML = paginatedItems.map(i => `
+            <tr><td>${i.tarih}</td><td>${i.firma}</td><td>${i.tip}</td><td class="text-info">${formatCurrency(i.tutar)}</td></tr>
+        `).join('') || '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">Kayıt bulunamadı.</td></tr>';
+    } else if (window.currentStatType === 'alacak') {
+        tbody.innerHTML = paginatedItems.map(c => `
+            <tr><td>${c.adi}</td><td>${c.tel}</td><td class="text-alert">${formatCurrency(Math.abs(c.bakiye))}</td></tr>
+        `).join('') || '<tr><td colspan="3" style="text-align:center; color:var(--text-muted);">Kayıt bulunamadı.</td></tr>';
+    } else if (window.currentStatType === 'teklif') {
+        tbody.innerHTML = paginatedItems.map(o => `
+            <tr><td>${o.customerName}</td><td>${o.description || '-'}</td><td>${formatCurrency(o.total)}</td><td><span class="badge warning">${o.durum}</span></td></tr>
+        `).join('') || '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">Kayıt bulunamadı.</td></tr>';
+    } else if (window.currentStatType === 'teslimat_hepsi') {
+        tbody.innerHTML = paginatedItems.map(o => `
+            <tr><td>${o.customerName}</td><td>${o.description || '-'}</td><td>${o.tarih}</td><td>${formatCurrency(o.total)}</td></tr>
+        `).join('') || '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">Kayıt bulunamadı.</td></tr>';
+    }
+}
+
+window.prevStatPage = function() {
+    if (window.pageStatDetail > 1) {
+        window.pageStatDetail--;
+        renderStatModal();
+    }
+}
+
+window.nextStatPage = function() {
+    window.pageStatDetail++;
+    renderStatModal();
 }
 
 
@@ -639,7 +742,28 @@ function renderCariler() {
     if (alacakEl) alacakEl.textContent = formatCurrency(toplamAlacak);
     if (borcEl) borcEl.textContent = formatCurrency(toplamBorc);
 
-    tbody.innerHTML = filtered.map(c => {
+    // Sayfalama (Pagination) - Cariler
+    window.pageAccounts = window.pageAccounts || 1;
+    const itemsPerPage = 10;
+    const totalPages = Math.ceil(filtered.length / itemsPerPage) || 1;
+    
+    if (window.pageAccounts > totalPages) window.pageAccounts = totalPages;
+    if (window.pageAccounts < 1) window.pageAccounts = 1;
+
+    const startIndex = (window.pageAccounts - 1) * itemsPerPage;
+    const paginatedItems = filtered.slice(startIndex, startIndex + itemsPerPage);
+
+    // Update pagination UI
+    const pageInfo = document.getElementById('accounts-page-info');
+    if (pageInfo) pageInfo.textContent = `Sayfa ${window.pageAccounts} / ${totalPages} (${filtered.length} Kayıt)`;
+
+    const btnPrev = document.getElementById('btn-accounts-prev');
+    const btnNext = document.getElementById('btn-accounts-next');
+    
+    if (btnPrev) btnPrev.disabled = window.pageAccounts <= 1;
+    if (btnNext) btnNext.disabled = window.pageAccounts >= totalPages;
+
+    tbody.innerHTML = paginatedItems.map(c => {
         const escapedAdi = (c.adi || '').replace(/"/g, '&amp;quot;').replace(/'/g, '\\&#39;');
         return `
         <tr>
@@ -675,6 +799,18 @@ function renderCariler() {
             }
         }
     });
+}
+
+window.prevAccountsPage = function() {
+    if (window.pageAccounts > 1) {
+        window.pageAccounts--;
+        renderCariler();
+    }
+}
+
+window.nextAccountsPage = function() {
+    window.pageAccounts = (window.pageAccounts || 1) + 1;
+    renderCariler();
 }
 
 window.openCariDetay = function(id) {
@@ -727,11 +863,47 @@ window.openCariDetay = function(id) {
         });
     });
 
-    // Sort by date (oldest to newest)
+    // Sort by date (oldest to newest for building, then we might want newest to oldest for display)
+    // Actually newest to oldest is better for reading history.
     history.sort((a, b) => b.tarihObj - a.tarihObj);
 
+    // Save globally for pagination and filtering
+    window.currentCariHistory = history;
+    window.cariHistoryPage = 1;
+    
+    // Reset filter
+    const filterEl = document.getElementById('ekstre-filter');
+    if (filterEl) filterEl.value = 'all';
+
+    renderCariHistory();
+    openModal('modal-cari-ekstre');
+}
+
+window.renderCariHistory = function() {
+    if (!window.currentCariHistory) return;
+
+    const filter = document.getElementById('ekstre-filter') ? document.getElementById('ekstre-filter').value : 'all';
+    
+    let filteredHistory = window.currentCariHistory;
+    if (filter === 'finans') {
+        filteredHistory = filteredHistory.filter(h => h.tip !== 'İş Emri (Satış)' && h.tip !== 'Malzeme Geldi');
+    } else if (filter === 'satis') {
+        filteredHistory = filteredHistory.filter(h => h.tip === 'İş Emri (Satış)');
+    } else if (filter === 'malzeme') {
+        filteredHistory = filteredHistory.filter(h => h.tip === 'Malzeme Geldi');
+    }
+
+    const itemsPerPage = 10;
+    const totalPages = Math.ceil(filteredHistory.length / itemsPerPage) || 1;
+    
+    if (window.cariHistoryPage > totalPages) window.cariHistoryPage = totalPages;
+    if (window.cariHistoryPage < 1) window.cariHistoryPage = 1;
+
+    const startIndex = (window.cariHistoryPage - 1) * itemsPerPage;
+    const paginatedItems = filteredHistory.slice(startIndex, startIndex + itemsPerPage);
+
     const tbody = document.getElementById('ekstre-tbody');
-    tbody.innerHTML = history.map(h => `
+    tbody.innerHTML = paginatedItems.map(h => `
         <tr>
             <td>${h.tarih}</td>
             <td><span class="badge ${h.tutar === 0 ? 'pending' : (h.tutar > 0 ? 'success' : 'warning')}">${h.tip}</span></td>
@@ -742,7 +914,32 @@ window.openCariDetay = function(id) {
         </tr>
     `).join('') || '<tr><td colspan="4" style="text-align:center; padding:20px;">Geçmiş hareket bulunamadı.</td></tr>';
 
-    openModal('modal-cari-ekstre');
+    // Update pagination UI
+    const pageInfo = document.getElementById('ekstre-page-info');
+    if (pageInfo) pageInfo.textContent = `Sayfa ${window.cariHistoryPage} / ${totalPages} (${filteredHistory.length} Kayıt)`;
+
+    const btnPrev = document.getElementById('btn-ekstre-prev');
+    const btnNext = document.getElementById('btn-ekstre-next');
+    
+    if (btnPrev) btnPrev.disabled = window.cariHistoryPage <= 1;
+    if (btnNext) btnNext.disabled = window.cariHistoryPage >= totalPages;
+}
+
+window.filterCariHistory = function() {
+    window.cariHistoryPage = 1;
+    renderCariHistory();
+}
+
+window.prevCariPage = function() {
+    if (window.cariHistoryPage > 1) {
+        window.cariHistoryPage--;
+        renderCariHistory();
+    }
+}
+
+window.nextCariPage = function() {
+    window.cariHistoryPage++;
+    renderCariHistory();
 }
 
 // Helper for DD.MM.YYYY
@@ -763,7 +960,7 @@ window.updateQuoteMaterials = function() {
     selectMaterial.innerHTML = '<option value="0">Malzeme Müşteriden (Sıfır Maliyet)</option>';
     
     // Add our materials
-    db.stoklar.filter(s => s.sahibiTipi === 'biz').forEach(stok => {
+    db.stoklar.filter(s => s.sahibiTipi === 'biz' || !s.sahibiTipi).forEach(stok => {
         selectMaterial.innerHTML += `<option value="${stok.id}">[BİZ] ${stok.cinsi} (${stok.mm}mm) - ${formatCurrency(stok.maliyet)}/plaka</option>`;
     });
 
@@ -825,7 +1022,7 @@ window.toggleStats = function() {
 function renderDashboard() {
     try {
         const incomeTransactions = (db.islemler || []).filter(i => i.isGelir);
-        const toplamGelir = incomeTransactions.reduce((acc, curr) => acc + curr.tutar, 0) + 110400; // 110400 is base dummy income
+        const toplamGelir = incomeTransactions.reduce((acc, curr) => acc + curr.tutar, 0);
         
         const bekleyenAlacak = (db.cariler || []).reduce((acc, curr) => acc + (curr.bakiye > 0 ? curr.bakiye : 0), 0);
         const toplamBorc = (db.cariler || []).reduce((acc, curr) => acc + (curr.bakiye < 0 ? Math.abs(curr.bakiye) : 0), 0);
@@ -906,10 +1103,33 @@ function renderExpenses() {
         tbody.innerHTML = '';
 
         const giderler = getDBArray('giderler');
-        if (giderler.length === 0) {
+        const reversedGiderler = [...giderler].reverse();
+
+        // Sayfalama (Pagination) - Giderler
+        window.pageExpenses = window.pageExpenses || 1;
+        const itemsPerPage = 10;
+        const totalPages = Math.ceil(reversedGiderler.length / itemsPerPage) || 1;
+        
+        if (window.pageExpenses > totalPages) window.pageExpenses = totalPages;
+        if (window.pageExpenses < 1) window.pageExpenses = 1;
+
+        const startIndex = (window.pageExpenses - 1) * itemsPerPage;
+        const paginatedItems = reversedGiderler.slice(startIndex, startIndex + itemsPerPage);
+
+        // Update pagination UI
+        const pageInfo = document.getElementById('expenses-page-info');
+        if (pageInfo) pageInfo.textContent = `Sayfa ${window.pageExpenses} / ${totalPages} (${reversedGiderler.length} Kayıt)`;
+
+        const btnPrev = document.getElementById('btn-expenses-prev');
+        const btnNext = document.getElementById('btn-expenses-next');
+        
+        if (btnPrev) btnPrev.disabled = window.pageExpenses <= 1;
+        if (btnNext) btnNext.disabled = window.pageExpenses >= totalPages;
+
+        if (paginatedItems.length === 0) {
             tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);">Henüz gider kaydı yok.</td></tr>';
         } else {
-            [...giderler].reverse().forEach(g => {
+            paginatedItems.forEach(g => {
                 const katBadge = getCategoryBadge(g.kategori);
                 tbody.innerHTML += `<tr>
                     <td>${g.tarih || '-'}</td>
@@ -920,6 +1140,12 @@ function renderExpenses() {
                 </tr>`;
             });
         }
+    } catch (e) {
+        console.error("renderExpenses error:", e);
+    }
+
+    try {
+        const giderler = getDBArray('giderler');
 
         const now = new Date();
         const thisMonth = now.getMonth();
@@ -988,6 +1214,18 @@ window.saveGider = function() {
     }
 }
 
+window.prevExpensesPage = function() {
+    if (window.pageExpenses > 1) {
+        window.pageExpenses--;
+        renderExpenses();
+    }
+}
+
+window.nextExpensesPage = function() {
+    window.pageExpenses = (window.pageExpenses || 1) + 1;
+    renderExpenses();
+}
+
 window.deleteGider = function(id) {
     if (!confirm('Bu gider kaydı silinsin mi?')) return;
     db.giderler = db.giderler.filter(g => g.id !== id);
@@ -1038,7 +1276,17 @@ function getQuoteData() {
     const stokQty = parseFloat(document.getElementById('quote-material-qty').value) || 0;
 
     const stok = db.stoklar.find(s => s.id == stokId);
-    const materialCostPerUnit = stok ? (stok.sahibiTipi === 'biz' ? stok.maliyet : 0) : 0;
+    
+    // Stok miktarı kontrolü (Eğer kendi malzememiz ise)
+    if (stok && (stok.sahibiTipi === 'biz' || !stok.sahibiTipi)) {
+        const requiredQty = (islemTipi === 'hammadde') ? kgAmount : stokQty;
+        if (requiredQty > stok.miktar) {
+            alert(`Yetersiz Stok! Seçilen malzemeden stokta sadece ${stok.miktar} ${stok.birim || 'adet/kg'} var. Lütfen miktarı düşürün.`);
+            return null;
+        }
+    }
+
+    const materialCostPerUnit = stok ? ((stok.sahibiTipi === 'biz' || !stok.sahibiTipi) ? stok.maliyet : 0) : 0;
     
     let operationCost = 0;
     let totalMaterialCost = 0;
@@ -1226,7 +1474,30 @@ function renderOrders() {
         updateNotifications(); // Update bell badge
         
         const orders = getDBArray('isEmirleri');
-        tbody.innerHTML = orders.length ? [...orders].reverse().map(o => `
+        const reversedOrders = [...orders].reverse();
+
+        // Sayfalama (Pagination) - İş Emirleri
+        window.pageOrders = window.pageOrders || 1;
+        const itemsPerPage = 10;
+        const totalPages = Math.ceil(reversedOrders.length / itemsPerPage) || 1;
+        
+        if (window.pageOrders > totalPages) window.pageOrders = totalPages;
+        if (window.pageOrders < 1) window.pageOrders = 1;
+
+        const startIndex = (window.pageOrders - 1) * itemsPerPage;
+        const paginatedItems = reversedOrders.slice(startIndex, startIndex + itemsPerPage);
+
+        // Update pagination UI
+        const pageInfo = document.getElementById('orders-page-info');
+        if (pageInfo) pageInfo.textContent = `Sayfa ${window.pageOrders} / ${totalPages} (${reversedOrders.length} Kayıt)`;
+
+        const btnPrev = document.getElementById('btn-orders-prev');
+        const btnNext = document.getElementById('btn-orders-next');
+        
+        if (btnPrev) btnPrev.disabled = window.pageOrders <= 1;
+        if (btnNext) btnNext.disabled = window.pageOrders >= totalPages;
+
+        tbody.innerHTML = paginatedItems.length ? paginatedItems.map(o => `
             <tr>
                 <td style="width:100px;"><span class="badge" style="background:rgba(233, 196, 106, 0.2); color:var(--warning); border:1px solid var(--warning); cursor:pointer; text-decoration:underline;" onclick="openOrderHistory(${o.id})" title="Tarihçeyi Gör">${o.orderNo || '-'}</span></td>
                 <td><strong>${o.customerName || '-'}</strong></td>
@@ -1244,6 +1515,18 @@ function renderOrders() {
     } catch(e) {
         console.error("renderOrders error:", e);
     }
+}
+
+window.prevOrdersPage = function() {
+    if (window.pageOrders > 1) {
+        window.pageOrders--;
+        renderOrders();
+    }
+}
+
+window.nextOrdersPage = function() {
+    window.pageOrders = (window.pageOrders || 1) + 1;
+    renderOrders();
 }
 
 window.openOrderStatusModal = function(id) {
@@ -1374,10 +1657,39 @@ window.updateOrderStatus = function() {
             if (order.stokId && order.stokId !== "0") {
                 const stok = db.stoklar.find(s => s.id == order.stokId);
                 if (stok) {
-                    stok.miktar -= (order.stokQty || 0);
+                    const deductQty = (order.islemTipi === 'hammadde') ? (order.kgAmount || 0) : (order.stokQty || 0);
+                    stok.miktar -= deductQty;
                     if (stok.miktar < 0) stok.miktar = 0;
                 }
             }
+        }
+
+        // İptal edildiğinde cariye yansıtılan borcu geri al
+        if (newStatus === 'İptal' && order.bakiyeCariyeYansitildi === true) {
+            if (order.customerId !== 'internal') {
+                const firmaAdi = order.customerName;
+                const tutar = order.total;
+                const cari = db.cariler.find(c => c.adi === firmaAdi);
+                if (cari) {
+                    cari.bakiye -= tutar; // Borcu geri al
+                    if (cari.bakiye > 0) cari.durum = 'Müşteri Borçlu';
+                    else if (cari.bakiye < 0) cari.durum = 'Müşteri Alacaklı';
+                    else cari.durum = 'Temiz';
+
+                    db.islemler.push({
+                        id: Date.now(),
+                        tarih: new Date().toLocaleDateString('tr-TR'),
+                        firma: firmaAdi,
+                        tip: `İş Emri İptal (${order.orderNo})`,
+                        aciklama: 'İş emri iptal edildi, borç geri alındı',
+                        tutar: tutar,
+                        isSuccess: false,
+                        isGelir: false
+                    });
+                }
+            }
+            order.bakiyeCariyeYansitildi = false; // Sıfırlandı
+            alert(`${order.customerName} müşterisinin cari hesabından ${formatCurrency(order.total)} borç geri alındı.`);
         }
         saveDB();
         renderStoklar();
@@ -1397,9 +1709,7 @@ function updateDashboardChart() {
     const incomeData = new Array(labels.length).fill(0);
     const expenseData = new Array(labels.length).fill(0);
 
-    // Initial dummy data to make it look good
-    incomeData[currentMonth] = 110400; 
-
+    // Fill actual data from transactions
     db.islemler.forEach(i => {
         if (!i.tarih) return;
         const parts = i.tarih.split('.');
@@ -1624,7 +1934,7 @@ window.calculateQuote = function() {
     const stokId = selectMaterial ? selectMaterial.value : "0";
     const stok = db.stoklar.find(s => s.id == stokId);
     
-    const materialCostPerUnit = stok ? (stok.sahibiTipi === 'biz' ? stok.maliyet : 0) : 0;
+    const materialCostPerUnit = stok ? ((stok.sahibiTipi === 'biz' || !stok.sahibiTipi) ? stok.maliyet : 0) : 0;
     const materialQty = parseFloat(inputMaterialQty ? inputMaterialQty.value : 1) || 1;
     const discountPercent = parseFloat(inputDiscount ? inputDiscount.value : 0) || 0;
     const taxRate = parseFloat(selectTax ? selectTax.value : 20) / 100;
@@ -1698,8 +2008,30 @@ function renderInvoices() {
     if (elAlinan) elAlinan.textContent = formatCurrency(toplamAlinan);
 
     const filtered = invoiceTabFilter === 'kesilen' ? kesilen : alinan;
+    const reversedFiltered = [...filtered].reverse();
 
-    tbody.innerHTML = filtered.length ? [...filtered].reverse().map(f => `
+    // Sayfalama (Pagination) - Faturalar
+    window.pageInvoices = window.pageInvoices || 1;
+    const itemsPerPage = 10;
+    const totalPages = Math.ceil(reversedFiltered.length / itemsPerPage) || 1;
+    
+    if (window.pageInvoices > totalPages) window.pageInvoices = totalPages;
+    if (window.pageInvoices < 1) window.pageInvoices = 1;
+
+    const startIndex = (window.pageInvoices - 1) * itemsPerPage;
+    const paginatedItems = reversedFiltered.slice(startIndex, startIndex + itemsPerPage);
+
+    // Update pagination UI
+    const pageInfo = document.getElementById('invoices-page-info');
+    if (pageInfo) pageInfo.textContent = `Sayfa ${window.pageInvoices} / ${totalPages} (${reversedFiltered.length} Kayıt)`;
+
+    const btnPrev = document.getElementById('btn-invoices-prev');
+    const btnNext = document.getElementById('btn-invoices-next');
+    
+    if (btnPrev) btnPrev.disabled = window.pageInvoices <= 1;
+    if (btnNext) btnNext.disabled = window.pageInvoices >= totalPages;
+
+    tbody.innerHTML = paginatedItems.length ? paginatedItems.map(f => `
         <tr style="cursor:pointer;" onclick="showFaturaDetail(${f.id})">
             <td><span class="badge" style="background:rgba(69,123,157,0.2); color:var(--secondary); border:1px solid var(--secondary);">${f.faturaNo}</span></td>
             <td style="color:var(--text-muted);">${f.tarih}</td>
@@ -1711,6 +2043,18 @@ function renderInvoices() {
             </td>
         </tr>
     `).join('') : `<tr><td colspan="6" style="text-align:center; padding:40px; color:var(--text-muted);">${invoiceTabFilter === 'kesilen' ? 'Henüz kesilen fatura yok.' : 'Henüz alınan fatura yok.'}</td></tr>`;
+}
+
+window.prevInvoicesPage = function() {
+    if (window.pageInvoices > 1) {
+        window.pageInvoices--;
+        renderInvoices();
+    }
+}
+
+window.nextInvoicesPage = function() {
+    window.pageInvoices = (window.pageInvoices || 1) + 1;
+    renderInvoices();
 }
 
 window.showFaturaDetail = function(id) {

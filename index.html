@@ -311,6 +311,13 @@
                             <tbody id="orders-tbody">
                             </tbody>
                         </table>
+                        <div class="flex-between align-center mt-3">
+                            <span id="orders-page-info" style="color:var(--text-muted); font-size:13px;">Sayfa 1 / 1</span>
+                            <div>
+                                <button class="btn btn-outline" id="btn-orders-prev" onclick="prevOrdersPage()" style="padding:4px 12px; margin-right:4px;">&laquo; Önceki</button>
+                                <button class="btn btn-outline" id="btn-orders-next" onclick="nextOrdersPage()" style="padding:4px 12px;">Sonraki &raquo;</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -362,6 +369,13 @@
                             <tbody id="accounts-tbody">
                             </tbody>
                         </table>
+                        <div class="flex-between align-center mt-3">
+                            <span id="accounts-page-info" style="color:var(--text-muted); font-size:13px;">Sayfa 1 / 1</span>
+                            <div>
+                                <button class="btn btn-outline" id="btn-accounts-prev" onclick="prevAccountsPage()" style="padding:4px 12px; margin-right:4px;">&laquo; Önceki</button>
+                                <button class="btn btn-outline" id="btn-accounts-next" onclick="nextAccountsPage()" style="padding:4px 12px;">Sonraki &raquo;</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -419,6 +433,13 @@
                             <tbody id="scraps-tbody">
                             </tbody>
                         </table>
+                        <div class="flex-between align-center mt-3">
+                            <span id="scraps-page-info" style="color:var(--text-muted); font-size:13px;">Sayfa 1 / 1</span>
+                            <div>
+                                <button class="btn btn-outline" id="btn-scraps-prev" onclick="prevScrapsPage()" style="padding:4px 12px; margin-right:4px;">&laquo; Önceki</button>
+                                <button class="btn btn-outline" id="btn-scraps-next" onclick="nextScrapsPage()" style="padding:4px 12px;">Sonraki &raquo;</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -465,6 +486,13 @@
                             <tbody id="expenses-tbody">
                             </tbody>
                         </table>
+                        <div class="flex-between align-center mt-3">
+                            <span id="expenses-page-info" style="color:var(--text-muted); font-size:13px;">Sayfa 1 / 1</span>
+                            <div>
+                                <button class="btn btn-outline" id="btn-expenses-prev" onclick="prevExpensesPage()" style="padding:4px 12px; margin-right:4px;">&laquo; Önceki</button>
+                                <button class="btn btn-outline" id="btn-expenses-next" onclick="nextExpensesPage()" style="padding:4px 12px;">Sonraki &raquo;</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -511,6 +539,13 @@
                             <tbody id="invoices-tbody">
                             </tbody>
                         </table>
+                        <div class="flex-between align-center mt-3">
+                            <span id="invoices-page-info" style="color:var(--text-muted); font-size:13px;">Sayfa 1 / 1</span>
+                            <div>
+                                <button class="btn btn-outline" id="btn-invoices-prev" onclick="prevInvoicesPage()" style="padding:4px 12px; margin-right:4px;">&laquo; Önceki</button>
+                                <button class="btn btn-outline" id="btn-invoices-next" onclick="nextInvoicesPage()" style="padding:4px 12px;">Sonraki &raquo;</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -643,6 +678,14 @@
                     <thead id="stat-detail-thead"></thead>
                     <tbody id="stat-detail-tbody"></tbody>
                 </table>
+            </div>
+            
+            <div class="flex-between align-center mt-3" id="stat-detail-pagination-container" style="display:none;">
+                <span id="stat-detail-page-info" style="color:var(--text-muted); font-size:13px;">Sayfa 1 / 1</span>
+                <div>
+                    <button class="btn btn-outline" id="btn-stat-detail-prev" onclick="prevStatPage()" style="padding:4px 12px; margin-right:4px;">&laquo; Önceki</button>
+                    <button class="btn btn-outline" id="btn-stat-detail-next" onclick="nextStatPage()" style="padding:4px 12px;">Sonraki &raquo;</button>
+                </div>
             </div>
         </div>
     </div>
@@ -837,7 +880,17 @@
                 </div>
             </div>
 
-            <h4 style="margin-bottom:12px; color:var(--primary); font-weight:600;">Hesap Hareketleri & İşlem Geçmişi</h4>
+            <div class="flex-between align-center" style="margin-bottom:12px;">
+                <h4 style="color:var(--primary); font-weight:600; margin:0;">Hesap Hareketleri & İşlem Geçmişi</h4>
+                <div>
+                    <select id="ekstre-filter" class="form-control" style="width: auto; display: inline-block; padding: 4px 12px;" onchange="filterCariHistory()">
+                        <option value="all">Tümü</option>
+                        <option value="finans">Finansal İşlemler</option>
+                        <option value="satis">Satışlar / İş Emirleri</option>
+                        <option value="malzeme">Malzeme Girişleri</option>
+                    </select>
+                </div>
+            </div>
             <div style="max-height: 400px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px;">
                 <table class="data-table">
                     <thead>
@@ -852,6 +905,14 @@
                         <!-- Ekstre satırları JavaScript ile dolacak -->
                     </tbody>
                 </table>
+            </div>
+            
+            <div class="flex-between align-center mt-3">
+                <span id="ekstre-page-info" style="color:var(--text-muted); font-size:13px;">Sayfa 1 / 1</span>
+                <div>
+                    <button class="btn btn-outline" id="btn-ekstre-prev" onclick="prevCariPage()" style="padding:4px 12px; margin-right:4px;">&laquo; Önceki</button>
+                    <button class="btn btn-outline" id="btn-ekstre-next" onclick="nextCariPage()" style="padding:4px 12px;">Sonraki &raquo;</button>
+                </div>
             </div>
         </div>
     </div>
