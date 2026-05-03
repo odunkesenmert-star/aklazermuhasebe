@@ -8,7 +8,7 @@ function createWindow() {
         height: 800,
         minWidth: 1024,
         minHeight: 768,
-        title: "ProLazer ERP",
+        title: "AK LAZER ERP",
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
@@ -38,7 +38,7 @@ app.whenReady().then(() => {
             const day = String(date.getDate()).padStart(2, '0');
             
             const docsPath = app.getPath('documents');
-            const backupDir = path.join(docsPath, 'ProLazerYedek', year);
+            const backupDir = path.join(docsPath, 'AkLazerYedek', year);
             
             if (!fs.existsSync(backupDir)) {
                 fs.mkdirSync(backupDir, { recursive: true });

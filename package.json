@@ -15,8 +15,8 @@
     "electron-builder": "^24.13.3"
   },
   "build": {
-    "appId": "com.mert.prolazer",
-    "productName": "ProLazer ERP",
+    "appId": "com.mert.aklazer",
+    "productName": "AK LAZER ERP",
     "directories": {
       "output": "dist"
     },
