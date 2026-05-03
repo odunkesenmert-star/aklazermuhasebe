@@ -1287,8 +1287,8 @@ function getQuoteData() {
 
     const stok = db.stoklar.find(s => s.id == stokId);
     
-    // Stok miktarı kontrolü (Eğer kendi malzememiz ise)
-    if (stok && (stok.sahibiTipi === 'biz' || !stok.sahibiTipi)) {
+    // Stok miktarı kontrolü
+    if (stok) {
         const requiredQty = (islemTipi === 'hammadde') ? kgAmount : stokQty;
         if (requiredQty > stok.miktar) {
             alert(`Yetersiz Stok! Seçilen malzemeden stokta sadece ${stok.miktar} ${stok.birim || 'adet/kg'} var. Lütfen miktarı düşürün.`);
@@ -1668,8 +1668,11 @@ window.updateOrderStatus = function() {
                 const stok = db.stoklar.find(s => s.id == order.stokId);
                 if (stok) {
                     const deductQty = (order.islemTipi === 'hammadde') ? (order.kgAmount || 0) : (order.stokQty || 0);
+                    if (deductQty > stok.miktar) {
+                        alert(`HATA: Stok yetersiz! Bu iş emri için ${deductQty} adet/kg malzeme gerekiyor ancak stokta ${stok.miktar} var. Teslim işlemi iptal edildi.`);
+                        return; // İşlemi iptal et
+                    }
                     stok.miktar -= deductQty;
-                    if (stok.miktar < 0) stok.miktar = 0;
                 }
             }
         }
