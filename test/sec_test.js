@@ -42,9 +42,9 @@ setTimeout(() => {
 
     // Test 2: Crash via missing keys in DB
     console.log("Test 2: Corrupt DB Crash Check");
-    let corruptDB = { ...JSON.parse(storage['ProLazerDB']) };
+    let corruptDB = { ...JSON.parse(storage['AkLazerDB']) };
     delete corruptDB.islemler; // Remove critical array
-    storage['ProLazerDB'] = JSON.stringify(corruptDB);
+    storage['AkLazerDB'] = JSON.stringify(corruptDB);
     
     try {
         dom.window.renderDashboard();

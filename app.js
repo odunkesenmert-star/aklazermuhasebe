@@ -6,7 +6,7 @@ window.onerror = function(msg, url, line, col, error) {
 };
 
 // --- Database & Local Storage Logic ---
-const DB_KEY = 'ProLazerDB';
+const DB_KEY = 'AkLazerDB';
 
 const defaultDB = {
     cariler: [
