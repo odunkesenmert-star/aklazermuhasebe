@@ -961,9 +961,22 @@
                 <textarea id="input-ayar-adres" class="form-control" rows="3" placeholder="Fatura adresi veya notlar..."></textarea>
             </div>
             <button class="btn btn-primary w-100 mt-4" onclick="saveAyarlar()">Ayarları Kaydet</button>
+            
+            <div style="margin-top:20px; padding-top:20px; border-top:1px solid rgba(255,255,255,0.1);">
+                <h4 style="margin-bottom:15px; color:var(--text-light);">Veri Yedekleme</h4>
+                <div class="flex-between" style="gap:10px;">
+                    <button class="btn btn-outline" onclick="createManualBackup()" style="flex:1;"><i class="fa-solid fa-download"></i> Yedek Dosyası Oluştur</button>
+                    <button class="btn btn-outline" onclick="restoreBackupFile()" style="flex:1;"><i class="fa-solid fa-upload"></i> Yedekten Geri Yükle</button>
+                </div>
+            </div>
+
             <div style="margin-top:20px; padding-top:20px; border-top:1px solid rgba(255,255,255,0.1); text-align:center;">
                 <p style="font-size:12px; color:var(--text-muted); margin-bottom:10px;">Sorun mu yaşıyorsunuz? Tüm yerel verileri silebilirsiniz:</p>
-                <button class="btn btn-alert" onclick="if(confirm('DİKKAT: Tüm kayıtlarınız (cari, stok, iş emirleri) KALICI olarak silinecektir. Devam etmek istiyor musunuz?')){ localStorage.clear(); location.reload(); }" style="width:100%;"><i class="fa-solid fa-trash-can"></i> Verileri Tamamen Sıfırla (Kritik)</button>
+                <div style="background:rgba(230, 57, 70, 0.1); border:1px solid rgba(230, 57, 70, 0.3); border-radius:8px; padding:15px;">
+                    <p style="font-size:13px; color:var(--alert); margin-bottom:10px; font-weight:600;"><i class="fa-solid fa-triangle-exclamation"></i> DİKKAT: Tüm kayıtlarınız KALICI olarak silinecektir.</p>
+                    <input type="text" id="input-safe-reset" class="form-control" placeholder="Onaylamak için SIFIRLA yazın" style="text-align:center; margin-bottom:10px; text-transform:uppercase;" onkeyup="document.getElementById('btn-safe-reset').disabled = (this.value !== 'SIFIRLA');">
+                    <button id="btn-safe-reset" class="btn btn-alert" onclick="confirmSafeReset()" style="width:100%;" disabled><i class="fa-solid fa-trash-can"></i> Verileri Tamamen Sıfırla (Kritik)</button>
+                </div>
             </div>
         </div>
     </div>

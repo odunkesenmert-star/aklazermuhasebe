@@ -57,9 +57,19 @@ try {
     saveDB(true);
 }
 
+function triggerAutoBackup() {
+    if (window.electronAPI && window.electronAPI.sendBackup) {
+        const data = localStorage.getItem(DB_KEY);
+        if (data) {
+            window.electronAPI.sendBackup(data);
+        }
+    }
+}
+
 function saveDB(skipRender = false) {
     try {
         localStorage.setItem(DB_KEY, JSON.stringify(db));
+        triggerAutoBackup();
     } catch(e) {
         console.error('Storage error', e);
     }
@@ -2177,3 +2187,64 @@ document.addEventListener('DOMContentLoaded', () => {
         console.error("Initialization Error:", e);
     }
 });
+window.createManualBackup = async function() {
+    if (window.electronAPI && window.electronAPI.manualBackup) {
+        const data = localStorage.getItem(DB_KEY);
+        if (!data) return alert("Yedeklenecek veri bulunamadı.");
+        
+        const response = await window.electronAPI.manualBackup(data);
+        if (response && response.success) {
+            alert(`Yedek dosyası başarıyla kaydedildi:\n${response.path}`);
+        } else if (response && !response.canceled) {
+            alert("Yedekleme sırasında hata oluştu: " + response.error);
+        }
+    } else {
+        alert("Bu özellik sadece masaüstü uygulamasında çalışır.");
+    }
+}
+
+window.restoreBackupFile = async function() {
+    if (window.electronAPI && window.electronAPI.restoreBackup) {
+        // Trigger auto backup right before restore per user request
+        triggerAutoBackup();
+
+        const confirm1 = confirm("DİKKAT: Geri yükleme işlemi mevcut tüm verilerinizi silecek ve seçtiğiniz dosyadaki verileri yükleyecektir. Devam etmek istiyor musunuz?");
+        if (!confirm1) return;
+
+        const confirm2 = confirm("Emin misiniz? Bu işlem geri alınamaz. (Yine de sistem arka planda işlem öncesi otomatik yedeğinizi aldı).");
+        if (!confirm2) return;
+
+        const response = await window.electronAPI.restoreBackup();
+        if (response && response.success && response.data) {
+            try {
+                // Try parsing the JSON to ensure it's valid
+                const parsedData = JSON.parse(response.data);
+                if (typeof parsedData !== 'object' || parsedData === null) {
+                    throw new Error("JSON objesi geçersiz.");
+                }
+                
+                // If parsing successful, apply it
+                localStorage.clear();
+                localStorage.setItem(DB_KEY, response.data);
+                alert("Veriler başarıyla geri yüklendi! Sistem yeniden başlatılıyor.");
+                location.reload();
+            } catch (e) {
+                alert("Geçersiz yedek dosyası! İşlem iptal edildi.\nHata: " + e.message);
+            }
+        } else if (response && !response.canceled) {
+            alert("Geri yükleme hatası: " + response.error);
+        }
+    } else {
+        alert("Bu özellik sadece masaüstü uygulamasında çalışır.");
+    }
+}
+
+window.confirmSafeReset = function() {
+    const inputVal = document.getElementById('input-safe-reset').value;
+    if (inputVal === 'SIFIRLA') {
+        triggerAutoBackup();
+        localStorage.clear();
+        alert("Tüm veriler sıfırlandı. Uygulama yeniden başlatılıyor.");
+        location.reload();
+    }
+}
