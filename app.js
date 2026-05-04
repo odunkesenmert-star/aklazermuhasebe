@@ -487,7 +487,7 @@ window.saveIslem = function() {
         }
 
         const eskiBakiye = cari.bakiye;
-        cari.bakiye += bakiyeArtisi;
+        cari.bakiye = Math.round((cari.bakiye + bakiyeArtisi) * 100) / 100;
         
         if (cari.bakiye > 0) cari.durum = 'Müşteri Borçlu';
         else if (cari.bakiye < 0) cari.durum = 'Müşteri Alacaklı';
@@ -1641,7 +1641,7 @@ window.updateOrderStatus = function() {
                     const tutar = order.total;
                     const cari = db.cariler.find(c => c.adi === firmaAdi);
                     if (cari) {
-                        cari.bakiye += tutar;
+                        cari.bakiye = Math.round((cari.bakiye + tutar) * 100) / 100;
                         if (cari.bakiye > 0) cari.durum = 'Müşteri Borçlu';
                         else if (cari.bakiye < 0) cari.durum = 'Müşteri Alacaklı';
                         else cari.durum = 'Temiz';
@@ -1672,7 +1672,7 @@ window.updateOrderStatus = function() {
                         alert(`HATA: Stok yetersiz! Bu iş emri için ${deductQty} adet/kg malzeme gerekiyor ancak stokta ${stok.miktar} var. Teslim işlemi iptal edildi.`);
                         return; // İşlemi iptal et
                     }
-                    stok.miktar -= deductQty;
+                    stok.miktar = Math.round((stok.miktar - deductQty) * 100) / 100;
                 }
             }
         }
@@ -1684,7 +1684,7 @@ window.updateOrderStatus = function() {
                 const tutar = order.total;
                 const cari = db.cariler.find(c => c.adi === firmaAdi);
                 if (cari) {
-                    cari.bakiye -= tutar; // Borcu geri al
+                    cari.bakiye = Math.round((cari.bakiye - tutar) * 100) / 100; // Borcu geri al
                     if (cari.bakiye > 0) cari.durum = 'Müşteri Borçlu';
                     else if (cari.bakiye < 0) cari.durum = 'Müşteri Alacaklı';
                     else cari.durum = 'Temiz';
