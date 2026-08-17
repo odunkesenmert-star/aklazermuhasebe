@@ -4702,23 +4702,31 @@ hr {
 }
 
 /* Modals */
+body.modal-open {
+    overflow: hidden;
+}
+
 .modal-overlay {
     position: fixed;
-    top: 0; left: 0; width: 100vw; height: 100vh;
-    background-color: rgba(0, 0, 0, 0.7);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    display: none;
+    inset: 0;
+    display: flex;
     justify-content: center;
     align-items: center;
+    padding: 16px;
+    background: rgba(3, 5, 9, 0.78);
+    backdrop-filter: blur(10px) saturate(0.78);
+    -webkit-backdrop-filter: blur(10px) saturate(0.78);
     z-index: 1000;
     opacity: 0;
-    transition: opacity 0.3s ease;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.2s ease, visibility 0.2s ease;
 }
 
 .modal-overlay.active {
-    display: flex;
     opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
 }
 
 .modal-content {
@@ -4733,22 +4741,222 @@ hr {
     transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+.modal-content.modal-shell {
+    position: relative;
+    display: flex;
+    width: min(var(--modal-max-width, 620px), calc(100vw - 32px));
+    max-width: min(var(--modal-max-width, 620px), calc(100vw - 32px)) !important;
+    max-height: min(860px, calc(100dvh - 32px));
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-top-color: rgba(var(--modal-accent-rgb, 76, 201, 240), 0.62);
+    border-radius: 20px;
+    background:
+        radial-gradient(circle at 8% 0%, rgba(var(--modal-accent-rgb, 76, 201, 240), 0.11), transparent 30%),
+        linear-gradient(155deg, rgba(31,34,41,0.99), rgba(22,25,31,0.99));
+    box-shadow: 0 28px 90px rgba(0,0,0,0.72), 0 0 0 1px rgba(var(--modal-accent-rgb, 76, 201, 240), 0.04);
+    flex-direction: column;
+    transform: scale(0.985) translateY(12px);
+}
+
+.modal-content.modal-shell:hover {
+    border-color: rgba(255,255,255,0.12);
+    border-top-color: rgba(var(--modal-accent-rgb, 76, 201, 240), 0.62);
+    box-shadow: 0 28px 90px rgba(0,0,0,0.72), 0 0 0 1px rgba(var(--modal-accent-rgb, 76, 201, 240), 0.04);
+}
+
 .modal-overlay.active .modal-content {
     transform: scale(1) translateY(0);
 }
 
-.btn-close {
-    background: rgba(255,255,255,0.05);
-    border: none;
-    width: 44px; height: 44px;
-    border-radius: 50%;
-    color: var(--text-muted);
-    font-size: 16px;
-    cursor: pointer;
-    transition: all 0.2s;
+.modal-shell .modal-titlebar {
+    position: relative;
+    top: auto;
+    z-index: 4;
+    min-height: 78px;
+    margin: 0 !important;
+    padding: 16px 18px 16px 20px;
+    border-bottom: 1px solid rgba(255,255,255,0.085);
+    background: linear-gradient(180deg, rgba(36,39,47,0.98), rgba(29,32,39,0.96));
+    flex: 0 0 auto;
+}
+
+.modal-heading {
     display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 13px;
+}
+
+.modal-heading-icon {
+    display: grid;
+    width: 44px;
+    height: 44px;
+    flex: 0 0 44px;
+    place-items: center;
+    border: 1px solid rgba(var(--modal-accent-rgb, 76, 201, 240), 0.32);
+    border-radius: 13px;
+    background: rgba(var(--modal-accent-rgb, 76, 201, 240), 0.11);
+    color: rgb(var(--modal-accent-rgb, 76, 201, 240));
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+    font-size: 17px;
+}
+
+.modal-heading-copy {
+    min-width: 0;
+}
+
+.modal-shell .modal-titlebar h3 {
+    display: block;
+    margin: 0 !important;
+    color: #f7f9fc;
+    font-size: 18px;
+    font-weight: 720;
+    letter-spacing: -0.015em;
+    line-height: 1.25;
+}
+
+.modal-shell .modal-titlebar h3::before {
+    display: none;
+}
+
+.modal-subtitle {
+    max-width: 520px;
+    margin: 4px 0 0;
+    color: rgba(235,239,246,0.6);
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.modal-body {
+    min-height: 0;
+    padding: 20px 22px 8px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    flex: 1 1 auto;
+}
+
+.modal-body::-webkit-scrollbar {
+    width: 10px;
+}
+
+.modal-body::-webkit-scrollbar-thumb {
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.2);
+    background-clip: padding-box;
+}
+
+.modal-form-body .form-group {
+    margin-bottom: 16px;
+}
+
+.modal-form-body .form-row {
+    gap: 14px;
+}
+
+.modal-form-body label {
+    margin-bottom: 7px;
+    color: rgba(239,242,248,0.72);
+    font-size: 12px;
+    font-weight: 650;
+    letter-spacing: 0.015em;
+}
+
+.modal-form-body .form-control {
+    min-height: 46px;
+    padding: 11px 13px;
+    border-color: rgba(255,255,255,0.105);
+    border-radius: 11px;
+    background: rgba(8,10,14,0.58);
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.3);
+    font-size: 14px;
+    transition: border-color 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.modal-form-body .form-control:hover {
+    border-color: rgba(255,255,255,0.18);
+    background: rgba(8,10,14,0.68);
+}
+
+.modal-form-body .form-control:focus {
+    border-color: rgba(var(--modal-accent-rgb, 76, 201, 240), 0.78);
+    background: rgba(8,10,14,0.78);
+    box-shadow: 0 0 0 3px rgba(var(--modal-accent-rgb, 76, 201, 240), 0.15), inset 0 1px 2px rgba(0,0,0,0.28);
+}
+
+.modal-form-body .form-control::placeholder {
+    color: rgba(222,227,236,0.3);
+}
+
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 14px 20px 16px;
+    border-top: 1px solid rgba(255,255,255,0.085);
+    background: rgba(19,22,27,0.86);
+    box-shadow: 0 -12px 30px rgba(0,0,0,0.12);
+    flex: 0 0 auto;
+}
+
+.modal-actions .btn {
+    min-width: 128px;
+    min-height: 44px;
+    padding: 10px 18px;
+}
+
+.modal-actions .modal-submit-action {
+    min-width: 170px;
+}
+
+.modal-impact-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 13px;
+    border: 1px solid rgba(239,71,111,0.2);
+    border-radius: 11px;
+    background: rgba(239,71,111,0.07);
+    color: rgba(243,236,240,0.7);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.modal-impact-note i {
+    margin-top: 2px;
+    color: #ff7898;
+}
+
+#modal-gider .modal-body {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 14px;
+}
+
+#modal-gider .modal-body > .form-group:nth-of-type(n+3),
+#modal-gider .modal-impact-note {
+    grid-column: 1 / -1;
+}
+
+.btn-close {
+    display: flex;
+    width: 44px;
+    height: 44px;
+    padding: 0;
     justify-content: center;
     align-items: center;
+    flex: 0 0 44px;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    background: rgba(255,255,255,0.045);
+    color: rgba(235,239,246,0.62);
+    font-size: 16px;
+    cursor: pointer;
+    transition: color 0.18s ease, border-color 0.18s ease, background-color 0.18s ease, transform 0.18s ease;
 }
 
 .toast-region {
@@ -4924,9 +5132,70 @@ hr {
 }
 
 .btn-close:hover {
-    background: rgba(239, 71, 111, 0.2);
-    color: var(--alert);
-    transform: rotate(90deg);
+    border-color: rgba(239,71,111,0.32);
+    background: rgba(239,71,111,0.12);
+    color: #ff89a4;
+    transform: none;
+}
+
+.btn-close:active {
+    transform: scale(0.96);
+}
+
+@media (max-width: 700px) {
+    .modal-overlay {
+        align-items: flex-end;
+        padding: 8px 8px 0;
+    }
+
+    .modal-content.modal-shell {
+        width: 100%;
+        max-width: 100% !important;
+        max-height: calc(100dvh - 8px);
+        border-radius: 18px 18px 0 0;
+    }
+
+    .modal-shell .modal-titlebar {
+        min-height: 72px;
+        padding: 13px 12px 13px 16px;
+    }
+
+    .modal-heading {
+        gap: 10px;
+    }
+
+    .modal-heading-icon {
+        width: 40px;
+        height: 40px;
+        flex-basis: 40px;
+    }
+
+    .modal-subtitle {
+        display: none;
+    }
+
+    .modal-body {
+        padding: 16px 16px 6px;
+    }
+
+    .modal-form-body .form-row,
+    #modal-gider .modal-body {
+        grid-template-columns: 1fr;
+    }
+
+    #modal-gider .modal-body > .form-group,
+    #modal-gider .modal-impact-note {
+        grid-column: 1;
+    }
+
+    .modal-actions {
+        padding: 12px 16px;
+    }
+
+    .modal-actions .btn {
+        min-width: 0;
+        flex: 1 1 0;
+    }
 }
 
 /* Dashboard receivable / payable drill-down */

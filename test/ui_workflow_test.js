@@ -6,6 +6,7 @@ const root = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'style.css'), 'utf8');
+const modalReportPath = path.join(root, 'SONRAKI_BRIEF_MODAL_EKSIKLIK_RAPORU.md');
 
 const bulkIconActions = [...html.matchAll(/<button[^>]*class="[^"]*\bbulk-icon-action\b[^"]*"[^>]*>([\s\S]*?)<\/button>/g)];
 assert.strictEqual(bulkIconActions.length, 18, 'Tüm dokuz listede Excel ve yazdır ikon düğmeleri bulunmalı');
@@ -61,6 +62,9 @@ assert(app.includes('const INNER_PAGE_LAYOUTS'), 'İç sayfa tasarım sistemi ek
 assert(app.includes('function enhanceContentPageLayouts'), 'İç sayfa düzen dönüştürücüsü eksik');
 assert(app.includes('function enhanceTableHeaderScopes'), 'Dinamik tablo başlığı erişilebilirliği eksik');
 assert(app.includes('function enhanceModalLayout'), 'Ortak pencere düzeni eksik');
+assert(app.includes('const MODAL_PRESENTATION'), 'Pencere başlık ve renk tasarım sistemi eksik');
+assert(app.includes('function getModalFocusables'), 'Pencere klavye odak yönetimi eksik');
+assert(app.includes("event.key !== 'Tab'"), 'Pencere odak döngüsü eksik');
 assert(app.includes('function renderTableEmptyState'), 'Ortak tablo boş durum bileşeni eksik');
 assert(app.includes('account-identity-button') && app.includes('account-balance-cell'), 'Cari kimlik ve bakiye satır düzeni eksik');
 assert(app.includes('account-row-actions') && app.includes('account-action-delete'), 'Cari işlem düğmesi hiyerarşisi eksik');
@@ -112,6 +116,13 @@ assert(css.includes('.pagination-bar'), 'Ortak sayfalama stili eksik');
 assert(css.includes('.table-sort-button'), 'Sıralanabilir tablo başlığı stili eksik');
 assert(html.includes('class="settings-tabs"') && html.includes('id="settings-panel-backup"'), 'Sekmeli geniş ayarlar çalışma alanı eksik');
 assert(css.includes('.settings-modal') && css.includes('.settings-layout'), 'Ayarlar çalışma alanı stili eksik');
+assert(css.includes('.modal-content.modal-shell'), 'Ortak pencere kabuğu stili eksik');
+assert(css.includes('.modal-heading-icon') && css.includes('.modal-subtitle'), 'Pencere başlık hiyerarşisi stili eksik');
+assert(css.includes('.modal-body') && css.includes('.modal-actions'), 'Sabit başlık, kaydırılan içerik ve işlem alanı ayrımı eksik');
+assert(css.includes('#modal-gider .modal-body'), 'Kompakt gider formu düzeni eksik');
+assert(html.includes('Gideri Kaydet') && html.includes('modal-impact-note'), 'Gider penceresi işlem özeti ve açık eylem metni eksik');
+assert(!html.includes('📤') && !html.includes('📥') && !html.includes('🛒') && !html.includes('💸'), 'Form seçeneklerinde yapısal emoji kullanılmamalı');
+assert(fs.existsSync(modalReportPath), 'Sonraki brief için pencere eksiklik raporu eksik');
 assert(css.includes('@media (prefers-reduced-motion: reduce)'), 'Azaltılmış hareket desteği eksik');
 assert(css.includes('body {') && css.includes('user-select: none') && css.includes('[contenteditable="true"]'), 'Arayüz metin seçimi sınırı ve form alanı istisnası eksik');
 

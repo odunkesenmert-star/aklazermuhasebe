@@ -191,6 +191,7 @@ window.confirmAction = confirmAction;
 document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && activeConfirmation) {
         event.preventDefault();
+        event.stopImmediatePropagation();
         resolveConfirmation(false);
     }
 });
@@ -2550,14 +2551,132 @@ function enhanceTableHeaderScopes(root = document) {
     root.querySelectorAll('table.data-table thead th').forEach(th => th.setAttribute('scope', 'col'));
 }
 
+const MODAL_PRESENTATION = Object.freeze({
+    'modal-ceksenet': { icon: 'fa-money-check-dollar', accent: '76, 201, 240', width: 700, subtitle: 'Belge, vade ve tahsilat bilgilerini tek kayıtta yönetin.' },
+    'modal-fatura': { icon: 'fa-file-invoice', accent: '255, 51, 102', width: 620, subtitle: 'Faturayı ilgili cari ve varsa teslim edilmiş işle bağlayın.' },
+    'modal-cari': { icon: 'fa-user-plus', accent: '6, 214, 160', width: 540, subtitle: 'Yeni müşteri veya tedarikçi hesabını hızlıca oluşturun.' },
+    'modal-stok': { icon: 'fa-boxes-stacked', accent: '255, 209, 102', width: 760, subtitle: 'Malzeme sahipliği, ölçü ve miktar bilgilerini girin.' },
+    'modal-stok-duzenle': { icon: 'fa-pen-to-square', accent: '255, 209, 102', width: 640, subtitle: 'Mevcut stok kartının temel bilgilerini güncelleyin.' },
+    'modal-fire': { icon: 'fa-recycle', accent: '255, 159, 67', width: 640, subtitle: 'Kalan malzeme veya kullanılabilir parçayı kayıt altına alın.' },
+    'modal-islem': { icon: 'fa-arrow-right-arrow-left', accent: '76, 201, 240', width: 680, subtitle: 'Cari, kasa ve belge etkisini tek işlemde yönetin.' },
+    'modal-cari-detay': { icon: 'fa-address-card', accent: '6, 214, 160', width: 860, subtitle: 'Finansal hareketleri ve müşteriye ait malzemeleri inceleyin.' },
+    'modal-cari-ekstre': { icon: 'fa-list-check', accent: '6, 214, 160', width: 980 },
+    'modal-cari-duzenle': { icon: 'fa-user-pen', accent: '6, 214, 160', width: 540, subtitle: 'Cari kart bilgilerini ve aktiflik durumunu güncelleyin.' },
+    'modal-gider': { icon: 'fa-receipt', accent: '239, 71, 111', width: 660, subtitle: 'Gideri sınıflandırın ve ödeme yapılan hesabı seçin.' },
+    'modal-personel': { icon: 'fa-user-tie', accent: '156, 125, 255', width: 680, subtitle: 'Personel, görev ve ücret bilgilerini düzenleyin.' },
+    'modal-puantaj': { icon: 'fa-calendar-check', accent: '156, 125, 255', width: 720, subtitle: 'Dönem, çalışma ve ödeme değerlerini birlikte hesaplayın.' },
+    'modal-order-status': { icon: 'fa-list-check', accent: '76, 201, 240', width: 540, subtitle: 'İş emrinin üretim aşamasını kontrollü olarak güncelleyin.' },
+    'modal-order-history': { icon: 'fa-clock-rotate-left', accent: '76, 201, 240', width: 720 },
+    'modal-notifications': { icon: 'fa-bell', accent: '255, 209, 102', width: 560, subtitle: 'Bekleyen ve dikkat gerektiren işleri görüntüleyin.' },
+    'modal-settlement': { icon: 'fa-hand-holding-dollar', accent: '6, 214, 160', width: 560, subtitle: 'Ödeme sözünü kapatın ve bağlı hesap etkisini uygulayın.' },
+    'modal-payment-plan': { icon: 'fa-calendar-days', accent: '76, 201, 240', width: 600, subtitle: 'Tahsilat veya ödeme için tarih ve tutar planlayın.' },
+    'modal-kasa-hesap': { icon: 'fa-building-columns', accent: '76, 201, 240', width: 560, subtitle: 'Yeni kasa veya banka hesabının açılış bilgilerini girin.' },
+    'modal-kasa-hareket': { icon: 'fa-money-bill-transfer', accent: '76, 201, 240', width: 560, subtitle: 'Seçilen hesaba manuel para giriş veya çıkışı kaydedin.' },
+    'modal-fatura-detail': { icon: 'fa-file-lines', accent: '255, 51, 102', width: 560 },
+    'modal-quote-detail': { icon: 'fa-file-signature', accent: '255, 51, 102', width: 760 }
+});
+
+const modalReturnFocus = new WeakMap();
+
+function getModalFocusables(modal) {
+    return [...modal.querySelectorAll('button:not([disabled]), [href], input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+        .filter(element => !element.hidden && element.offsetParent !== null);
+}
+
 function enhanceModalLayout(modal) {
     const content = modal?.querySelector('.modal-content');
     if (!content) return;
-    content.querySelector(':scope > .flex-between.mb-4:first-child')?.classList.add('modal-titlebar');
+
+    const meta = MODAL_PRESENTATION[modal.id] || { icon: 'fa-window-maximize', accent: '76, 201, 240', width: 620 };
+    const specialLayout = content.matches('.settings-modal, .profitability-modal, .quote-detail-modal, .stat-detail-modal, .confirm-dialog');
+    const header = content.querySelector(':scope > .modal-titlebar, :scope > .flex-between.mb-4:first-child');
+    const title = header?.querySelector('h3');
+
+    modal.setAttribute('role', modal.getAttribute('role') || 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    content.style.setProperty('--modal-accent-rgb', meta.accent);
+
+    if (title) {
+        if (!title.id) title.id = `${modal.id || 'modal'}-title`;
+        modal.setAttribute('aria-labelledby', title.id);
+    }
+
+    content.querySelectorAll('.btn-close').forEach(button => {
+        button.type = 'button';
+        if (!button.getAttribute('aria-label')) button.setAttribute('aria-label', 'Pencereyi kapat');
+        if (!button.title) button.title = 'Kapat';
+    });
+
     content.querySelectorAll('.form-group .form-control').forEach(control => {
         const label = control.closest('.form-group')?.querySelector('label');
         if (label && control.id && !label.htmlFor) label.htmlFor = control.id;
     });
+
+    if (specialLayout || !header) return;
+
+    content.classList.add('modal-shell');
+    if (content.querySelector('.form-control')) content.classList.add('modal-form-shell');
+    content.style.setProperty('--modal-max-width', `${meta.width || 620}px`);
+    header.classList.add('modal-titlebar');
+
+    if (title && !header.querySelector(':scope > .modal-heading')) {
+        const heading = document.createElement('div');
+        heading.className = 'modal-heading';
+
+        const icon = document.createElement('span');
+        icon.className = 'modal-heading-icon';
+        icon.setAttribute('aria-hidden', 'true');
+        icon.innerHTML = `<i class="fa-solid ${meta.icon}"></i>`;
+
+        let copy = title.parentElement !== header ? title.parentElement : null;
+        if (copy) {
+            header.insertBefore(heading, copy);
+            heading.append(icon, copy);
+        } else {
+            copy = document.createElement('div');
+            copy.className = 'modal-heading-copy';
+            header.insertBefore(heading, title);
+            heading.append(icon, copy);
+            copy.appendChild(title);
+        }
+        copy.classList.add('modal-heading-copy');
+
+        if (meta.subtitle && !copy.querySelector('.modal-subtitle')) {
+            const subtitle = document.createElement('p');
+            subtitle.className = 'modal-subtitle';
+            subtitle.textContent = meta.subtitle;
+            copy.appendChild(subtitle);
+        }
+    }
+
+    let actions = content.querySelector(':scope > .modal-actions');
+    if (!actions) {
+        const primaryAction = [...content.children].reverse().find(child =>
+            child.matches?.('button.btn') && !child.classList.contains('btn-close')
+        );
+        if (primaryAction) {
+            actions = document.createElement('div');
+            actions.className = 'modal-actions';
+            const cancelButton = document.createElement('button');
+            cancelButton.type = 'button';
+            cancelButton.className = 'btn btn-outline modal-cancel-action';
+            cancelButton.innerHTML = '<i class="fa-solid fa-xmark" aria-hidden="true"></i> Vazgeç';
+            cancelButton.addEventListener('click', () => closeModal(modal.id));
+            primaryAction.classList.remove('w-100', 'mt-4');
+            primaryAction.classList.add('modal-submit-action');
+            actions.append(cancelButton, primaryAction);
+            content.appendChild(actions);
+        }
+    }
+
+    if (!content.querySelector(':scope > .modal-body')) {
+        const body = document.createElement('div');
+        body.className = 'modal-body';
+        if (content.classList.contains('modal-form-shell')) body.classList.add('modal-form-body');
+        const bodyNodes = [...content.children].filter(child => child !== header && child !== actions);
+        header.after(body);
+        bodyNodes.forEach(child => body.appendChild(child));
+    }
 }
 
 function enhanceContentPageLayouts() {
@@ -3367,16 +3486,62 @@ window.printList = function(type, selectedOnly = false) {
 
 window.openModal = function(id) {
     const el = document.getElementById(id);
-    if(el) {
-        enhanceModalLayout(el);
-        el.classList.add('active');
-    }
+    if (!el) return;
+    enhanceModalLayout(el);
+    if (!el.classList.contains('active')) modalReturnFocus.set(el, document.activeElement);
+    el.classList.add('active');
+    document.body.classList.add('modal-open');
+    setTimeout(() => {
+        const preferred = el.querySelector('.modal-body .form-control:not([type="hidden"]):not([disabled]), .modal-body button:not([disabled]), .btn-close');
+        preferred?.focus();
+    }, 0);
 }
 
 window.closeModal = function(id) {
     const el = document.getElementById(id);
-    if(el) el.classList.remove('active');
+    if (!el) return;
+    el.classList.remove('active');
+    if (!document.querySelector('.modal-overlay.active')) document.body.classList.remove('modal-open');
+    const returnTarget = modalReturnFocus.get(el);
+    modalReturnFocus.delete(el);
+    if (returnTarget?.isConnected && typeof returnTarget.focus === 'function') {
+        setTimeout(() => returnTarget.focus(), 0);
+    }
 }
+
+document.addEventListener('keydown', event => {
+    const activeModals = [...document.querySelectorAll('.modal-overlay.active')];
+    const modal = activeModals.at(-1);
+    if (!modal || modal.id === 'modal-confirm') return;
+
+    if (event.key === 'Escape') {
+        event.preventDefault();
+        closeModal(modal.id);
+        return;
+    }
+
+    if (event.key !== 'Tab') return;
+    const focusables = getModalFocusables(modal);
+    if (!focusables.length) {
+        event.preventDefault();
+        const content = modal.querySelector('.modal-content');
+        if (content) {
+            content.tabIndex = -1;
+            content.focus();
+        }
+        return;
+    }
+
+    const first = focusables[0];
+    const last = focusables.at(-1);
+    if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+    }
+});
 
 window.saveCari = function() {
     try {
@@ -6679,8 +6844,8 @@ window.showQuoteDetail = function(id) {
         document.body.appendChild(modal);
     }
     modal.innerHTML = html;
-    modal.classList.add('active');
-    modal.onclick = function(e) { if (e.target === modal) modal.classList.remove('active'); };
+    openModal('modal-quote-detail');
+    modal.onclick = function(e) { if (e.target === modal) closeModal('modal-quote-detail'); };
 }
 
 function renderOrders() {
@@ -8735,8 +8900,8 @@ window.showFaturaDetail = function(id) {
         document.body.appendChild(modal);
     }
     modal.innerHTML = html;
-    modal.classList.add('active');
-    modal.onclick = function(e) { if (e.target === modal) modal.classList.remove('active'); };
+    openModal('modal-fatura-detail');
+    modal.onclick = function(e) { if (e.target === modal) closeModal('modal-fatura-detail'); };
 };
 
 function getSelectedInvoiceModalOrder() {

@@ -1,6 +1,6 @@
 {
   "name": "prolazer-erp",
-  "version": "1.3.29",
+  "version": "1.3.30",
   "description": "Profesyonel Lazer Kesim Muhasebe ve Yönetim Sistemi",
   "main": "main.js",
   "scripts": {

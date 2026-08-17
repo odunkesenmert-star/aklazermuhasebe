@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;">
     <title>AK LAZER ERP - Lazer Kesim Yönetim Sistemi</title>
-    <link rel="stylesheet" href="style.css?v=1.3.29">
-    <link rel="stylesheet" href="node_modules/@fortawesome/fontawesome-free/css/all.min.css?v=1.3.29">
-    <script src="node_modules/chart.js/dist/chart.umd.min.js?v=1.3.29"></script>
-    <script src="app.js?v=1.3.29" defer></script>
+    <link rel="stylesheet" href="style.css?v=1.3.30">
+    <link rel="stylesheet" href="node_modules/@fortawesome/fontawesome-free/css/all.min.css?v=1.3.30">
+    <script src="node_modules/chart.js/dist/chart.umd.min.js?v=1.3.30"></script>
+    <script src="app.js?v=1.3.30" defer></script>
 </head>
 <body>
     <a class="skip-link" href="#main-content">Ana içeriğe geç</a>
@@ -95,7 +95,7 @@
             </nav>
             <div class="sidebar-version" aria-label="Uygulama sürümü">
                 <span class="sidebar-version-label">Sürüm</span>
-                <strong id="app-version">v1.3.29</strong>
+                <strong id="app-version">v1.3.30</strong>
             </div>
         </aside>
 
@@ -1475,8 +1475,8 @@
             <div class="form-group">
                 <label>Fatura Türü</label>
                 <select id="input-fatura-tur" class="form-control" onchange="updateInvoiceModalMode()">
-                    <option value="kesilen">📤 Kesilen Fatura (Biz kestik, müşteriye)</option>
-                    <option value="alinan">📥 Alınan Fatura (Bize kesildi, tedarikçiden)</option>
+                    <option value="kesilen">Kesilen Fatura (Biz kestik, müşteriye)</option>
+                    <option value="alinan">Alınan Fatura (Bize kesildi, tedarikçiden)</option>
                 </select>
             </div>
             <div class="form-group">
@@ -1739,12 +1739,12 @@
                 <label>İşlem Tipi</label>
                 <select id="input-islem-tipi" class="form-control" onchange="updateIslemTipiInfo()">
                     <optgroup label="Bize Ödenecek / Alacak">
-                        <option value="tahsilat">✅ Müşteriden Tahsilat Aldık (Borç Kapandı)</option>
-                        <option value="fatura_kes">📋 Müşteriye Fatura Kestik / Belgeledik</option>
+                        <option value="tahsilat">Müşteriden Tahsilat Aldık (Borç Kapandı)</option>
+                        <option value="fatura_kes">Müşteriye Fatura Kestik / Belgeledik</option>
                     </optgroup>
                     <optgroup label="Bizim Ödeyeceğimiz / Borç">
-                        <option value="mal_alimi">🛒 Firmadan Mal/Hizmet Aldık (Biz Borçlandık)</option>
-                        <option value="odeme_yaptik">💸 Firmaya Ödeme Yaptık (Borcumuz Kapandı)</option>
+                        <option value="mal_alimi">Firmadan Mal/Hizmet Aldık (Biz Borçlandık)</option>
+                        <option value="odeme_yaptik">Firmaya Ödeme Yaptık (Borcumuz Kapandı)</option>
                     </optgroup>
                 </select>
             </div>
@@ -2085,12 +2085,12 @@
                 </datalist>
             </div>
             <div class="form-group">
-                <label>Açıklama (İsteğe Bağlı)</label>
-                <input type="text" id="input-gider-aciklama" class="form-control" placeholder="Örn: Ahmet Usta - Nisan Maaşı">
+                <label>Tutar (₺) *</label>
+                <input type="number" id="input-gider-tutar" class="form-control" min="0.01" step="0.01" placeholder="Örn: 25000">
             </div>
             <div class="form-group">
-                <label>Tutar (₺)</label>
-                <input type="number" id="input-gider-tutar" class="form-control" placeholder="Örn: 25000">
+                <label>Açıklama (İsteğe Bağlı)</label>
+                <input type="text" id="input-gider-aciklama" class="form-control" placeholder="Örn: Nisan ayı elektrik faturası">
             </div>
             <div class="form-group">
                 <label>Ödeme Yapılan Kasa / Banka *</label>
@@ -2098,7 +2098,11 @@
                     <option value="">Kasa/banka seçin...</option>
                 </select>
             </div>
-            <button class="btn btn-primary w-100 mt-4" onclick="saveGider()">Kaydet</button>
+            <div class="modal-impact-note">
+                <i class="fa-solid fa-arrow-trend-down" aria-hidden="true"></i>
+                <span>Kayıt tamamlandığında seçilen kasa veya banka bakiyesi gider tutarı kadar azalır.</span>
+            </div>
+            <button class="btn btn-primary w-100 mt-4" onclick="saveGider()"><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Gideri Kaydet</button>
         </div>
     </div>
 
