@@ -1,6 +1,6 @@
 {
   "name": "prolazer-erp",
-  "version": "1.3.27",
+  "version": "1.3.28",
   "description": "Profesyonel Lazer Kesim Muhasebe ve Yönetim Sistemi",
   "main": "main.js",
   "scripts": {
@@ -72,16 +72,16 @@
       "title": "AK LAZER ERP ${version}",
       "artifactName": "AK_LAZER_ERP_Kurulum.${ext}",
       "background": "build/dmg-background.png",
-      "iconSize": 96,
+      "iconSize": 88,
       "iconTextSize": 13,
       "contents": [
         {
-          "x": 165,
-          "y": 263
+          "x": 155,
+          "y": 220
         },
         {
-          "x": 495,
-          "y": 263,
+          "x": 445,
+          "y": 220,
           "type": "link",
           "path": "/Applications"
         }
