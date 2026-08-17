@@ -12,8 +12,8 @@
       <stop offset="0" stop-color="#DCEEFF" stop-opacity="0.95"/>
       <stop offset="1" stop-color="#F7FAFD" stop-opacity="0"/>
     </radialGradient>
-    <filter id="arrowGlow" x="-35%" y="-80%" width="170%" height="260%">
-      <feGaussianBlur stdDeviation="3" result="blur"/>
+    <filter id="motifGlow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="2.5" result="blur"/>
       <feMerge>
         <feMergeNode in="blur"/>
         <feMergeNode in="SourceGraphic"/>
@@ -32,10 +32,21 @@
 
   <image x="180" y="24" width="240" height="64" xlink:href="../assets/ak-lazer-logo-wide.png" preserveAspectRatio="xMidYMid meet"/>
 
-  <text x="300" y="126" text-anchor="middle" fill="#172033" font-family="Helvetica Neue, Arial, sans-serif" font-size="18" font-weight="600">Uygulamayı Applications klasörüne sürükleyin.</text>
-
-  <g transform="translate(251 211)" filter="url(#arrowGlow)">
-    <path d="M0 9 H92" fill="none" stroke="#2786EA" stroke-width="3" stroke-linecap="round"/>
-    <path d="M83 0 L94 9 L83 18" fill="none" stroke="#247DE8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <g transform="translate(300 220)">
+    <circle r="42" fill="#EAF5FF" fill-opacity="0.72" stroke="#7AB9EF" stroke-width="1" stroke-dasharray="3 7"/>
+    <circle r="29" fill="none" stroke="#A7CFF2" stroke-width="1"/>
+    <path d="M-48 0 H48 M0-48 V48" stroke="#9CC9EF" stroke-width="1" stroke-linecap="round"/>
+    <path d="M-25-25 25 25 M25-25-25 25" stroke="#C3DDF4" stroke-width="1"/>
+    <g fill="#FFFFFF" stroke="#3F99E7" stroke-width="1.5">
+      <circle cx="0" cy="-42" r="3"/>
+      <circle cx="42" cy="0" r="3"/>
+      <circle cx="0" cy="42" r="3"/>
+      <circle cx="-42" cy="0" r="3"/>
+    </g>
+    <g filter="url(#motifGlow)">
+      <path d="M0-17 17 0 0 17-17 0Z" fill="url(#accent)"/>
+      <circle r="5" fill="#FFFFFF"/>
+      <circle r="2.5" fill="#1A8EF0"/>
+    </g>
   </g>
 </svg>
