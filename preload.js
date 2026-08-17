@@ -1,7 +1,14 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
-    sendBackup: (data) => ipcRenderer.send('veri-degisti', data),
+    sendBackup: (data) => ipcRenderer.invoke('veri-degisti', data),
     manualBackup: (data) => ipcRenderer.invoke('manuel-yedek', data),
-    restoreBackup: () => ipcRenderer.invoke('yedek-geri-yukle')
+    restoreBackup: () => ipcRenderer.invoke('yedek-geri-yukle'),
+    loadDBFromFile: () => ipcRenderer.invoke('db-dosyadan-yukle'),
+    saveDBToFile: (data) => ipcRenderer.invoke('db-dosyaya-kaydet', data),
+    savePDF: (payload) => ipcRenderer.invoke('pdf-kaydet', payload),
+    archiveAttachment: (payload) => ipcRenderer.invoke('belge-arsivle', payload),
+    openAttachment: (filePath) => ipcRenderer.invoke('belge-ac', filePath),
+    getAppVersion: () => ipcRenderer.invoke('app-surumu'),
+    getPathForFile: (file) => webUtils.getPathForFile(file)
 });

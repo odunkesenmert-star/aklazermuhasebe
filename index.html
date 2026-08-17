@@ -3,70 +3,114 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;">
     <title>AK LAZER ERP - Lazer Kesim Yönetim Sistemi</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-    <script src="app.js" defer></script>
+    <link rel="stylesheet" href="style.css?v=1.3.24">
+    <link rel="stylesheet" href="node_modules/@fortawesome/fontawesome-free/css/all.min.css?v=1.3.24">
+    <script src="node_modules/chart.js/dist/chart.umd.min.js?v=1.3.24"></script>
+    <script src="app.js?v=1.3.24" defer></script>
 </head>
 <body>
+    <a class="skip-link" href="#main-content">Ana içeriğe geç</a>
     <div class="app-container">
         <!-- Sidebar -->
         <aside class="sidebar">
             <div class="sidebar-header">
-                <i class="fa-solid fa-bolt logo-icon"></i>
-                <h2>AK LAZER ERP</h2>
+                <img class="logo-mark" src="assets/ak-lazer-logo-ui.png" alt="AK LAZER">
             </div>
-            <ul class="nav-menu">
-                <li class="nav-item active" data-target="dashboard" onclick="location.hash='dashboard'">
-                    <i class="fa-solid fa-chart-pie"></i>
-                    <span>Gösterge Paneli</span>
-                </li>
-                <li class="nav-item" data-target="quotation" onclick="location.hash='quotation'">
-                    <i class="fa-solid fa-file-invoice-dollar"></i>
-                    <span>Teklif Motoru</span>
-                </li>
-                <li class="nav-item" data-target="orders" onclick="location.hash='orders'">
-                    <i class="fa-solid fa-clipboard-list"></i>
-                    <span>İş Emirleri</span>
-                </li>
-                <li class="nav-item" data-target="accounts" onclick="location.hash='accounts'">
-                    <i class="fa-solid fa-users"></i>
-                    <span>Cari Hesaplar</span>
-                </li>
-                <li class="nav-item" data-target="inventory" onclick="location.hash='inventory'">
-                    <i class="fa-solid fa-boxes-stacked"></i>
-                    <span>Stok / Malzeme</span>
-                </li>
-                <li class="nav-item" data-target="scraps" onclick="location.hash='scraps'">
-                    <i class="fa-solid fa-recycle"></i>
-                    <span>Fireler / Parçalar</span>
-                </li>
-                <li class="nav-item" data-target="expenses" onclick="location.hash='expenses'">
-                    <i class="fa-solid fa-money-bill-wave"></i>
-                    <span>Giderler</span>
-                </li>
-                <li class="nav-item" data-target="invoices" onclick="location.hash='invoices'">
-                    <i class="fa-solid fa-file-invoice"></i>
-                    <span>Faturalar</span>
-                </li>
-
-            </ul>
+            <nav class="sidebar-nav" aria-label="Ana menü">
+                <ul class="nav-menu">
+                    <li class="nav-home-item"><button type="button" class="nav-item nav-item-home active" data-target="dashboard" aria-current="page" onclick="location.hash='dashboard'">
+                        <i class="fa-solid fa-chart-pie" aria-hidden="true"></i><span>Gösterge Paneli</span>
+                    </button></li>
+                    <li class="nav-group" data-nav-group="operations">
+                        <button type="button" class="nav-section-toggle" aria-expanded="false" aria-controls="nav-group-operations" onclick="toggleNavGroup('operations')">
+                            <span class="nav-section-label"><i class="fa-solid fa-gears" aria-hidden="true"></i>Operasyon</span>
+                            <span class="nav-section-meta"><strong id="nav-group-badge-operations" class="nav-count-badge" hidden>0</strong><i class="fa-solid fa-chevron-down nav-section-chevron" aria-hidden="true"></i></span>
+                        </button>
+                        <ul class="nav-group-items" id="nav-group-operations" hidden>
+                            <li><button type="button" class="nav-item" data-target="quotation" data-page-title="Teklif Motoru" onclick="location.hash='quotation'">
+                                <i class="fa-solid fa-file-invoice-dollar" aria-hidden="true"></i><span>Teklifler</span>
+                            </button></li>
+                            <li><button type="button" class="nav-item" data-target="orders" onclick="location.hash='orders'">
+                                <i class="fa-solid fa-clipboard-list" aria-hidden="true"></i><span>İş Emirleri</span><strong id="nav-badge-orders" class="nav-count-badge" hidden>0</strong>
+                            </button></li>
+                            <li><button type="button" class="nav-item" data-target="inventory" data-page-title="Stok / Malzeme" onclick="location.hash='inventory'">
+                                <i class="fa-solid fa-boxes-stacked" aria-hidden="true"></i><span>Stoklar</span><strong id="nav-badge-stock" class="nav-count-badge nav-count-badge-alert" hidden>0</strong>
+                            </button></li>
+                            <li><button type="button" class="nav-item" data-target="scraps" data-page-title="Fireler / Parçalar" onclick="location.hash='scraps'">
+                                <i class="fa-solid fa-recycle" aria-hidden="true"></i><span>Fire / Parçalar</span>
+                            </button></li>
+                        </ul>
+                    </li>
+                    <li class="nav-group" data-nav-group="finance">
+                        <button type="button" class="nav-section-toggle" aria-expanded="false" aria-controls="nav-group-finance" onclick="toggleNavGroup('finance')">
+                            <span class="nav-section-label"><i class="fa-solid fa-coins" aria-hidden="true"></i>Finans</span>
+                            <i class="fa-solid fa-chevron-down nav-section-chevron" aria-hidden="true"></i>
+                        </button>
+                        <ul class="nav-group-items" id="nav-group-finance" hidden>
+                            <li><button type="button" class="nav-item" data-target="accounts" data-page-title="Cari Hesaplar" onclick="location.hash='accounts'">
+                                <i class="fa-solid fa-users" aria-hidden="true"></i><span>Cariler</span>
+                            </button></li>
+                            <li><button type="button" class="nav-item" data-target="invoices" onclick="location.hash='invoices'">
+                                <i class="fa-solid fa-file-invoice" aria-hidden="true"></i><span>Faturalar</span>
+                            </button></li>
+                            <li><button type="button" class="nav-item" data-target="cashbank" onclick="location.hash='cashbank'">
+                                <i class="fa-solid fa-building-columns" aria-hidden="true"></i><span>Kasa / Banka</span>
+                            </button></li>
+                            <li><button type="button" class="nav-item" data-target="cheques" onclick="location.hash='cheques'">
+                                <i class="fa-solid fa-money-check-dollar" aria-hidden="true"></i><span>Çek / Senet</span>
+                            </button></li>
+                            <li><button type="button" class="nav-item" data-target="expenses" onclick="location.hash='expenses'">
+                                <i class="fa-solid fa-money-bill-wave" aria-hidden="true"></i><span>Giderler</span>
+                            </button></li>
+                        </ul>
+                    </li>
+                    <li class="nav-group" data-nav-group="reports">
+                        <button type="button" class="nav-section-toggle" aria-expanded="false" aria-controls="nav-group-reports" onclick="toggleNavGroup('reports')">
+                            <span class="nav-section-label"><i class="fa-solid fa-chart-column" aria-hidden="true"></i>Raporlar</span>
+                            <i class="fa-solid fa-chevron-down nav-section-chevron" aria-hidden="true"></i>
+                        </button>
+                        <ul class="nav-group-items" id="nav-group-reports" hidden>
+                            <li><button type="button" class="nav-item" data-target="profitability" data-page-title="Kârlılık Raporu" onclick="location.hash='profitability'">
+                                <i class="fa-solid fa-chart-line" aria-hidden="true"></i><span>İş Kârlılığı</span>
+                            </button></li>
+                        </ul>
+                    </li>
+                    <li class="nav-group" data-nav-group="management">
+                        <button type="button" class="nav-section-toggle" aria-expanded="false" aria-controls="nav-group-management" onclick="toggleNavGroup('management')">
+                            <span class="nav-section-label"><i class="fa-solid fa-sliders" aria-hidden="true"></i>Yönetim</span>
+                            <i class="fa-solid fa-chevron-down nav-section-chevron" aria-hidden="true"></i>
+                        </button>
+                        <ul class="nav-group-items" id="nav-group-management" hidden>
+                            <li><button type="button" class="nav-item" data-target="personnel" onclick="location.hash='personnel'">
+                                <i class="fa-solid fa-user-clock" aria-hidden="true"></i><span>Personel</span>
+                            </button></li>
+                            <li><button type="button" class="nav-item nav-action-item" onclick="openAyarlarModal()">
+                                <i class="fa-solid fa-gear" aria-hidden="true"></i><span>Ayarlar / Yedek</span>
+                            </button></li>
+                        </ul>
+                    </li>
+                </ul>
+            </nav>
+            <div class="sidebar-version" aria-label="Uygulama sürümü">
+                <span class="sidebar-version-label">Sürüm</span>
+                <strong id="app-version">v1.3.24</strong>
+            </div>
         </aside>
 
         <!-- Main Content -->
-        <main class="main-content">
+        <main class="main-content" id="main-content" tabindex="-1">
             <!-- Header -->
             <header class="top-header">
                 <div class="header-title" id="page-title">Gösterge Paneli</div>
                 <div class="header-actions">
                     <div style="position: relative; display: inline-block;">
-                        <button class="btn btn-outline" onclick="openNotifications()"><i class="fa-solid fa-bell"></i></button>
+                        <button class="btn btn-outline header-icon-button" onclick="openNotifications()" aria-label="Bekleyen iş bildirimlerini aç" title="Bekleyen işler"><i class="fa-solid fa-bell" aria-hidden="true"></i></button>
                         <span id="notification-badge" class="badge" style="position: absolute; top: -5px; right: -5px; background-color: var(--alert); color: white; border-radius: 50%; padding: 2px 6px; font-size: 10px; display: none;">0</span>
                     </div>
                     <div class="user-profile" id="btn-user-profile" style="cursor: pointer; display: flex; align-items: center;" onclick="openAyarlarModal()">
-                        <img id="header-avatar" src="https://ui-avatars.com/api/?name=Firma&background=E63946&color=fff" alt="User">
+                        <img id="header-avatar" src="" alt="User">
                         <span id="header-firma-adi" style="margin-left: 10px; font-weight: 500; font-size: 14px; color: var(--text-primary);">Firma Adı</span>
                     </div>
                 </div>
@@ -77,54 +121,176 @@
 
                 <!-- Dashboard View -->
                 <div id="view-dashboard" class="view active">
-                    <div class="flex-between mb-4">
-                        <h3 style="color:var(--primary); font-size:18px;">Finansal Özet</h3>
-                        <button class="btn btn-outline" id="btn-toggle-stats" onclick="toggleStats()"><i class="fa-solid fa-eye-slash"></i> Göster</button>
-                    </div>
-                    <div class="stats-grid">
-                        <div class="stat-card clickable-card" onclick="openStatModal('gelir')" style="cursor:pointer;">
+                    <section class="dashboard-command-bar" aria-labelledby="dashboard-overview-title">
+                        <div class="dashboard-command-copy">
+                            <div class="dashboard-command-meta">
+                                <span class="section-kicker">Bugünün çalışma alanı</span>
+                                <span id="dashboard-status-chip" class="dashboard-status-chip" aria-live="polite"><i class="fa-solid fa-circle-check" aria-hidden="true"></i><span id="dashboard-status-text">Akış dengede</span></span>
+                            </div>
+                            <div class="dashboard-command-title-row">
+                                <h2 id="dashboard-overview-title">İşletme Özeti</h2>
+                                <button type="button" class="btn btn-outline dashboard-privacy-button" id="btn-toggle-stats" onclick="toggleStats()" aria-pressed="false" aria-label="Finansal rakamları göster"><i class="fa-solid fa-eye-slash" aria-hidden="true"></i> Göster</button>
+                            </div>
+                            <p id="dashboard-date-label">Güncel finans ve operasyon görünümü</p>
+                        </div>
+                        <div class="dashboard-quick-actions" aria-label="Hızlı işlemler">
+                            <button type="button" class="btn btn-primary dashboard-quick-action" onclick="navigateTo('quotation')"><i class="fa-solid fa-file-circle-plus" aria-hidden="true"></i> Yeni Teklif</button>
+                            <button type="button" class="btn btn-outline dashboard-quick-action" onclick="openModal('modal-cari')"><i class="fa-solid fa-user-plus" aria-hidden="true"></i> Yeni Cari</button>
+                            <button type="button" class="btn btn-outline dashboard-quick-action" onclick="openGiderModal()"><i class="fa-solid fa-receipt" aria-hidden="true"></i> Gider Ekle</button>
+                        </div>
+                    </section>
+
+                    <div class="stats-grid dashboard-kpi-grid" aria-label="Temel göstergeler">
+                        <button type="button" class="stat-card dashboard-kpi-card dashboard-kpi-income clickable-card" onclick="openStatModal('gelir')">
                             <div class="stat-icon"><i class="fa-solid fa-wallet"></i></div>
                             <div class="stat-details">
                                 <h3>Toplam Gelir</h3>
                                 <div class="stat-value" id="dash-stat-income">***</div>
+                                <span class="dashboard-kpi-hint">Finansal hareketler</span>
                             </div>
-                        </div>
-                        <div class="stat-card clickable-card" onclick="openStatModal('alacak')" style="cursor:pointer;">
-                            <div class="stat-icon alert"><i class="fa-solid fa-hand-holding-dollar"></i></div>
+                            <i class="fa-solid fa-chevron-right dashboard-kpi-chevron" aria-hidden="true"></i>
+                        </button>
+                        <button type="button" class="stat-card dashboard-kpi-card dashboard-kpi-receivable clickable-card" onclick="openStatModal('alacak')">
+                            <div class="stat-icon success"><i class="fa-solid fa-arrow-trend-down"></i></div>
                             <div class="stat-details">
-                                <h3>Bekleyen Alacaklar</h3>
-                                <div class="stat-value text-alert" id="dash-stat-receivables">***</div>
+                                <h3>Müşterilerden Toplam Alacağımız</h3>
+                                <div class="stat-value text-success" id="dash-stat-receivables">***</div>
+                                <span class="dashboard-kpi-hint">Kimlerden alacağımızı gör</span>
                             </div>
-                        </div>
-                        <div class="stat-card clickable-card" onclick="navigateTo('accounts', 'borclu')" style="cursor:pointer;">
-                            <div class="stat-icon" style="background:rgba(230,57,70,0.2);color:var(--alert);"><i class="fa-solid fa-arrow-trend-up"></i></div>
+                            <i class="fa-solid fa-chevron-right dashboard-kpi-chevron" aria-hidden="true"></i>
+                        </button>
+                        <button type="button" class="stat-card dashboard-kpi-card dashboard-kpi-debt clickable-card" onclick="openStatModal('borc')">
+                            <div class="stat-icon"><i class="fa-solid fa-arrow-trend-up"></i></div>
                             <div class="stat-details">
-                                <h3>Toplam Borcumuz</h3>
+                                <h3>Firmalara Toplam Borcumuz</h3>
                                 <div class="stat-value text-error" id="dash-stat-debt">***</div>
+                                <span class="dashboard-kpi-hint">Kimlere borçlu olduğumuzu gör</span>
                             </div>
-                        </div>
-                        <div class="stat-card clickable-card" onclick="openStatModal('teklif')" style="cursor:pointer;">
+                            <i class="fa-solid fa-chevron-right dashboard-kpi-chevron" aria-hidden="true"></i>
+                        </button>
+                        <button type="button" class="stat-card dashboard-kpi-card dashboard-kpi-orders clickable-card" onclick="openStatModal('teklif')">
                             <div class="stat-icon success"><i class="fa-solid fa-check-double"></i></div>
                             <div class="stat-details">
-                                <h3>Onaylanan Teklifler</h3>
+                                <h3>Aktif İş Emirleri</h3>
                                 <div class="stat-value" id="dash-stat-orders">***</div>
+                                <span class="dashboard-kpi-hint">Devam eden işler</span>
+                            </div>
+                            <i class="fa-solid fa-chevron-right dashboard-kpi-chevron" aria-hidden="true"></i>
+                        </button>
+                    </div>
+
+                    <div class="dashboard-insight-grid">
+                        <section class="glass-panel dashboard-chart-panel" aria-labelledby="dashboard-chart-title">
+                            <div class="dashboard-panel-header">
+                                <div>
+                                    <span class="section-kicker">Aylık Performans</span>
+                                    <h3 id="dashboard-chart-title">Gelir / Gider Eğilimi</h3>
+                                </div>
+                                <span id="dashboard-chart-period" class="dashboard-period-chip">Bu yıl · Aylık</span>
+                                <div class="chart-summary" aria-label="Grafik toplamları">
+                                    <div class="chart-summary-item income">
+                                        <span>Gelir</span>
+                                        <strong id="chart-income-total">₺0,00</strong>
+                                    </div>
+                                    <div class="chart-summary-item expense">
+                                        <span>Gider</span>
+                                        <strong id="chart-expense-total">₺0,00</strong>
+                                    </div>
+                                    <div class="chart-summary-item net">
+                                        <span>Net</span>
+                                        <strong id="chart-net-total">₺0,00</strong>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="chart-shell">
+                                <canvas id="dashboard-chart" height="105" aria-label="Aylara göre gelir ve gider grafiği" aria-describedby="dashboard-chart-a11y"></canvas>
+                                <p id="dashboard-chart-a11y" class="sr-only" aria-live="polite">Finansal rakamlar gizli.</p>
+                                <div id="dashboard-chart-privacy" class="dashboard-chart-empty dashboard-chart-privacy">
+                                    <i class="fa-solid fa-eye-slash" aria-hidden="true"></i>
+                                    <strong>Finansal rakamlar gizli</strong>
+                                    <span>Grafiği ve tutarları görmek için “Göster” düğmesini kullanın.</span>
+                                </div>
+                                <div id="dashboard-chart-empty" class="dashboard-chart-empty" hidden>
+                                    <i class="fa-solid fa-chart-line" aria-hidden="true"></i>
+                                    <strong>Henüz grafik verisi yok</strong>
+                                    <span>Gelir veya gider kaydı eklendiğinde aylık eğilim burada görünür.</span>
+                                </div>
+                            </div>
+                        </section>
+
+                        <aside class="glass-panel dashboard-attention-panel" aria-labelledby="dashboard-attention-title">
+                            <div class="dashboard-attention-header">
+                                <div>
+                                    <span class="section-kicker">Öncelikler</span>
+                                    <h3 id="dashboard-attention-title">Dikkat Gerektirenler</h3>
+                                </div>
+                                <span id="dashboard-attention-count" class="dashboard-attention-count">Sorun yok</span>
+                            </div>
+                            <div class="dashboard-alert-list">
+                                <button type="button" id="dashboard-alert-overdue" class="dashboard-alert-card overdue" onclick="navigateTo('accounts')">
+                                    <div class="dashboard-alert-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
+                                    <div>
+                                        <span>Geciken Vade</span>
+                                        <strong id="dash-due-overdue-count">0</strong>
+                                        <small id="dash-due-overdue-amount">₺0,00</small>
+                                    </div>
+                                    <i class="fa-solid fa-chevron-right dashboard-alert-chevron" aria-hidden="true"></i>
+                                </button>
+                                <button type="button" id="dashboard-alert-today" class="dashboard-alert-card today" onclick="navigateTo('accounts')">
+                                    <div class="dashboard-alert-icon"><i class="fa-solid fa-calendar-day"></i></div>
+                                    <div>
+                                        <span>Bugün Vadesi Gelen</span>
+                                        <strong id="dash-due-today-count">0</strong>
+                                        <small id="dash-due-today-amount">₺0,00</small>
+                                    </div>
+                                    <i class="fa-solid fa-chevron-right dashboard-alert-chevron" aria-hidden="true"></i>
+                                </button>
+                                <button type="button" id="dashboard-alert-week" class="dashboard-alert-card week" onclick="navigateTo('accounts')">
+                                    <div class="dashboard-alert-icon"><i class="fa-solid fa-calendar-week"></i></div>
+                                    <div>
+                                        <span>7 Gün İçinde</span>
+                                        <strong id="dash-due-week-count">0</strong>
+                                        <small id="dash-due-week-amount">₺0,00</small>
+                                    </div>
+                                    <i class="fa-solid fa-chevron-right dashboard-alert-chevron" aria-hidden="true"></i>
+                                </button>
+                                <button type="button" id="dashboard-alert-stock" class="dashboard-alert-card stock" onclick="navigateTo('inventory')">
+                                    <div class="dashboard-alert-icon"><i class="fa-solid fa-box-open"></i></div>
+                                    <div>
+                                        <span>Kritik Stok</span>
+                                        <strong id="dash-critical-stock-count">0</strong>
+                                        <small id="dash-critical-stock-detail">Kritik stok yok</small>
+                                    </div>
+                                    <i class="fa-solid fa-chevron-right dashboard-alert-chevron" aria-hidden="true"></i>
+                                </button>
+                                <div id="dashboard-alert-clear" class="dashboard-alert-clear">
+                                    <div class="dashboard-alert-clear-icon"><i class="fa-solid fa-check" aria-hidden="true"></i></div>
+                                    <strong>Kritik durum yok</strong>
+                                    <span>Geciken vade veya kritik stok görünmüyor.</span>
+                                    <div class="dashboard-health-chips" aria-label="Sağlıklı durumlar">
+                                        <span><i class="fa-solid fa-calendar-check" aria-hidden="true"></i> Vadeler temiz</span>
+                                        <span><i class="fa-solid fa-boxes-stacked" aria-hidden="true"></i> Stok normal</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </aside>
+                    </div>
+
+                    <section class="widget dashboard-section dashboard-activity-hub" aria-labelledby="dashboard-activity-title">
+                        <div class="dashboard-activity-header">
+                            <div>
+                                <span class="section-kicker">Güncel Akış</span>
+                                <h3 id="dashboard-activity-title">Son Hareketler</h3>
+                            </div>
+                            <div class="dashboard-activity-tabs" role="tablist" aria-label="Gösterge paneli hareket türleri" onkeydown="handleDashboardActivityKey(event)">
+                                <button type="button" id="dashboard-tab-finance" class="dashboard-activity-tab active" role="tab" aria-selected="true" aria-controls="dashboard-panel-finance" onclick="setDashboardActivityTab('finance')"><i class="fa-solid fa-money-bill-transfer" aria-hidden="true"></i> Finans</button>
+                                <button type="button" id="dashboard-tab-pending" class="dashboard-activity-tab" role="tab" aria-selected="false" aria-controls="dashboard-panel-pending" tabindex="-1" onclick="setDashboardActivityTab('pending')"><i class="fa-solid fa-gears" aria-hidden="true"></i> Bekleyen İşler</button>
+                                <button type="button" id="dashboard-tab-delivered" class="dashboard-activity-tab" role="tab" aria-selected="false" aria-controls="dashboard-panel-delivered" tabindex="-1" onclick="setDashboardActivityTab('delivered')"><i class="fa-solid fa-truck-fast" aria-hidden="true"></i> Teslim Edilenler</button>
                             </div>
                         </div>
-                    </div>
 
-                    <!-- Chart -->
-                    <div class="glass-panel mb-4" style="margin-top:24px;">
-                        <h3 style="margin-bottom:16px;">Aylık Gelir / Gider Karşılaştırması</h3>
-                        <canvas id="dashboard-chart" height="100"></canvas>
-                    </div>
-
-                    <div class="dashboard-widgets" style="grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px;">
-                        <div class="widget">
-                            <div class="flex-between mb-2">
-                                <h3>Son Finansal İşlemler</h3>
-                                <button class="btn btn-outline" style="padding:4px 8px; font-size:12px;" onclick="openStatModal('gelir')">Tümünü Gör</button>
-                            </div>
-                            <table class="data-table">
+                        <div id="dashboard-panel-finance" class="dashboard-activity-panel active" role="tabpanel" aria-labelledby="dashboard-tab-finance">
+                            <table class="data-table dashboard-table">
                                 <thead>
                                     <tr>
                                         <th>Tarih</th>
@@ -135,14 +301,11 @@
                                 </thead>
                                 <tbody id="dashboard-tbody"></tbody>
                             </table>
+                            <div class="dashboard-activity-footer"><button type="button" class="btn btn-outline dashboard-link-btn" onclick="openStatModal('gelir')">Tüm finansal işlemleri gör <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button></div>
                         </div>
 
-                        <div class="widget">
-                            <div class="flex-between mb-2">
-                                <h3>Bekleyen İş Emirleri</h3>
-                                <button class="btn btn-outline" style="padding:4px 8px; font-size:12px;" onclick="openStatModal('teklif')">Tümünü Gör</button>
-                            </div>
-                            <table class="data-table">
+                        <div id="dashboard-panel-pending" class="dashboard-activity-panel" role="tabpanel" aria-labelledby="dashboard-tab-pending" hidden>
+                            <table class="data-table dashboard-table">
                                 <thead>
                                     <tr>
                                         <th>Müşteri</th>
@@ -152,14 +315,11 @@
                                 </thead>
                                 <tbody id="dashboard-pending-tbody"></tbody>
                             </table>
+                            <div class="dashboard-activity-footer"><button type="button" class="btn btn-outline dashboard-link-btn" onclick="navigateTo('orders')">Tüm iş emirlerini gör <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button></div>
                         </div>
 
-                        <div class="widget">
-                            <div class="flex-between mb-2">
-                                <h3>Son Teslim Edilenler</h3>
-                                <button class="btn btn-outline" style="padding:4px 8px; font-size:12px;" onclick="openStatModal('teslimat_hepsi')">Tümünü Gör</button>
-                            </div>
-                            <table class="data-table">
+                        <div id="dashboard-panel-delivered" class="dashboard-activity-panel" role="tabpanel" aria-labelledby="dashboard-tab-delivered" hidden>
+                            <table class="data-table dashboard-table">
                                 <thead>
                                     <tr>
                                         <th>Müşteri</th>
@@ -169,19 +329,35 @@
                                 </thead>
                                 <tbody id="dashboard-delivered-tbody"></tbody>
                             </table>
+                            <div class="dashboard-activity-footer"><button type="button" class="btn btn-outline dashboard-link-btn" onclick="openStatModal('teslimat_hepsi')">Tüm teslim edilenleri gör <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button></div>
                         </div>
-                    </div>
+                    </section>
                 </div>
 
                 <!-- Quotation View -->
                 <div id="view-quotation" class="view">
                     <div class="quotation-layout">
                         <div class="quotation-form glass-panel">
-                            <h3>Yeni Teklif Hazırla</h3>
+                            <div class="quote-form-heading">
+                                <div>
+                                    <span class="quote-form-kicker">Yeni kayıt</span>
+                                    <h3>Yeni Teklif Hazırla</h3>
+                                </div>
+                                <span class="quote-form-step">1. Bilgileri gir</span>
+                            </div>
+                            <div class="quote-form-section">
+                                <div class="quote-section-heading">
+                                    <span class="quote-section-number">1</span>
+                                    <div>
+                                        <strong>Müşteri ve İş</strong>
+                                        <span>Teklifin kime ve hangi iş için hazırlandığını seçin.</span>
+                                    </div>
+                                </div>
                             <div class="form-group">
                                 <label>İşlem Tipi</label>
                                 <select id="quote-type" class="form-control" onchange="updateQuoteTypeUI()">
                                     <option value="lazer">Lazer Kesim</option>
+                                    <option value="cnc_plazma">CNC Plazma</option>
                                     <option value="bukum">Büküm</option>
                                     <option value="hammadde">Hammadde Satışı</option>
                                 </select>
@@ -208,6 +384,15 @@
                                 <label>İş Açıklaması</label>
                                 <input type="text" id="quote-description" class="form-control" placeholder="Örn: 50 adet flanş kesimi">
                             </div>
+                            </div>
+                            <div class="quote-form-section">
+                                <div class="quote-section-heading">
+                                    <span class="quote-section-number">2</span>
+                                    <div>
+                                        <strong>Fiyatlandırma</strong>
+                                        <span>İşlem tipine göre süre veya ağırlık, ücret, iskonto ve KDV bilgilerini girin.</span>
+                                    </div>
+                                </div>
                             <div class="form-row" id="quote-lazer-fields">
                                 <div class="form-group">
                                     <label>Kesim Süresi (Dakika)</label>
@@ -221,13 +406,14 @@
                             <div class="form-row" id="quote-kg-fields" style="display:none;">
                                 <div class="form-group">
                                     <label id="label-kg-amount">Ağırlık (KG)</label>
-                                    <input type="number" id="quote-kg-amount" class="form-control" placeholder="Örn: 150">
+                                    <input type="number" id="quote-kg-amount" class="form-control" min="0" step="0.01" placeholder="Örn: 150">
                                 </div>
                                 <div class="form-group">
                                     <label id="label-kg-price">KG Ücreti (₺)</label>
-                                    <input type="number" id="quote-kg-price" class="form-control" value="50">
+                                    <input type="number" id="quote-kg-price" class="form-control" min="0" step="0.01" value="50">
                                 </div>
                             </div>
+                            <p id="quote-pricing-helper" class="quote-pricing-helper" hidden></p>
                             <div class="form-row">
                                 <div class="form-group">
                                     <label>İskonto (%)</label>
@@ -242,11 +428,18 @@
                                     </select>
                                 </div>
                             </div>
-                            <button id="btn-calculate" class="btn btn-primary w-100" onclick="calculateQuote()">Hesapla</button>
+                            <button id="btn-calculate" class="btn btn-primary w-100 quote-calculate-btn" onclick="calculateQuote()"><i class="fa-solid fa-calculator"></i> Teklifi Hesapla</button>
+                            </div>
                         </div>
 
                         <div class="quotation-preview glass-panel">
-                            <h3>Teklif Özeti</h3>
+                            <div class="quote-preview-heading">
+                                <div>
+                                    <span class="quote-form-kicker">Canlı özet</span>
+                                    <h3>Teklif Özeti</h3>
+                                </div>
+                                <span class="quote-form-step">2. Kontrol et ve tamamla</span>
+                            </div>
                             <div class="quote-summary">
                                 <div class="summary-item" id="summary-cut-container">
                                     <span id="summary-cut-label">Kesim Bedeli:</span>
@@ -266,7 +459,7 @@
                                     <span id="summary-sub">₺0.00</span>
                                 </div>
                                 <div class="summary-item">
-                                    <span>KDV (%20):</span>
+                                    <span id="summary-tax-label">KDV (%20):</span>
                                     <span id="summary-tax">₺0.00</span>
                                 </div>
                                 <div class="summary-item grand-total text-primary">
@@ -274,14 +467,39 @@
                                     <span id="summary-total">₺0.00</span>
                                 </div>
                             </div>
-                            <div class="quote-actions mt-4" style="display:flex;gap:8px;">
-                                <button class="btn btn-primary" id="btn-save-quote" style="flex:1;" onclick="saveQuote()"><i class="fa-solid fa-save"></i> Kaydet</button>
-                                <button class="btn btn-success" id="btn-approve-quote" style="flex:1;" onclick="approveQuoteAsOrder()"><i class="fa-solid fa-check"></i> Onayla & İş Emri Oluştur</button>
+                            <div class="quote-actions mt-4">
+                                <button class="btn btn-outline" id="btn-save-quote" onclick="saveQuote()"><i class="fa-solid fa-floppy-disk"></i> Teklifi Kaydet</button>
+                                <button class="btn btn-outline" id="btn-print-quote" onclick="printCurrentQuote()"><i class="fa-solid fa-print"></i> Önizle / Yazdır</button>
+                                <button class="btn btn-success quote-approve-btn" id="btn-approve-quote" onclick="approveQuoteAsOrder()"><i class="fa-solid fa-check"></i> Onayla ve İş Emri Oluştur</button>
                             </div>
 
                             <!-- Quote History -->
                             <div style="margin-top:24px;">
                                 <h3 style="margin-bottom:12px;">Teklif Geçmişi</h3>
+                                <div class="account-statement-panel report-date-panel compact" data-report-date-panel="quotes">
+                                    <div class="account-statement-copy">
+                                        <div class="account-statement-title"><i class="fa-solid fa-calendar-days"></i> Teklif Tarih Aralığı</div>
+                                        <div class="account-statement-subtitle" id="report-date-quotes-label">Tüm tarihler listelenir.</div>
+                                    </div>
+                                    <div class="account-date-presets">
+                                        <button type="button" class="account-date-preset active" data-preset="all" onclick="setReportDatePreset('quotes','all')">Tümü</button>
+                                        <button type="button" class="account-date-preset" data-preset="thisWeek" onclick="setReportDatePreset('quotes','thisWeek')">Bu Hafta</button>
+                                        <button type="button" class="account-date-preset" data-preset="thisMonth" onclick="setReportDatePreset('quotes','thisMonth')">Bu Ay</button>
+                                        <button type="button" class="account-date-preset" data-preset="lastMonth" onclick="setReportDatePreset('quotes','lastMonth')">Geçen Ay</button>
+                                        <button type="button" class="account-date-preset" data-preset="thisYear" onclick="setReportDatePreset('quotes','thisYear')">Bu Yıl</button>
+                                    </div>
+                                    <div class="account-date-fields">
+                                        <label class="account-date-field">
+                                            <span>Başlangıç</span>
+                                            <input type="date" id="report-date-quotes-start" class="form-control account-date-input" onchange="applyReportDateFilter('quotes')">
+                                        </label>
+                                        <label class="account-date-field">
+                                            <span>Bitiş</span>
+                                            <input type="date" id="report-date-quotes-end" class="form-control account-date-input" onchange="applyReportDateFilter('quotes')">
+                                        </label>
+                                        <button type="button" class="btn btn-outline account-date-clear" onclick="clearReportDateRange('quotes')"><i class="fa-solid fa-rotate-left"></i> Temizle</button>
+                                    </div>
+                                </div>
                                 <div id="quote-history-list" style="max-height:300px;overflow-y:auto;">
                                     <p style="color:var(--text-muted);text-align:center;">Henüz kaydedilen teklif yok.</p>
                                 </div>
@@ -295,12 +513,41 @@
                     <div class="glass-panel">
                         <div class="flex-between mb-4">
                             <h3>İş Emirleri</h3>
-                            <span style="color:var(--text-muted);font-size:13px;">Teklifler onaylandıkça buraya düşer</span>
+                            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                                <span style="color:var(--text-muted);font-size:13px;">Teklifler onaylandıkça buraya düşer</span>
+                                <span id="orders-selection-count" class="selection-count">Seçim yok</span>
+                                <button type="button" class="btn btn-outline bulk-icon-action bulk-icon-action-excel" onclick="exportSelectedListToExcel('orders')" aria-label="Seçilen iş emirlerini Excel'e aktar" title="Seçilenleri Excel'e aktar"><i class="fa-solid fa-file-excel" aria-hidden="true"></i></button>
+                                <button type="button" class="btn btn-outline bulk-icon-action bulk-icon-action-print" onclick="printList('orders')" aria-label="Seçilen iş emirlerini yazdır" title="Seçilenleri yazdır"><i class="fa-solid fa-print" aria-hidden="true"></i></button>
+                            </div>
+                        </div>
+                        <div class="account-statement-panel report-date-panel" data-report-date-panel="orders">
+                            <div class="account-statement-copy">
+                                <div class="account-statement-title"><i class="fa-solid fa-calendar-days"></i> İş Emri Tarih Aralığı</div>
+                                <div class="account-statement-subtitle" id="report-date-orders-label">Tüm tarihler listelenir.</div>
+                            </div>
+                            <div class="account-date-presets">
+                                <button type="button" class="account-date-preset active" data-preset="all" onclick="setReportDatePreset('orders','all')">Tümü</button>
+                                <button type="button" class="account-date-preset" data-preset="thisMonth" onclick="setReportDatePreset('orders','thisMonth')">Bu Ay</button>
+                                <button type="button" class="account-date-preset" data-preset="lastMonth" onclick="setReportDatePreset('orders','lastMonth')">Geçen Ay</button>
+                                <button type="button" class="account-date-preset" data-preset="thisYear" onclick="setReportDatePreset('orders','thisYear')">Bu Yıl</button>
+                            </div>
+                            <div class="account-date-fields">
+                                <label class="account-date-field">
+                                    <span>Başlangıç</span>
+                                    <input type="date" id="report-date-orders-start" class="form-control account-date-input" onchange="applyReportDateFilter('orders')">
+                                </label>
+                                <label class="account-date-field">
+                                    <span>Bitiş</span>
+                                    <input type="date" id="report-date-orders-end" class="form-control account-date-input" onchange="applyReportDateFilter('orders')">
+                                </label>
+                                <button type="button" class="btn btn-outline account-date-clear" onclick="clearReportDateRange('orders')"><i class="fa-solid fa-rotate-left"></i> Temizle</button>
+                            </div>
                         </div>
                         <table class="data-table">
                             <thead>
-                                <tr>
-                                    <th>İş Emri No</th>
+	                                <tr>
+	                                    <th class="selection-cell"><input type="checkbox" data-select-all="orders" onchange="toggleVisibleReportSelection('orders', this.checked)"></th>
+	                                    <th>İş Emri No</th>
                                     <th>Müşteri</th>
                                     <th>İş Açıklaması</th>
                                     <th>Tutar</th>
@@ -323,47 +570,62 @@
 
                 <!-- Accounts View -->
                 <div id="view-accounts" class="view">
-                    <!-- Tab Bar -->
-                    <div style="display:flex; gap:10px; margin-bottom:20px; padding-bottom:14px; border-bottom:1px solid var(--border);">
-                        <button id="tab-btn-tumumu" class="btn btn-primary" onclick="setCariTab('tuumu')" style="font-size:13px;">Tüm Cariler</button>
-                        <button id="tab-btn-alacakli" class="btn btn-outline" onclick="setCariTab('alacakli')" style="font-size:13px; color:var(--success);"><i class="fa-solid fa-circle-arrow-down" style="margin-right:5px;"></i>Alacaklı Olduklarımız</button>
-                        <button id="tab-btn-borclu" class="btn btn-outline" onclick="setCariTab('borclu')" style="font-size:13px; color:var(--alert);"><i class="fa-solid fa-circle-arrow-up" style="margin-right:5px;"></i>Borçlu Olduklarımız</button>
-                        <div style="flex:1;"></div>
-                        <div class="search-box" style="position: relative;">
-                            <i class="fa-solid fa-magnifying-glass" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-muted);"></i>
-                            <input type="text" id="cari-search" class="form-control" placeholder="Firma adı veya kod..." style="padding-left: 35px; border-radius: 8px; min-width:200px;" oninput="renderCariler()">
+                    <div class="accounts-toolbar workspace-toolbar" aria-label="Cari liste araçları">
+                        <div class="account-filter-tabs" role="group" aria-label="Cari görünümü">
+                            <button id="tab-btn-tumumu" class="btn btn-primary account-tab-btn" onclick="setCariTab('tuumu')">Tüm Cariler</button>
+                            <button id="tab-btn-alacakli" class="btn btn-outline account-tab-btn account-tab-success" onclick="setCariTab('alacakli')"><i class="fa-solid fa-circle-arrow-down"></i>Müşteriden Alacağımız</button>
+                            <button id="tab-btn-borclu" class="btn btn-outline account-tab-btn account-tab-alert" onclick="setCariTab('borclu')"><i class="fa-solid fa-circle-arrow-up"></i>Bizim Ödeyeceğimiz</button>
                         </div>
-                        <button class="btn btn-primary" onclick="openModal('modal-cari')" style="white-space: nowrap;">+ Yeni Cari Ekle</button>
-                    </div>
-
-                    <!-- Alacak / Borç Özet Kartları -->
-                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px;">
-                        <div class="stat-card" style="background:rgba(80,200,120,0.1); border:1px solid rgba(80,200,120,0.3);">
-                            <div class="stat-icon success"><i class="fa-solid fa-arrow-trend-down"></i></div>
-                            <div class="stat-details">
-                                <h3 style="color:var(--success)">Toplam Alacak (Piyasadan Toplayacağımız)</h3>
-                                <div class="stat-value" id="cari-total-alacak" style="color:var(--success);">₺0,00</div>
+                        <div class="workspace-primary-actions">
+                            <button class="btn btn-outline account-action-btn" onclick="openPaymentPlanModal()"><i class="fa-solid fa-calendar-check"></i> Vade Planı</button>
+                            <button class="btn btn-primary account-action-btn" onclick="openModal('modal-cari')"><i class="fa-solid fa-plus"></i> Yeni Cari Ekle</button>
+                        </div>
+                        <div class="workspace-list-row">
+                            <div class="search-box account-search-box">
+                                <i class="fa-solid fa-magnifying-glass"></i>
+                                <input type="text" id="cari-search" class="form-control" placeholder="Firma adı veya kod..." oninput="handleHighVolumeSearch('accounts')">
+                            </div>
+                            <div class="workspace-list-actions">
+                                <span id="accounts-selection-count" class="selection-count">Seçim yok</span>
+                                <button type="button" class="btn btn-outline account-action-btn bulk-icon-action bulk-icon-action-excel" onclick="exportSelectedListToExcel('accounts')" aria-label="Seçilen carileri Excel'e aktar" title="Seçilenleri Excel'e aktar"><i class="fa-solid fa-file-excel" aria-hidden="true"></i></button>
+                                <button type="button" class="btn btn-outline account-action-btn bulk-icon-action bulk-icon-action-print" onclick="printList('accounts')" aria-label="Seçilen carileri yazdır" title="Seçilenleri yazdır"><i class="fa-solid fa-print" aria-hidden="true"></i></button>
                             </div>
                         </div>
-                        <div class="stat-card" style="background:rgba(230,57,70,0.1); border:1px solid rgba(230,57,70,0.3);">
-                            <div class="stat-icon" style="background:rgba(230,57,70,0.2); color:var(--alert);"><i class="fa-solid fa-arrow-trend-up"></i></div>
-                            <div class="stat-details">
-                                <h3 style="color:var(--alert)">Toplam Borç (Piyasaya Ödeyeceğimiz)</h3>
-                                <div class="stat-value" id="cari-total-borc" style="color:var(--alert);">₺0,00</div>
+                        <div class="account-statement-panel account-date-panel-main account-toolbar-filter">
+                            <div class="account-statement-copy">
+                                <div class="account-statement-title"><i class="fa-solid fa-calendar-days"></i> Ekstre tarihleri</div>
+                                <div class="account-statement-subtitle" id="account-print-date-label">Tüm tarihler yazdırılır.</div>
+                            </div>
+                            <div class="account-date-presets">
+                                <button type="button" class="account-date-preset active" onclick="setAccountPrintDatePreset('all')">Tümü</button>
+                                <button type="button" class="account-date-preset" onclick="setAccountPrintDatePreset('thisMonth')">Bu Ay</button>
+                                <button type="button" class="account-date-preset" onclick="setAccountPrintDatePreset('lastMonth')">Geçen Ay</button>
+                                <button type="button" class="account-date-preset" onclick="setAccountPrintDatePreset('thisYear')">Bu Yıl</button>
+                            </div>
+                            <div class="account-date-fields">
+                                <label class="account-date-field">
+                                    <span>Başlangıç</span>
+                                    <input type="date" id="account-print-date-start" class="form-control account-date-input" title="Ekstre başlangıç tarihi" onchange="updateAccountDateRangeUI()">
+                                </label>
+                                <label class="account-date-field">
+                                    <span>Bitiş</span>
+                                    <input type="date" id="account-print-date-end" class="form-control account-date-input" title="Ekstre bitiş tarihi" onchange="updateAccountDateRangeUI()">
+                                </label>
+                                <button type="button" class="btn btn-outline account-date-clear" onclick="clearAccountPrintDateRange()"><i class="fa-solid fa-rotate-left"></i> Temizle</button>
                             </div>
                         </div>
                     </div>
 
                     <div class="glass-panel">
-                        <table class="data-table">
+                        <table class="data-table accounts-data-table">
                             <thead>
-                                <tr>
-                                    <th>Cari Kodu</th>
-                                    <th>Firma Adı</th>
-                                    <th>Telefon</th>
+	                                <tr>
+	                                    <th class="selection-cell"><input type="checkbox" data-select-all="accounts" onchange="toggleVisibleReportSelection('accounts', this.checked)"></th>
+	                                    <th>Firma / Cari</th>
+                                    <th>İletişim</th>
                                     <th>Bakiye</th>
                                     <th>Durum</th>
-                                    <th>İşlem</th>
+                                    <th>İşlemler</th>
                                 </tr>
                             </thead>
                             <tbody id="accounts-tbody">
@@ -377,6 +639,32 @@
                             </div>
                         </div>
                     </div>
+
+                    <div class="glass-panel secondary-data-panel is-collapsed">
+                        <div class="flex-between mb-4 secondary-panel-heading">
+                            <div>
+                                <h3>Ödeme / Tahsilat Vade Planı</h3>
+                                <p class="muted-copy">Yaklaşan ve geciken ödeme sözleri burada takip edilir.</p>
+                            </div>
+                            <button type="button" class="btn btn-outline secondary-panel-toggle" aria-expanded="false" onclick="toggleSecondaryPanel(this)"><i class="fa-solid fa-calendar-check" aria-hidden="true"></i> <span>Göster</span> <i class="fa-solid fa-chevron-down secondary-panel-chevron" aria-hidden="true"></i></button>
+                        </div>
+                        <div class="secondary-panel-body">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Vade</th>
+                                        <th>Cari</th>
+                                        <th>Tip</th>
+                                        <th>Açıklama</th>
+                                        <th>Tutar</th>
+                                        <th>Durum</th>
+                                        <th>İşlem</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="payment-plans-tbody"></tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Inventory View -->
@@ -384,18 +672,45 @@
                     <div class="glass-panel">
                         <div class="flex-between mb-4" style="flex-wrap: wrap; gap: 15px;">
                             <h3 style="flex: 1; min-width: 150px;">Stok / Malzeme Durumu</h3>
-                            <div style="display:flex; gap:8px; flex: 3; min-width: 300px;">
+                            <div style="display:flex; gap:8px; flex: 3; min-width: 300px; flex-wrap:wrap;">
                                 <div class="search-box" style="flex: 1; position: relative;">
                                     <i class="fa-solid fa-magnifying-glass" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-muted);"></i>
-                                    <input type="text" id="stok-search" class="form-control" placeholder="Malzeme adı veya kod ile ara..." style="width: 100%; padding-left: 35px; border-radius: 8px;" oninput="renderStoklar()">
+                                    <input type="text" id="stok-search" class="form-control" placeholder="Malzeme adı veya kod ile ara..." style="width: 100%; padding-left: 35px; border-radius: 8px;" oninput="handleHighVolumeSearch('inventory')">
                                 </div>
+                                <span id="inventory-selection-count" class="selection-count">Seçim yok</span>
+                                <button type="button" class="btn btn-outline bulk-icon-action bulk-icon-action-excel" onclick="exportSelectedListToExcel('inventory')" aria-label="Seçilen stokları Excel'e aktar" title="Seçilenleri Excel'e aktar"><i class="fa-solid fa-file-excel" aria-hidden="true"></i></button>
+                                <button type="button" class="btn btn-outline bulk-icon-action bulk-icon-action-print" onclick="printList('inventory')" aria-label="Seçilen stokları yazdır" title="Seçilenleri yazdır"><i class="fa-solid fa-print" aria-hidden="true"></i></button>
                                 <button class="btn btn-primary" onclick="openModal('modal-stok')" style="white-space: nowrap;">+ Yeni Malzeme Girişi</button>
+                            </div>
+                        </div>
+                        <div class="account-statement-panel report-date-panel" data-report-date-panel="inventory">
+                            <div class="account-statement-copy">
+                                <div class="account-statement-title"><i class="fa-solid fa-calendar-days"></i> Stok Giriş Tarih Aralığı</div>
+                                <div class="account-statement-subtitle" id="report-date-inventory-label">Tüm tarihler listelenir.</div>
+                            </div>
+                            <div class="account-date-presets">
+                                <button type="button" class="account-date-preset active" data-preset="all" onclick="setReportDatePreset('inventory','all')">Tümü</button>
+                                <button type="button" class="account-date-preset" data-preset="thisMonth" onclick="setReportDatePreset('inventory','thisMonth')">Bu Ay</button>
+                                <button type="button" class="account-date-preset" data-preset="lastMonth" onclick="setReportDatePreset('inventory','lastMonth')">Geçen Ay</button>
+                                <button type="button" class="account-date-preset" data-preset="thisYear" onclick="setReportDatePreset('inventory','thisYear')">Bu Yıl</button>
+                            </div>
+                            <div class="account-date-fields">
+                                <label class="account-date-field">
+                                    <span>Başlangıç</span>
+                                    <input type="date" id="report-date-inventory-start" class="form-control account-date-input" onchange="applyReportDateFilter('inventory')">
+                                </label>
+                                <label class="account-date-field">
+                                    <span>Bitiş</span>
+                                    <input type="date" id="report-date-inventory-end" class="form-control account-date-input" onchange="applyReportDateFilter('inventory')">
+                                </label>
+                                <button type="button" class="btn btn-outline account-date-clear" onclick="clearReportDateRange('inventory')"><i class="fa-solid fa-rotate-left"></i> Temizle</button>
                             </div>
                         </div>
                         <table class="data-table">
                             <thead>
-                                <tr>
-                                    <th>Kod</th>
+	                                <tr>
+	                                    <th class="selection-cell"><input type="checkbox" data-select-all="inventory" onchange="toggleVisibleReportSelection('inventory', this.checked)"></th>
+	                                    <th>Kod</th>
                                     <th>Cinsi / Kalite</th>
                                     <th>Kalınlık (mm)</th>
                                     <th>Ebat (EnxBoy)</th>
@@ -409,6 +724,30 @@
                             <tbody id="inventory-tbody">
                             </tbody>
                         </table>
+                        <div class="secondary-data-panel is-collapsed stock-movements-panel">
+                            <div class="flex-between mb-4 secondary-panel-heading">
+                                <div>
+                                    <h3>Stok Hareketleri</h3>
+                                    <span class="muted-copy">Tüm hareketler</span>
+                                </div>
+                                <button type="button" class="btn btn-outline secondary-panel-toggle" aria-expanded="false" onclick="toggleSecondaryPanel(this)"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> <span>Göster</span> <i class="fa-solid fa-chevron-down secondary-panel-chevron" aria-hidden="true"></i></button>
+                            </div>
+                            <div class="secondary-panel-body">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Tarih</th>
+                                            <th>Malzeme</th>
+                                            <th>Hareket</th>
+                                            <th>Açıklama</th>
+                                            <th>Miktar</th>
+                                            <th>Son Durum</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="stock-movements-tbody"></tbody>
+                                </table>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -416,13 +755,42 @@
                 <div id="view-scraps" class="view">
                     <div class="flex-between mb-4">
                         <h2>Fireler ve Artık Parçalar</h2>
-                        <button class="btn btn-primary" onclick="openModal('modal-fire')"><i class="fa-solid fa-plus"></i> Yeni Fire Ekle</button>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                            <span id="scraps-selection-count" class="selection-count">Seçim yok</span>
+                            <button type="button" class="btn btn-outline bulk-icon-action bulk-icon-action-excel" onclick="exportSelectedListToExcel('scraps')" aria-label="Seçilen fire kayıtlarını Excel'e aktar" title="Seçilenleri Excel'e aktar"><i class="fa-solid fa-file-excel" aria-hidden="true"></i></button>
+                            <button type="button" class="btn btn-outline bulk-icon-action bulk-icon-action-print" onclick="printList('scraps')" aria-label="Seçilen fire kayıtlarını yazdır" title="Seçilenleri yazdır"><i class="fa-solid fa-print" aria-hidden="true"></i></button>
+                            <button class="btn btn-primary" onclick="openModal('modal-fire')"><i class="fa-solid fa-plus"></i> Yeni Fire Ekle</button>
+                        </div>
+                    </div>
+                    <div class="account-statement-panel report-date-panel" data-report-date-panel="scraps">
+                        <div class="account-statement-copy">
+                            <div class="account-statement-title"><i class="fa-solid fa-calendar-days"></i> Fire Tarih Aralığı</div>
+                            <div class="account-statement-subtitle" id="report-date-scraps-label">Tüm tarihler listelenir.</div>
+                        </div>
+                        <div class="account-date-presets">
+                            <button type="button" class="account-date-preset active" data-preset="all" onclick="setReportDatePreset('scraps','all')">Tümü</button>
+                            <button type="button" class="account-date-preset" data-preset="thisMonth" onclick="setReportDatePreset('scraps','thisMonth')">Bu Ay</button>
+                            <button type="button" class="account-date-preset" data-preset="lastMonth" onclick="setReportDatePreset('scraps','lastMonth')">Geçen Ay</button>
+                            <button type="button" class="account-date-preset" data-preset="thisYear" onclick="setReportDatePreset('scraps','thisYear')">Bu Yıl</button>
+                        </div>
+                        <div class="account-date-fields">
+                            <label class="account-date-field">
+                                <span>Başlangıç</span>
+                                <input type="date" id="report-date-scraps-start" class="form-control account-date-input" onchange="applyReportDateFilter('scraps')">
+                            </label>
+                            <label class="account-date-field">
+                                <span>Bitiş</span>
+                                <input type="date" id="report-date-scraps-end" class="form-control account-date-input" onchange="applyReportDateFilter('scraps')">
+                            </label>
+                            <button type="button" class="btn btn-outline account-date-clear" onclick="clearReportDateRange('scraps')"><i class="fa-solid fa-rotate-left"></i> Temizle</button>
+                        </div>
                     </div>
                     <div class="glass-panel">
                         <table class="data-table">
                             <thead>
-                                <tr>
-                                    <th>Cinsi</th>
+	                                <tr>
+	                                    <th class="selection-cell"><input type="checkbox" data-select-all="scraps" onchange="toggleVisibleReportSelection('scraps', this.checked)"></th>
+	                                    <th>Cinsi</th>
                                     <th>Kalınlık (mm)</th>
                                     <th>Ebat (EnxBoy)</th>
                                     <th>Sahibi</th>
@@ -471,12 +839,41 @@
                     <div class="glass-panel">
                         <div class="flex-between mb-4">
                             <h3>Gider Kayıtları</h3>
-                            <button class="btn btn-primary" id="btn-add-expense" onclick="openModal('modal-gider')"><i class="fa-solid fa-plus"></i> Gider Ekle</button>
+                            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                                <span id="expenses-selection-count" class="selection-count">Seçim yok</span>
+                                <button type="button" class="btn btn-outline bulk-icon-action bulk-icon-action-excel" onclick="exportSelectedListToExcel('expenses')" aria-label="Seçilen giderleri Excel'e aktar" title="Seçilenleri Excel'e aktar"><i class="fa-solid fa-file-excel" aria-hidden="true"></i></button>
+                                <button type="button" class="btn btn-outline bulk-icon-action bulk-icon-action-print" onclick="printList('expenses')" aria-label="Seçilen giderleri yazdır" title="Seçilenleri yazdır"><i class="fa-solid fa-print" aria-hidden="true"></i></button>
+                                <button class="btn btn-primary" id="btn-add-expense" onclick="openGiderModal()"><i class="fa-solid fa-plus"></i> Gider Ekle</button>
+                            </div>
+                        </div>
+                        <div class="account-statement-panel report-date-panel" data-report-date-panel="expenses">
+                            <div class="account-statement-copy">
+                                <div class="account-statement-title"><i class="fa-solid fa-calendar-days"></i> Gider Tarih Aralığı</div>
+                                <div class="account-statement-subtitle" id="report-date-expenses-label">Tüm tarihler listelenir.</div>
+                            </div>
+                            <div class="account-date-presets">
+                                <button type="button" class="account-date-preset active" data-preset="all" onclick="setReportDatePreset('expenses','all')">Tümü</button>
+                                <button type="button" class="account-date-preset" data-preset="thisMonth" onclick="setReportDatePreset('expenses','thisMonth')">Bu Ay</button>
+                                <button type="button" class="account-date-preset" data-preset="lastMonth" onclick="setReportDatePreset('expenses','lastMonth')">Geçen Ay</button>
+                                <button type="button" class="account-date-preset" data-preset="thisYear" onclick="setReportDatePreset('expenses','thisYear')">Bu Yıl</button>
+                            </div>
+                            <div class="account-date-fields">
+                                <label class="account-date-field">
+                                    <span>Başlangıç</span>
+                                    <input type="date" id="report-date-expenses-start" class="form-control account-date-input" onchange="applyReportDateFilter('expenses')">
+                                </label>
+                                <label class="account-date-field">
+                                    <span>Bitiş</span>
+                                    <input type="date" id="report-date-expenses-end" class="form-control account-date-input" onchange="applyReportDateFilter('expenses')">
+                                </label>
+                                <button type="button" class="btn btn-outline account-date-clear" onclick="clearReportDateRange('expenses')"><i class="fa-solid fa-rotate-left"></i> Temizle</button>
+                            </div>
                         </div>
                         <table class="data-table">
                             <thead>
-                                <tr>
-                                    <th>Tarih</th>
+	                                <tr>
+	                                    <th class="selection-cell"><input type="checkbox" data-select-all="expenses" onchange="toggleVisibleReportSelection('expenses', this.checked)"></th>
+	                                    <th>Tarih</th>
                                     <th>Kategori</th>
                                     <th>Açıklama</th>
                                     <th>Tutar</th>
@@ -496,18 +893,454 @@
                     </div>
                 </div>
 
+                <!-- Profitability View -->
+                <div id="view-profitability" class="view">
+                    <div class="profitability-heading">
+                        <div>
+                            <span class="section-kicker">Şirket İçi Rapor</span>
+                            <h2>İş Emri Kârlılığı</h2>
+                            <p>KDV hariç net satış ile doğrudan üretim maliyetlerini karşılaştırır.</p>
+                        </div>
+                        <div class="profitability-actions">
+                            <span id="profitability-selection-count" class="selection-count">Seçim yok</span>
+                            <button type="button" class="btn btn-outline bulk-icon-action bulk-icon-action-excel" onclick="exportSelectedListToExcel('profitability')" aria-label="Seçilen kârlılık kayıtlarını Excel'e aktar" title="Seçilenleri Excel'e aktar"><i class="fa-solid fa-file-excel" aria-hidden="true"></i></button>
+                            <button type="button" class="btn btn-outline bulk-icon-action bulk-icon-action-print" onclick="printList('profitability')" aria-label="Seçilen kârlılık kayıtlarını yazdır" title="Seçilenleri yazdır"><i class="fa-solid fa-print" aria-hidden="true"></i></button>
+                            <button class="btn btn-outline" onclick="openAyarlarModal()"><i class="fa-solid fa-gear"></i> Maliyet Ayarları</button>
+                        </div>
+                    </div>
+
+                    <div class="account-statement-panel report-date-panel profitability-date-panel" data-report-date-panel="profitability">
+                        <div class="account-statement-copy">
+                            <div class="account-statement-title"><i class="fa-solid fa-calendar-days"></i> Kârlılık Tarih Aralığı</div>
+                            <div class="account-statement-subtitle" id="report-date-profitability-label">Tüm tarihler listelenir.</div>
+                        </div>
+                        <div class="account-date-presets">
+                            <button type="button" class="account-date-preset active" data-preset="all" onclick="setReportDatePreset('profitability','all')">Tümü</button>
+                            <button type="button" class="account-date-preset" data-preset="thisMonth" onclick="setReportDatePreset('profitability','thisMonth')">Bu Ay</button>
+                            <button type="button" class="account-date-preset" data-preset="lastMonth" onclick="setReportDatePreset('profitability','lastMonth')">Geçen Ay</button>
+                            <button type="button" class="account-date-preset" data-preset="thisYear" onclick="setReportDatePreset('profitability','thisYear')">Bu Yıl</button>
+                        </div>
+                        <div class="account-date-fields">
+                            <label class="account-date-field">
+                                <span>Başlangıç</span>
+                                <input type="date" id="report-date-profitability-start" class="form-control account-date-input" onchange="applyReportDateFilter('profitability')">
+                            </label>
+                            <label class="account-date-field">
+                                <span>Bitiş</span>
+                                <input type="date" id="report-date-profitability-end" class="form-control account-date-input" onchange="applyReportDateFilter('profitability')">
+                            </label>
+                            <button type="button" class="btn btn-outline account-date-clear" onclick="clearReportDateRange('profitability')"><i class="fa-solid fa-rotate-left"></i> Temizle</button>
+                        </div>
+                    </div>
+
+                    <div class="profitability-filter-bar">
+                        <div class="search-box profitability-search-box">
+                            <i class="fa-solid fa-magnifying-glass"></i>
+                            <input type="text" id="profitability-search" class="form-control" placeholder="İş emri, müşteri veya açıklama..." oninput="handleHighVolumeSearch('profitability')">
+                        </div>
+                        <label class="profitability-status-filter">
+                            <span>Rapor kapsamı</span>
+                            <select id="profitability-status-filter" class="form-control" onchange="handleHighVolumeSearch('profitability')">
+                                <option value="delivered">Teslim edilen işler</option>
+                                <option value="all">İptal dışındaki tüm işler</option>
+                                <option value="incomplete">Maliyeti eksik / tahmini</option>
+                                <option value="loss">Zarar edilen işler</option>
+                            </select>
+                        </label>
+                        <div class="profitability-warning"><i class="fa-solid fa-circle-info"></i> Eksik ve tahmini maliyetler toplamları etkileyebilir.</div>
+                    </div>
+
+                    <div class="profitability-stats-grid">
+                        <div class="profitability-stat">
+                            <span>Net Satış</span>
+                            <strong id="profit-stat-revenue">₺0,00</strong>
+                            <small>KDV hariç</small>
+                        </div>
+                        <div class="profitability-stat">
+                            <span>Toplam Maliyet</span>
+                            <strong id="profit-stat-cost">₺0,00</strong>
+                            <small>Doğrudan maliyet</small>
+                        </div>
+                        <div class="profitability-stat profit-positive" id="profit-stat-profit-card">
+                            <span>Brüt Kâr</span>
+                            <strong id="profit-stat-profit">₺0,00</strong>
+                            <small>Net satış - maliyet</small>
+                        </div>
+                        <div class="profitability-stat">
+                            <span>Ortalama Marj</span>
+                            <strong id="profit-stat-margin">%0,00</strong>
+                            <small>Ağırlıklı ortalama</small>
+                        </div>
+                        <div class="profitability-stat profit-attention">
+                            <span>Kontrol Bekleyen</span>
+                            <strong id="profit-stat-incomplete">0</strong>
+                            <small>Eksik veya tahmini</small>
+                        </div>
+                    </div>
+
+                    <div class="glass-panel profitability-table-panel">
+                        <div class="profitability-table-title">
+                            <div>
+                                <h3>İş Emri Bazında Sonuçlar</h3>
+                                <p>Kesinleşmemiş maliyetler durum sütununda işaretlenir.</p>
+                            </div>
+                        </div>
+                        <table class="data-table profitability-table">
+                            <thead>
+                                <tr>
+                                    <th class="selection-cell"><input type="checkbox" data-select-all="profitability" onchange="toggleVisibleReportSelection('profitability', this.checked)"></th>
+                                    <th>İş Emri</th>
+                                    <th>Tarih</th>
+                                    <th>Müşteri / İş</th>
+                                    <th>Net Satış</th>
+                                    <th>Maliyet</th>
+                                    <th>Kâr</th>
+                                    <th>Marj</th>
+                                    <th>Maliyet Durumu</th>
+                                    <th>İşlem</th>
+                                </tr>
+                            </thead>
+                            <tbody id="profitability-tbody"></tbody>
+                        </table>
+                        <div class="flex-between align-center mt-3">
+                            <span id="profitability-page-info" style="color:var(--text-muted); font-size:13px;">Sayfa 1 / 1</span>
+                            <div>
+                                <button class="btn btn-outline" id="btn-profitability-prev" onclick="prevProfitabilityPage()" style="padding:4px 12px; margin-right:4px;">&laquo; Önceki</button>
+                                <button class="btn btn-outline" id="btn-profitability-next" onclick="nextProfitabilityPage()" style="padding:4px 12px;">Sonraki &raquo;</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Cash / Bank View -->
+                <div id="view-cashbank" class="view">
+                    <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 24px;">
+                        <div class="stat-card">
+                            <div class="stat-icon success"><i class="fa-solid fa-vault"></i></div>
+                            <div>
+                                <div class="stat-label">Toplam Kasa / Banka</div>
+                                <div class="stat-value" id="cash-stat-total">₺0,00</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon"><i class="fa-solid fa-money-bill-wave"></i></div>
+                            <div>
+                                <div class="stat-label">Nakit Kasa</div>
+                                <div class="stat-value" id="cash-stat-cash">₺0,00</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon alert"><i class="fa-solid fa-building-columns"></i></div>
+                            <div>
+                                <div class="stat-label">Banka Hesapları</div>
+                                <div class="stat-value" id="cash-stat-bank">₺0,00</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="glass-panel">
+                        <div class="flex-between mb-4">
+                            <div>
+                                <h3>Kasa / Banka Hesapları</h3>
+                                <p class="muted-copy">Nakit, banka ve tahsilat/ödeme hareketleri.</p>
+                            </div>
+                            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                                <button class="btn btn-outline" onclick="openKasaHareketModal()"><i class="fa-solid fa-right-left"></i> Hareket Ekle</button>
+                                <button class="btn btn-primary" onclick="openKasaHesapModal()"><i class="fa-solid fa-plus"></i> Hesap Ekle</button>
+                            </div>
+                        </div>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Kod</th>
+                                    <th>Hesap</th>
+                                    <th>Tip</th>
+                                    <th>Bakiye</th>
+                                </tr>
+                            </thead>
+                            <tbody id="cash-accounts-tbody"></tbody>
+                        </table>
+                    </div>
+                    <div class="glass-panel secondary-data-panel is-collapsed">
+                        <div class="flex-between mb-4 secondary-panel-heading">
+                            <div>
+                                <h3>Son Kasa / Banka Hareketleri</h3>
+                                <p class="muted-copy">Hesaplardaki son giriş ve çıkış kayıtları.</p>
+                            </div>
+                            <button type="button" class="btn btn-outline secondary-panel-toggle" aria-expanded="false" onclick="toggleSecondaryPanel(this)"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> <span>Göster</span> <i class="fa-solid fa-chevron-down secondary-panel-chevron" aria-hidden="true"></i></button>
+                        </div>
+                        <div class="secondary-panel-body">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Tarih</th>
+                                        <th>Hesap</th>
+                                        <th>Tip</th>
+                                        <th>Açıklama</th>
+                                        <th>Tutar</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="cash-movements-tbody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Personnel View -->
+                <div id="view-personnel" class="view">
+                    <div class="stats-grid personnel-stats">
+                        <div class="stat-card">
+                            <div class="stat-icon success"><i class="fa-solid fa-users"></i></div>
+                            <div>
+                                <div class="stat-label">Aktif Personel</div>
+                                <div class="stat-value" id="personnel-stat-active">0</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon"><i class="fa-solid fa-calendar-check"></i></div>
+                            <div>
+                                <div class="stat-label">Bu Ay Çalışılan Gün</div>
+                                <div class="stat-value" id="personnel-stat-workdays">0</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon alert"><i class="fa-solid fa-money-check-dollar"></i></div>
+                            <div>
+                                <div class="stat-label">Bu Ay Net Maaş</div>
+                                <div class="stat-value" id="personnel-stat-payroll">₺0,00</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background:rgba(255,209,102,0.15); color:var(--warning);"><i class="fa-solid fa-hourglass-half"></i></div>
+                            <div>
+                                <div class="stat-label">Bekleyen Ödeme</div>
+                                <div class="stat-value" id="personnel-stat-pending">₺0,00</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="accounts-toolbar personnel-toolbar workspace-toolbar">
+                        <div class="account-filter-tabs">
+                            <button id="personnel-tab-active" class="btn btn-primary account-tab-btn" onclick="setPersonnelTab('active')">Aktif Personel</button>
+                            <button id="personnel-tab-all" class="btn btn-outline account-tab-btn" onclick="setPersonnelTab('all')">Tüm Personel</button>
+                            <button id="personnel-tab-payroll" class="btn btn-outline account-tab-btn" onclick="setPersonnelTab('payroll')">Maaş / Puantaj</button>
+                        </div>
+                        <div class="workspace-primary-actions">
+                            <button class="btn btn-primary account-action-btn" onclick="openPersonnelModal()"><i class="fa-solid fa-user-plus"></i> Personel Ekle</button>
+                        </div>
+                        <div class="workspace-list-row">
+                            <div class="search-box account-search-box">
+                                <i class="fa-solid fa-magnifying-glass"></i>
+                                <input type="text" id="personnel-search" class="form-control" placeholder="Personel adı veya görev..." oninput="handleHighVolumeSearch('personnel')">
+                            </div>
+                            <div class="workspace-list-actions">
+                                <span id="personnel-selection-count" class="selection-count">Seçim yok</span>
+                                <button type="button" class="btn btn-outline account-action-btn bulk-icon-action bulk-icon-action-excel" onclick="exportSelectedListToExcel('personnel')" aria-label="Seçilen personel kayıtlarını Excel'e aktar" title="Seçilenleri Excel'e aktar"><i class="fa-solid fa-file-excel" aria-hidden="true"></i></button>
+                                <button type="button" class="btn btn-outline account-action-btn bulk-icon-action bulk-icon-action-print" onclick="printList('personnel')" aria-label="Seçilen personel kayıtlarını yazdır" title="Seçilenleri yazdır"><i class="fa-solid fa-print" aria-hidden="true"></i></button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="account-statement-panel report-date-panel" data-report-date-panel="personnel">
+                        <div class="account-statement-copy">
+                            <div class="account-statement-title"><i class="fa-solid fa-calendar-days"></i> Personel Tarih Aralığı</div>
+                            <div class="account-statement-subtitle" id="report-date-personnel-label">Tüm tarihler listelenir.</div>
+                        </div>
+                        <div class="account-date-presets">
+                            <button type="button" class="account-date-preset active" data-preset="all" onclick="setReportDatePreset('personnel','all')">Tümü</button>
+                            <button type="button" class="account-date-preset" data-preset="thisMonth" onclick="setReportDatePreset('personnel','thisMonth')">Bu Ay</button>
+                            <button type="button" class="account-date-preset" data-preset="lastMonth" onclick="setReportDatePreset('personnel','lastMonth')">Geçen Ay</button>
+                            <button type="button" class="account-date-preset" data-preset="thisYear" onclick="setReportDatePreset('personnel','thisYear')">Bu Yıl</button>
+                        </div>
+                        <div class="account-date-fields">
+                            <label class="account-date-field">
+                                <span>Başlangıç</span>
+                                <input type="date" id="report-date-personnel-start" class="form-control account-date-input" onchange="applyReportDateFilter('personnel')">
+                            </label>
+                            <label class="account-date-field">
+                                <span>Bitiş</span>
+                                <input type="date" id="report-date-personnel-end" class="form-control account-date-input" onchange="applyReportDateFilter('personnel')">
+                            </label>
+                            <button type="button" class="btn btn-outline account-date-clear" onclick="clearReportDateRange('personnel')"><i class="fa-solid fa-rotate-left"></i> Temizle</button>
+                        </div>
+                    </div>
+
+                    <div class="glass-panel">
+                        <div class="flex-between mb-4">
+                            <div>
+                                <h3 id="personnel-list-title">Personel Listesi</h3>
+                                <p class="muted-copy" id="personnel-list-subtitle">Personel bilgileri ve son maaş/puantaj durumları.</p>
+                            </div>
+                            <button class="btn btn-outline" onclick="openPayrollModal()"><i class="fa-solid fa-calendar-plus"></i> Puantaj / Maaş Kaydı</button>
+                        </div>
+                        <table class="data-table">
+                            <thead id="personnel-table-head"></thead>
+                            <tbody id="personnel-tbody"></tbody>
+                        </table>
+                        <div class="flex-between align-center mt-3">
+                            <span id="personnel-page-info" style="color:var(--text-muted); font-size:13px;">Sayfa 1 / 1</span>
+                            <div>
+                                <button class="btn btn-outline" id="btn-personnel-prev" onclick="prevPersonnelPage()" style="padding:4px 12px; margin-right:4px;">&laquo; Önceki</button>
+                                <button class="btn btn-outline" id="btn-personnel-next" onclick="nextPersonnelPage()" style="padding:4px 12px;">Sonraki &raquo;</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Cheques / Promissory Notes View -->
+                <div id="view-cheques" class="view">
+                    <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 24px;">
+                        <div class="stat-card" style="background:rgba(6,214,160,0.08); border:1px solid rgba(6,214,160,0.26);">
+                            <div class="stat-icon success"><i class="fa-solid fa-circle-arrow-down"></i></div>
+                            <div>
+                                <div class="stat-label">Bekleyen Alınan Çek/Senet</div>
+                                <div class="stat-value" id="cheques-stat-incoming">₺0,00</div>
+                            </div>
+                        </div>
+                        <div class="stat-card" style="background:rgba(239,71,111,0.08); border:1px solid rgba(239,71,111,0.26);">
+                            <div class="stat-icon alert"><i class="fa-solid fa-circle-arrow-up"></i></div>
+                            <div>
+                                <div class="stat-label">Bekleyen Verilen Çek/Senet</div>
+                                <div class="stat-value" id="cheques-stat-outgoing">₺0,00</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon"><i class="fa-solid fa-circle-check"></i></div>
+                            <div>
+                                <div class="stat-label">Tahsil / Ödeme Tamamlanan</div>
+                                <div class="stat-value" id="cheques-stat-settled">₺0,00</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="glass-panel">
+                        <div class="flex-between mb-4 cheque-panel-heading">
+                            <div>
+                                <h3>Çek / Senet Takibi</h3>
+                                <p class="muted-copy">Bekleyen vadeleri takip edin; tahsil edildi veya ödendi yapınca cari otomatik işlenir.</p>
+                            </div>
+                            <div class="workspace-primary-actions">
+                                <button class="btn btn-primary" onclick="openCekSenetModal()"><i class="fa-solid fa-plus"></i> Çek / Senet Ekle</button>
+                            </div>
+                        </div>
+
+                        <div class="cheque-workspace-row">
+                            <div class="cheque-filter-tools">
+                                <div class="search-box account-search-box">
+                                    <i class="fa-solid fa-magnifying-glass"></i>
+                                    <input type="text" id="ceksenet-search" class="form-control" placeholder="Firma, belge no, banka..." oninput="handleHighVolumeSearch('cheques')">
+                                </div>
+                                <select id="ceksenet-status-filter" class="form-control compact-select" onchange="handleHighVolumeSearch('cheques')">
+                                    <option value="all">Tüm Durumlar</option>
+                                    <option value="beklemede">Beklemede</option>
+                                    <option value="tahsil_edildi">Tahsil Edildi</option>
+                                    <option value="odendi">Ödendi</option>
+                                    <option value="karsiliksiz">Karşılıksız</option>
+                                    <option value="iptal">İptal</option>
+                                </select>
+                            </div>
+                            <div class="workspace-list-actions">
+                                <span id="cheques-selection-count" class="selection-count">Seçim yok</span>
+                                <button type="button" class="btn btn-outline bulk-icon-action bulk-icon-action-excel" onclick="exportSelectedListToExcel('cheques')" aria-label="Seçilen çek ve senetleri Excel'e aktar" title="Seçilenleri Excel'e aktar"><i class="fa-solid fa-file-excel" aria-hidden="true"></i></button>
+                                <button type="button" class="btn btn-outline bulk-icon-action bulk-icon-action-print" onclick="printList('cheques')" aria-label="Seçilen çek ve senetleri yazdır" title="Seçilenleri yazdır"><i class="fa-solid fa-print" aria-hidden="true"></i></button>
+                            </div>
+                        </div>
+
+                        <div class="account-statement-panel report-date-panel" data-report-date-panel="cheques">
+                            <div class="account-statement-copy">
+                                <div class="account-statement-title"><i class="fa-solid fa-calendar-days"></i> Vade Tarih Aralığı</div>
+                                <div class="account-statement-subtitle" id="report-date-cheques-label">Tüm tarihler listelenir.</div>
+                            </div>
+                            <div class="account-date-presets">
+                                <button type="button" class="account-date-preset active" data-preset="all" onclick="setReportDatePreset('cheques','all')">Tümü</button>
+                                <button type="button" class="account-date-preset" data-preset="thisMonth" onclick="setReportDatePreset('cheques','thisMonth')">Bu Ay</button>
+                                <button type="button" class="account-date-preset" data-preset="lastMonth" onclick="setReportDatePreset('cheques','lastMonth')">Geçen Ay</button>
+                                <button type="button" class="account-date-preset" data-preset="thisYear" onclick="setReportDatePreset('cheques','thisYear')">Bu Yıl</button>
+                            </div>
+                            <div class="account-date-fields">
+                                <label class="account-date-field">
+                                    <span>Başlangıç</span>
+                                    <input type="date" id="report-date-cheques-start" class="form-control account-date-input" onchange="applyReportDateFilter('cheques')">
+                                </label>
+                                <label class="account-date-field">
+                                    <span>Bitiş</span>
+                                    <input type="date" id="report-date-cheques-end" class="form-control account-date-input" onchange="applyReportDateFilter('cheques')">
+                                </label>
+                                <button type="button" class="btn btn-outline account-date-clear" onclick="clearReportDateRange('cheques')"><i class="fa-solid fa-rotate-left"></i> Temizle</button>
+                            </div>
+                        </div>
+
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th class="selection-cell"><input type="checkbox" data-select-all="cheques" onchange="toggleVisibleReportSelection('cheques', this.checked)"></th>
+                                    <th>Tip</th>
+                                    <th>Firma / Belge No</th>
+                                    <th>Vade</th>
+                                    <th>Banka</th>
+                                    <th>Tutar</th>
+                                    <th>Durum</th>
+                                    <th>İşlem</th>
+                                </tr>
+                            </thead>
+                            <tbody id="cheques-tbody"></tbody>
+                        </table>
+                        <div class="flex-between align-center mt-3">
+                            <span id="cheques-page-info" style="color:var(--text-muted); font-size:13px;">Sayfa 1 / 1</span>
+                            <div>
+                                <button class="btn btn-outline" id="btn-cheques-prev" onclick="prevChequesPage()" style="padding:4px 12px; margin-right:4px;">&laquo; Önceki</button>
+                                <button class="btn btn-outline" id="btn-cheques-next" onclick="nextChequesPage()" style="padding:4px 12px;">Sonraki &raquo;</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Invoices View -->
                 <div id="view-invoices" class="view">
                     <!-- Tabs -->
-                    <div style="display:flex; gap:10px; margin-bottom:20px; padding-bottom:14px; border-bottom:1px solid var(--border);">
-                        <button id="inv-tab-kesilen" class="btn btn-primary" onclick="setInvoiceTab('kesilen')" style="font-size:13px;"><i class="fa-solid fa-file-export" style="margin-right:5px;"></i>Kesilen Faturalar</button>
-                        <button id="inv-tab-alinan" class="btn btn-outline" onclick="setInvoiceTab('alinan')" style="font-size:13px;"><i class="fa-solid fa-file-import" style="margin-right:5px;"></i>Alınan Faturalar</button>
-                        <div style="flex:1;"></div>
-                        <button class="btn btn-primary" onclick="openFaturaModal()" style="white-space:nowrap;"><i class="fa-solid fa-plus"></i> Fatura Ekle</button>
+                    <div class="invoice-toolbar workspace-toolbar">
+                        <div class="account-filter-tabs">
+                            <button id="inv-tab-kesilen" class="btn btn-primary account-tab-btn" onclick="setInvoiceTab('kesilen')"><i class="fa-solid fa-file-export"></i>Kesilen Faturalar</button>
+                            <button id="inv-tab-alinan" class="btn btn-outline account-tab-btn" onclick="setInvoiceTab('alinan')"><i class="fa-solid fa-file-import"></i>Alınan Faturalar</button>
+                        </div>
+                        <div class="workspace-primary-actions">
+                            <button class="btn btn-primary account-action-btn" onclick="openFaturaModal()"><i class="fa-solid fa-plus"></i> Fatura Ekle</button>
+                        </div>
+                        <div class="workspace-list-row workspace-list-row-hint">
+                            <span class="workspace-list-hint"><i class="fa-solid fa-list-check"></i> Aktif fatura listesinin işlemleri</span>
+                            <div class="workspace-list-actions">
+                                <span id="invoices-selection-count" class="selection-count">Seçim yok</span>
+                                <button type="button" class="btn btn-outline account-action-btn bulk-icon-action bulk-icon-action-excel" onclick="exportSelectedListToExcel('invoices')" aria-label="Seçilen faturaları Excel'e aktar" title="Seçilenleri Excel'e aktar"><i class="fa-solid fa-file-excel" aria-hidden="true"></i></button>
+                                <button type="button" class="btn btn-outline account-action-btn bulk-icon-action bulk-icon-action-print" onclick="printList('invoices')" aria-label="Seçilen faturaları yazdır" title="Seçilenleri yazdır"><i class="fa-solid fa-print" aria-hidden="true"></i></button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="account-statement-panel report-date-panel" data-report-date-panel="invoices">
+                        <div class="account-statement-copy">
+                            <div class="account-statement-title"><i class="fa-solid fa-calendar-days"></i> Fatura Tarih Aralığı</div>
+                            <div class="account-statement-subtitle" id="report-date-invoices-label">Tüm tarihler listelenir.</div>
+                        </div>
+                        <div class="account-date-presets">
+                            <button type="button" class="account-date-preset active" data-preset="all" onclick="setReportDatePreset('invoices','all')">Tümü</button>
+                            <button type="button" class="account-date-preset" data-preset="thisMonth" onclick="setReportDatePreset('invoices','thisMonth')">Bu Ay</button>
+                            <button type="button" class="account-date-preset" data-preset="lastMonth" onclick="setReportDatePreset('invoices','lastMonth')">Geçen Ay</button>
+                            <button type="button" class="account-date-preset" data-preset="thisYear" onclick="setReportDatePreset('invoices','thisYear')">Bu Yıl</button>
+                        </div>
+                        <div class="account-date-fields">
+                            <label class="account-date-field">
+                                <span>Başlangıç</span>
+                                <input type="date" id="report-date-invoices-start" class="form-control account-date-input" onchange="applyReportDateFilter('invoices')">
+                            </label>
+                            <label class="account-date-field">
+                                <span>Bitiş</span>
+                                <input type="date" id="report-date-invoices-end" class="form-control account-date-input" onchange="applyReportDateFilter('invoices')">
+                            </label>
+                            <button type="button" class="btn btn-outline account-date-clear" onclick="clearReportDateRange('invoices')"><i class="fa-solid fa-rotate-left"></i> Temizle</button>
+                        </div>
                     </div>
 
                     <!-- Özet Kartları -->
-                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px;">
+                    <div class="summary-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px;">
                         <div class="stat-card" style="background:rgba(80,200,120,0.1); border:1px solid rgba(80,200,120,0.3);">
                             <div class="stat-icon success"><i class="fa-solid fa-file-export"></i></div>
                             <div class="stat-details">
@@ -527,8 +1360,9 @@
                     <div class="glass-panel">
                         <table class="data-table">
                             <thead>
-                                <tr>
-                                    <th>Fatura No</th>
+	                                <tr>
+	                                    <th class="selection-cell"><input type="checkbox" data-select-all="invoices" onchange="toggleVisibleReportSelection('invoices', this.checked)"></th>
+	                                    <th>Fatura No</th>
                                     <th>Tarih</th>
                                     <th>Firma</th>
                                     <th>Açıklama</th>
@@ -555,6 +1389,82 @@
 
     <!-- Modals -->
 
+    <!-- Çek / Senet Ekle Modal -->
+    <div id="modal-ceksenet" class="modal-overlay">
+        <div class="modal-content glass-panel" style="max-width: 620px;">
+            <div class="flex-between mb-4">
+                <h3>Çek / Senet Ekle</h3>
+                <button class="btn-close" onclick="closeModal('modal-ceksenet')"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Belge Tipi</label>
+                    <select id="input-ceksenet-tip" class="form-control" onchange="updateCekSenetStatusOptions()">
+                        <option value="alinan_cek">Alınan Çek</option>
+                        <option value="verilen_cek">Verilen Çek</option>
+                        <option value="alinan_senet">Alınan Senet</option>
+                        <option value="verilen_senet">Verilen Senet</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Durum</label>
+                    <select id="input-ceksenet-durum" class="form-control">
+                        <option value="beklemede">Beklemede</option>
+                        <option value="tahsil_edildi">Tahsil Edildi</option>
+                        <option value="karsiliksiz">Karşılıksız</option>
+                        <option value="iptal">İptal</option>
+                    </select>
+                </div>
+            </div>
+            <div id="ceksenet-info" style="padding:10px 12px; border-radius:8px; font-size:13px; color:var(--text-muted); background:rgba(255,255,255,0.05); margin-bottom:12px;">
+                Alınan çek/senet beklemedeyken sadece takip edilir; tahsil edildi yapınca cari borç azalır.
+            </div>
+            <div class="form-group">
+                <label>Cari / Firma *</label>
+                <select id="input-ceksenet-cari" class="form-control"></select>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Belge No *</label>
+                    <input type="text" id="input-ceksenet-no" class="form-control" placeholder="Örn: ÇEK-2026-001">
+                </div>
+                <div class="form-group">
+                    <label>Banka / Şube</label>
+                    <input type="text" id="input-ceksenet-banka" class="form-control" placeholder="Örn: Ziraat / Sanayi">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Vade Tarihi</label>
+                    <input type="date" id="input-ceksenet-vade" class="form-control account-date-input">
+                </div>
+                <div class="form-group">
+                    <label>Tutar (₺) *</label>
+                    <input type="number" id="input-ceksenet-tutar" class="form-control" placeholder="Örn: 25000">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Tahsilat / Ödeme Hesabı</label>
+                <select id="input-ceksenet-kasa" class="form-control">
+                    <option value="">Durum kapatılırken seçilecek</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Açıklama</label>
+                <input type="text" id="input-ceksenet-aciklama" class="form-control" placeholder="Örn: Haziran iş ödemesi">
+            </div>
+            <div class="form-group">
+                <label>Belge Eki (PDF / Fotoğraf)</label>
+                <input type="file" id="input-ceksenet-ek" class="form-control" accept=".pdf,image/*">
+            </div>
+            <div class="form-group">
+                <label>Ek Notu</label>
+                <input type="text" id="input-ceksenet-ek-not" class="form-control" placeholder="Örn: Çek fotoğrafı veya dekont">
+            </div>
+            <button class="btn btn-primary w-100 mt-4" onclick="saveCekSenet()">Kaydet</button>
+        </div>
+    </div>
+
     <!-- Fatura Ekle Modal -->
     <div id="modal-fatura" class="modal-overlay">
         <div class="modal-content glass-panel">
@@ -564,7 +1474,7 @@
             </div>
             <div class="form-group">
                 <label>Fatura Türü</label>
-                <select id="input-fatura-tur" class="form-control">
+                <select id="input-fatura-tur" class="form-control" onchange="updateInvoiceModalMode()">
                     <option value="kesilen">📤 Kesilen Fatura (Biz kestik, müşteriye)</option>
                     <option value="alinan">📥 Alınan Fatura (Bize kesildi, tedarikçiden)</option>
                 </select>
@@ -575,9 +1485,23 @@
             </div>
             <div class="form-group">
                 <label>Firma / Müşteri Adı *</label>
-                <select id="input-fatura-firma" class="form-control">
+                <select id="input-fatura-firma" class="form-control" onchange="populateInvoiceOrderOptions()">
                     <option value="">Seçiniz...</option>
                 </select>
+            </div>
+            <div class="invoice-flow-note" id="fatura-flow-note">
+                <i class="fa-solid fa-circle-info"></i>
+                <div>
+                    <strong>İş emrine bağlı fatura önerilir</strong>
+                    <span>Teslim edilmiş işi seçtiğinizde tutar otomatik gelir ve cari borç ikinci kez eklenmez.</span>
+                </div>
+            </div>
+            <div class="form-group" id="fatura-order-container">
+                <label>Teslim Edilmiş İş Emri</label>
+                <select id="input-fatura-order" class="form-control" onchange="applyInvoiceOrderSelection()">
+                    <option value="">Serbest fatura (iş emrine bağlı değil)</option>
+                </select>
+                <span class="form-helper" id="fatura-order-helper">Serbest fatura yeni bir cari borç hareketi oluşturur.</span>
             </div>
             <div class="form-group">
                 <label>Açıklama</label>
@@ -587,7 +1511,15 @@
                 <label>Tutar (₺) *</label>
                 <input type="number" id="input-fatura-tutar" class="form-control" placeholder="Örn: 15000">
             </div>
-            <button class="btn btn-primary w-100 mt-4" onclick="saveFatura()">Kaydet</button>
+            <div class="form-group">
+                <label>Belge Eki (PDF / Fotoğraf)</label>
+                <input type="file" id="input-fatura-ek" class="form-control" accept=".pdf,image/*">
+            </div>
+            <div class="form-group">
+                <label>Ek Notu</label>
+                <input type="text" id="input-fatura-ek-not" class="form-control" placeholder="Örn: Fatura PDF veya irsaliye">
+            </div>
+            <button class="btn btn-primary w-100 mt-4" onclick="saveFatura()"><i class="fa-solid fa-floppy-disk"></i> Faturayı Kaydet</button>
         </div>
     </div>
 
@@ -662,25 +1594,48 @@
                 <label>Birim Maliyet (₺/plaka)</label>
                 <input type="number" id="input-stok-maliyet" class="form-control" value="0">
             </div>
+            <div class="form-group">
+                <label>Kritik Stok Seviyesi (Plaka/Adet/KG)</label>
+                <input type="number" id="input-stok-kritik" class="form-control" value="0" placeholder="0 ise uyarı kapalı">
+            </div>
             <button class="btn btn-primary w-100 mt-4" onclick="saveStok()">Kaydet</button>
         </div>
     </div>
 
     <!-- Stat Detay Modal -->
     <div id="modal-stat-detail" class="modal-overlay">
-        <div class="modal-content glass-panel" style="max-width: 850px;">
-            <div class="flex-between mb-4">
-                <h3 id="stat-detail-title">Detay Listesi</h3>
-                <button class="btn-close" onclick="closeModal('modal-stat-detail')"><i class="fa-solid fa-xmark"></i></button>
+        <div class="modal-content glass-panel stat-detail-modal">
+            <div class="flex-between stat-detail-header">
+                <div>
+                    <span class="section-kicker" id="stat-detail-kicker">Detay görünümü</span>
+                    <h3 id="stat-detail-title">Detay Listesi</h3>
+                </div>
+                <button type="button" class="btn-close" onclick="closeModal('modal-stat-detail')" aria-label="Detay penceresini kapat"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
             </div>
-            <div style="max-height: 450px; overflow-y: auto;">
+
+            <div id="stat-detail-summary" class="stat-detail-summary" hidden>
+                <span id="stat-detail-summary-icon" class="stat-detail-summary-icon" aria-hidden="true"><i class="fa-solid fa-wallet"></i></span>
+                <span class="stat-detail-summary-copy">
+                    <span id="stat-detail-summary-label">Cari dağılımı</span>
+                    <strong id="stat-detail-summary-count">0 firma</strong>
+                </span>
+                <strong id="stat-detail-summary-total" class="stat-detail-summary-total">₺0,00</strong>
+            </div>
+
+            <label id="stat-detail-search-wrap" class="stat-detail-search" hidden>
+                <span class="sr-only">Cari ara</span>
+                <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+                <input type="search" id="stat-detail-search" class="form-control" placeholder="Firma, cari kodu veya telefon ara..." oninput="filterStatDetails()">
+            </label>
+
+            <div class="stat-detail-table-shell" tabindex="0" role="region" aria-label="Finansal detay listesi">
                 <table class="data-table">
                     <thead id="stat-detail-thead"></thead>
                     <tbody id="stat-detail-tbody"></tbody>
                 </table>
             </div>
             
-            <div class="flex-between align-center mt-3" id="stat-detail-pagination-container" style="display:none;">
+            <div class="flex-between align-center mt-3 stat-detail-pagination" id="stat-detail-pagination-container" style="display:none;">
                 <span id="stat-detail-page-info" style="color:var(--text-muted); font-size:13px;">Sayfa 1 / 1</span>
                 <div>
                     <button class="btn btn-outline" id="btn-stat-detail-prev" onclick="prevStatPage()" style="padding:4px 12px; margin-right:4px;">&laquo; Önceki</button>
@@ -719,6 +1674,10 @@
             <div class="form-group" id="duzenle-stok-maliyet-container">
                 <label>Bize Maliyeti (₺ / Plaka)</label>
                 <input type="number" id="input-duzenle-stok-maliyet" class="form-control">
+            </div>
+            <div class="form-group">
+                <label>Kritik Stok Seviyesi (Plaka/Adet/KG)</label>
+                <input type="number" id="input-duzenle-stok-kritik" class="form-control" placeholder="0 ise uyarı kapalı">
             </div>
             <button class="btn btn-primary w-100 mt-4" onclick="updateStok()">Güncelle</button>
         </div>
@@ -775,12 +1734,13 @@
             </div>
             <input type="hidden" id="input-islem-cari-id">
             <input type="hidden" id="input-islem-firma-adi">
+            <input type="hidden" id="input-islem-payment-order-id">
             <div class="form-group">
                 <label>İşlem Tipi</label>
                 <select id="input-islem-tipi" class="form-control" onchange="updateIslemTipiInfo()">
                     <optgroup label="Bize Ödenecek / Alacak">
                         <option value="tahsilat">✅ Müşteriden Tahsilat Aldık (Borç Kapandı)</option>
-                        <option value="fatura_kes">📋 Müşteriye Fatura Kestik (Müşteri Borçlandı)</option>
+                        <option value="fatura_kes">📋 Müşteriye Fatura Kestik / Belgeledik</option>
                     </optgroup>
                     <optgroup label="Bizim Ödeyeceğimiz / Borç">
                         <option value="mal_alimi">🛒 Firmadan Mal/Hizmet Aldık (Biz Borçlandık)</option>
@@ -789,9 +1749,33 @@
                 </select>
             </div>
             <div id="islem-tipi-info" style="padding:10px 12px; border-radius:8px; font-size:13px; color:var(--text-muted); background:rgba(255,255,255,0.05); margin-bottom:12px;"></div>
+            <div id="tahsilat-summary" class="transaction-summary" style="display:none;">
+                <div class="transaction-summary-row">
+                    <span>Müşterinin Toplam Borcu</span>
+                    <strong id="tahsilat-current-balance">₺0,00</strong>
+                </div>
+                <div class="transaction-summary-row">
+                    <span>Tahsil Edilecek Tutar</span>
+                    <strong id="tahsilat-entered-amount">₺0,00</strong>
+                </div>
+                <div class="transaction-summary-row">
+                    <span>Tahsilattan Sonra Kalan</span>
+                    <strong id="tahsilat-remaining-balance">₺0,00</strong>
+                </div>
+                <button type="button" class="btn btn-secondary btn-small w-100" onclick="fillFullTahsilatAmount()">Tamamını Tahsil Et</button>
+            </div>
             <div class="form-group" id="fatura-no-container" style="display:none;">
                 <label>Fatura No *</label>
                 <input type="text" id="input-islem-fatura-no" class="form-control" placeholder="Örn: FTR-2026-0042">
+            </div>
+            <div class="form-group" id="fatura-order-container" style="display:none;">
+                <label>Faturalandırılacak Teslim Edilmiş İş</label>
+                <select id="input-islem-order-id" class="form-control" onchange="applySelectedOrderToInvoice()">
+                    <option value="">Serbest fatura / iş emri seçme</option>
+                </select>
+                <div style="font-size:12px; color:var(--text-muted); margin-top:8px;">
+                    Teslim edilmiş iş seçilirse tutar otomatik gelir. İş tesliminde cariye borç işlendiği için fatura tekrar borç eklemez.
+                </div>
             </div>
             <div class="form-group">
                 <label>Açıklama (İsteğe Bağlı)</label>
@@ -799,7 +1783,21 @@
             </div>
             <div class="form-group">
                 <label>Tutar (₺)</label>
-                <input type="number" id="input-islem-tutar" class="form-control" placeholder="Örn: 5000">
+                <input type="number" id="input-islem-tutar" class="form-control" placeholder="Örn: 5000" oninput="updateTahsilatSummary()">
+            </div>
+            <div class="form-group" id="islem-kasa-container">
+                <label>Kasa / Banka *</label>
+                <select id="input-islem-kasa" class="form-control">
+                    <option value="">Kasa/banka seçin...</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Belge Eki (PDF / Fotoğraf)</label>
+                <input type="file" id="input-islem-ek" class="form-control" accept=".pdf,image/*">
+            </div>
+            <div class="form-group">
+                <label>Ek Notu</label>
+                <input type="text" id="input-islem-ek-not" class="form-control" placeholder="Örn: Dekont veya müşteri belgesi">
             </div>
             <button class="btn btn-primary w-100 mt-4" onclick="saveIslem()">Kaydet</button>
         </div>
@@ -887,7 +1885,9 @@
                         <option value="all">Tümü</option>
                         <option value="finans">Finansal İşlemler</option>
                         <option value="satis">Satışlar / İş Emirleri</option>
+                        <option value="fiyat">Fiyat Geçmişi</option>
                         <option value="malzeme">Malzeme Girişleri</option>
+                        <option value="ceksenet">Bekleyen Çek / Senet</option>
                     </select>
                 </div>
             </div>
@@ -899,6 +1899,7 @@
                             <th style="width: 150px;">İşlem Tipi</th>
                             <th>Açıklama / Detay</th>
                             <th style="width: 150px; text-align:right;">Tutar</th>
+                            <th style="width: 110px; text-align:right;">İşlem</th>
                         </tr>
                     </thead>
                     <tbody id="ekstre-tbody">
@@ -943,40 +1944,117 @@
 
     <!-- Firma Ayarları Modal -->
     <div id="modal-ayarlar" class="modal-overlay">
-        <div class="modal-content glass-panel">
+        <div class="modal-content glass-panel settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
             <div class="flex-between mb-4">
-                <h3>Firma Ayarları</h3>
-                <button class="btn-close" onclick="closeModal('modal-ayarlar')"><i class="fa-solid fa-xmark"></i></button>
+                <div>
+                    <span class="settings-modal-kicker">Yönetim</span>
+                    <h3 id="settings-modal-title">Ayarlar ve Yedekleme</h3>
+                    <p class="settings-modal-subtitle">Firma bilgileri, belge numaraları ve veri güvenliği tek yerde.</p>
+                </div>
+                <button class="btn-close" onclick="closeModal('modal-ayarlar')" aria-label="Ayarları kapat" title="Kapat"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
             </div>
-            <div class="form-group">
-                <label>Firma Adı (Uygulama Sahibi)</label>
-                <input type="text" id="input-ayar-firma" class="form-control" placeholder="Örn: AK LAZER Kesim">
-            </div>
-            <div class="form-group">
-                <label>Firma Telefonu</label>
-                <input type="text" id="input-ayar-tel" class="form-control" placeholder="Örn: 0555 123 4567">
-            </div>
-            <div class="form-group">
-                <label>Firma Adresi / Ek Bilgi</label>
-                <textarea id="input-ayar-adres" class="form-control" rows="3" placeholder="Fatura adresi veya notlar..."></textarea>
-            </div>
-            <button class="btn btn-primary w-100 mt-4" onclick="saveAyarlar()">Ayarları Kaydet</button>
-            
-            <div style="margin-top:20px; padding-top:20px; border-top:1px solid rgba(255,255,255,0.1);">
-                <h4 style="margin-bottom:15px; color:var(--text-light);">Veri Yedekleme</h4>
-                <div class="flex-between" style="gap:10px;">
-                    <button class="btn btn-outline" onclick="createManualBackup()" style="flex:1;"><i class="fa-solid fa-download"></i> Yedek Dosyası Oluştur</button>
-                    <button class="btn btn-outline" onclick="restoreBackupFile()" style="flex:1;"><i class="fa-solid fa-upload"></i> Yedekten Geri Yükle</button>
+
+            <div class="settings-layout">
+                <div class="settings-tabs" role="tablist" aria-label="Ayar bölümleri">
+                    <button type="button" class="settings-tab active" id="settings-tab-company" role="tab" aria-selected="true" aria-controls="settings-panel-company" onclick="setSettingsTab('company')">
+                        <i class="fa-solid fa-building" aria-hidden="true"></i><span>Firma Bilgileri</span>
+                    </button>
+                    <button type="button" class="settings-tab" id="settings-tab-numbering" role="tab" aria-selected="false" aria-controls="settings-panel-numbering" onclick="setSettingsTab('numbering')">
+                        <i class="fa-solid fa-hashtag" aria-hidden="true"></i><span>Numara Düzeni</span>
+                    </button>
+                    <button type="button" class="settings-tab" id="settings-tab-backup" role="tab" aria-selected="false" aria-controls="settings-panel-backup" onclick="setSettingsTab('backup')">
+                        <i class="fa-solid fa-shield-halved" aria-hidden="true"></i><span>Yedekleme</span>
+                    </button>
+                </div>
+
+                <div class="settings-panels">
+                    <section class="settings-panel active" id="settings-panel-company" role="tabpanel" aria-labelledby="settings-tab-company">
+                        <div class="settings-section-heading">
+                            <div class="settings-section-icon"><i class="fa-solid fa-building" aria-hidden="true"></i></div>
+                            <div><h4>Firma Bilgileri</h4><p>Belge ve uygulama üst bilgilerinde kullanılacak iletişim bilgileri.</p></div>
+                        </div>
+                        <div class="form-row settings-company-grid">
+                            <div class="form-group">
+                                <label for="input-ayar-firma">Firma Adı</label>
+                                <input type="text" id="input-ayar-firma" class="form-control" placeholder="Örn: AK LAZER Kesim">
+                            </div>
+                            <div class="form-group">
+                                <label for="input-ayar-tel">Firma Telefonu</label>
+                                <input type="text" id="input-ayar-tel" class="form-control" placeholder="Örn: 0555 123 4567">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="input-ayar-adres">Firma Adresi / Ek Bilgi</label>
+                            <textarea id="input-ayar-adres" class="form-control" rows="3" placeholder="Fatura adresi veya notlar..."></textarea>
+                        </div>
+                        <div class="settings-profitability-section">
+                            <div class="settings-section-heading compact">
+                                <div class="settings-section-icon"><i class="fa-solid fa-chart-line" aria-hidden="true"></i></div>
+                                <div><h4>Kârlılık Varsayılanları</h4><p>Yeni iş emirlerinin tahmini maliyet başlangıcı. Kesinleşen işleri geriye dönük değiştirmez.</p></div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="input-ayar-makine-dakika-maliyeti">Makine Dakika Maliyeti (₺)</label>
+                                    <input type="number" id="input-ayar-makine-dakika-maliyeti" class="form-control" min="0" step="0.01" value="0">
+                                </div>
+                                <div class="form-group">
+                                    <label for="input-ayar-iscilik-saat-maliyeti">İşçilik Saat Maliyeti (₺)</label>
+                                    <input type="number" id="input-ayar-iscilik-saat-maliyeti" class="form-control" min="0" step="0.01" value="0">
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="settings-panel" id="settings-panel-numbering" role="tabpanel" aria-labelledby="settings-tab-numbering" hidden>
+                        <div class="settings-section-heading">
+                            <div class="settings-section-icon"><i class="fa-solid fa-hashtag" aria-hidden="true"></i></div>
+                            <div><h4>Otomatik Numara Ön Ekleri</h4><p>Yeni kayıtlarda oluşan kodların kısa ve tutarlı görünmesini sağlar.</p></div>
+                        </div>
+                        <div class="settings-number-grid">
+                            <div class="form-group"><label for="input-num-cari-prefix">Cari</label><input type="text" id="input-num-cari-prefix" class="form-control" placeholder="C"></div>
+                            <div class="form-group"><label for="input-num-stok-prefix">Stok</label><input type="text" id="input-num-stok-prefix" class="form-control" placeholder="STK"></div>
+                            <div class="form-group"><label for="input-num-teklif-prefix">Teklif</label><input type="text" id="input-num-teklif-prefix" class="form-control" placeholder="TEK"></div>
+                            <div class="form-group"><label for="input-num-isemri-prefix">İş Emri</label><input type="text" id="input-num-isemri-prefix" class="form-control" placeholder="EMR"></div>
+                            <div class="form-group"><label for="input-num-fatura-prefix">Fatura</label><input type="text" id="input-num-fatura-prefix" class="form-control" placeholder="FTR"></div>
+                            <div class="form-group"><label for="input-num-ceksenet-prefix">Çek / Senet</label><input type="text" id="input-num-ceksenet-prefix" class="form-control" placeholder="CS"></div>
+                            <div class="form-group"><label for="input-num-vade-prefix">Vade Planı</label><input type="text" id="input-num-vade-prefix" class="form-control" placeholder="VP"></div>
+                            <div class="form-group"><label for="input-num-kasa-prefix">Kasa</label><input type="text" id="input-num-kasa-prefix" class="form-control" placeholder="KASA"></div>
+                        </div>
+                        <div class="settings-info-note"><i class="fa-solid fa-circle-info" aria-hidden="true"></i><span>Değişiklikler yalnızca bundan sonra oluşturulan kayıt numaralarında kullanılır.</span></div>
+                    </section>
+
+                    <section class="settings-panel" id="settings-panel-backup" role="tabpanel" aria-labelledby="settings-tab-backup" hidden>
+                        <div class="settings-section-heading">
+                            <div class="settings-section-icon"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i></div>
+                            <div><h4>Veri Yedekleme</h4><p>Güncelleme veya bilgisayar değişikliği öncesinde güvenli bir yedek oluşturun.</p></div>
+                        </div>
+                        <div class="settings-backup-actions">
+                            <button class="settings-backup-card" onclick="createManualBackup()">
+                                <span class="settings-backup-icon"><i class="fa-solid fa-download" aria-hidden="true"></i></span>
+                                <span><strong>Yedek Dosyası Oluştur</strong><small>Mevcut kayıtların tamamını tek dosyada kaydedin.</small></span>
+                                <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+                            </button>
+                            <button class="settings-backup-card" onclick="restoreBackupFile()">
+                                <span class="settings-backup-icon"><i class="fa-solid fa-upload" aria-hidden="true"></i></span>
+                                <span><strong>Yedekten Geri Yükle</strong><small>Daha önce oluşturulan yedek dosyasını seçin.</small></span>
+                                <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+                            </button>
+                        </div>
+                        <div class="settings-danger-zone">
+                            <div class="settings-danger-heading"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><div><strong>Kritik işlem</strong><span>Bu işlem bütün yerel kayıtları kalıcı olarak siler.</span></div></div>
+                            <label for="input-safe-reset">Devam etmek için <strong>SIFIRLA</strong> yazın</label>
+                            <div class="settings-danger-action">
+                                <input type="text" id="input-safe-reset" class="form-control" placeholder="SIFIRLA" autocomplete="off" onkeyup="document.getElementById('btn-safe-reset').disabled = (this.value !== 'SIFIRLA');">
+                                <button id="btn-safe-reset" class="btn btn-alert" onclick="confirmSafeReset()" disabled><i class="fa-solid fa-trash-can" aria-hidden="true"></i> Verileri Sıfırla</button>
+                            </div>
+                        </div>
+                    </section>
                 </div>
             </div>
 
-            <div style="margin-top:20px; padding-top:20px; border-top:1px solid rgba(255,255,255,0.1); text-align:center;">
-                <p style="font-size:12px; color:var(--text-muted); margin-bottom:10px;">Sorun mu yaşıyorsunuz? Tüm yerel verileri silebilirsiniz:</p>
-                <div style="background:rgba(230, 57, 70, 0.1); border:1px solid rgba(230, 57, 70, 0.3); border-radius:8px; padding:15px;">
-                    <p style="font-size:13px; color:var(--alert); margin-bottom:10px; font-weight:600;"><i class="fa-solid fa-triangle-exclamation"></i> DİKKAT: Tüm kayıtlarınız KALICI olarak silinecektir.</p>
-                    <input type="text" id="input-safe-reset" class="form-control" placeholder="Onaylamak için SIFIRLA yazın" style="text-align:center; margin-bottom:10px; text-transform:uppercase;" onkeyup="document.getElementById('btn-safe-reset').disabled = (this.value !== 'SIFIRLA');">
-                    <button id="btn-safe-reset" class="btn btn-alert" onclick="confirmSafeReset()" style="width:100%;" disabled><i class="fa-solid fa-trash-can"></i> Verileri Tamamen Sıfırla (Kritik)</button>
-                </div>
+            <div class="settings-modal-footer">
+                <span><i class="fa-solid fa-circle-check" aria-hidden="true"></i> Firma ve numara ayarları güvenli biçimde saklanır.</span>
+                <button class="btn btn-primary" onclick="saveAyarlar()"><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Ayarları Kaydet</button>
             </div>
         </div>
     </div>
@@ -1014,7 +2092,142 @@
                 <label>Tutar (₺)</label>
                 <input type="number" id="input-gider-tutar" class="form-control" placeholder="Örn: 25000">
             </div>
+            <div class="form-group">
+                <label>Ödeme Yapılan Kasa / Banka *</label>
+                <select id="input-gider-kasa" class="form-control">
+                    <option value="">Kasa/banka seçin...</option>
+                </select>
+            </div>
             <button class="btn btn-primary w-100 mt-4" onclick="saveGider()">Kaydet</button>
+        </div>
+    </div>
+
+    <!-- Personel Ekle / Düzenle Modal -->
+    <div id="modal-personel" class="modal-overlay">
+        <div class="modal-content glass-panel">
+            <div class="flex-between mb-4">
+                <h3 id="modal-personel-title">Personel Ekle</h3>
+                <button class="btn-close" onclick="closeModal('modal-personel')"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <input type="hidden" id="input-personel-id">
+            <div class="form-group">
+                <label>Ad Soyad *</label>
+                <input type="text" id="input-personel-ad" class="form-control" placeholder="Örn: Mehmet Usta">
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Telefon</label>
+                    <input type="text" id="input-personel-tel" class="form-control" placeholder="Örn: 0555 111 2233">
+                </div>
+                <div class="form-group">
+                    <label>Görev / Pozisyon</label>
+                    <input type="text" id="input-personel-gorev" class="form-control" placeholder="Örn: Operatör">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Maaş Tipi</label>
+                    <select id="input-personel-maas-tipi" class="form-control">
+                        <option value="aylik">Aylık Maaş</option>
+                        <option value="gunluk">Günlük Ücret</option>
+                        <option value="saatlik">Saatlik Ücret</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Maaş / Ücret (₺)</label>
+                    <input type="number" id="input-personel-maas" class="form-control" placeholder="Örn: 30000">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>İşe Giriş Tarihi</label>
+                    <input type="date" id="input-personel-giris" class="form-control account-date-input">
+                </div>
+                <div class="form-group">
+                    <label>Durum</label>
+                    <select id="input-personel-durum" class="form-control">
+                        <option value="Aktif">Aktif</option>
+                        <option value="Ayrıldı">Ayrıldı</option>
+                    </select>
+                </div>
+            </div>
+            <button class="btn btn-primary w-100 mt-4" onclick="savePersonel()">Kaydet</button>
+        </div>
+    </div>
+
+    <!-- Puantaj / Maaş Modal -->
+    <div id="modal-puantaj" class="modal-overlay">
+        <div class="modal-content glass-panel" style="max-width: 620px;">
+            <div class="flex-between mb-4">
+                <h3 id="modal-puantaj-title">Puantaj / Maaş Kaydı</h3>
+                <button class="btn-close" onclick="closeModal('modal-puantaj')"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <input type="hidden" id="input-puantaj-id">
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Personel *</label>
+                    <select id="input-puantaj-personel" class="form-control" onchange="updatePayrollPreview()"></select>
+                </div>
+                <div class="form-group">
+                    <label>Dönem Ayı *</label>
+                    <input type="month" id="input-puantaj-ay" class="form-control" onchange="updatePayrollPreview()">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Geldiği Gün</label>
+                    <input type="number" id="input-puantaj-gun" class="form-control" value="26" min="0" oninput="updatePayrollPreview()">
+                </div>
+                <div class="form-group">
+                    <label>İzinli Gün</label>
+                    <input type="number" id="input-puantaj-izin" class="form-control" value="0" min="0" oninput="updatePayrollPreview()">
+                </div>
+                <div class="form-group">
+                    <label>Raporlu / Gelmedi</label>
+                    <input type="number" id="input-puantaj-eksik" class="form-control" value="0" min="0" oninput="updatePayrollPreview()">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Fazla Mesai Saati</label>
+                    <input type="number" id="input-puantaj-mesai-saat" class="form-control" value="0" min="0" oninput="updatePayrollPreview()">
+                </div>
+                <div class="form-group">
+                    <label>Fazla Mesai Saat Ücreti (₺)</label>
+                    <input type="number" id="input-puantaj-mesai-ucret" class="form-control" value="0" min="0" oninput="updatePayrollPreview()">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Avans / Kesinti (₺)</label>
+                    <input type="number" id="input-puantaj-avans" class="form-control" value="0" min="0" oninput="updatePayrollPreview()">
+                </div>
+                <div class="form-group">
+                    <label>Prim / Ek Ödeme (₺)</label>
+                    <input type="number" id="input-puantaj-prim" class="form-control" value="0" min="0" oninput="updatePayrollPreview()">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Not</label>
+                <input type="text" id="input-puantaj-not" class="form-control" placeholder="Örn: Haziran maaşı, bayram avansı düşüldü">
+            </div>
+            <div class="payroll-preview">
+                <div><span>Brüt Maaş</span><strong id="payroll-preview-base">₺0,00</strong></div>
+                <div><span>Eksik Gün Kesintisi</span><strong id="payroll-preview-deduction">₺0,00</strong></div>
+                <div><span>Fazla Mesai + Prim</span><strong id="payroll-preview-extra">₺0,00</strong></div>
+                <div class="payroll-preview-total"><span>Net Ödenecek</span><strong id="payroll-preview-net">₺0,00</strong></div>
+            </div>
+            <div class="form-group" style="display:flex; align-items:center; gap:10px; margin-top:16px;">
+                <input type="checkbox" id="input-puantaj-odendi" style="width:18px; height:18px; cursor:pointer;" onchange="togglePayrollPaymentAccount()">
+                <label for="input-puantaj-odendi" style="margin:0; cursor:pointer;">Maaş ödendi, giderlere otomatik işlensin</label>
+            </div>
+            <div class="form-group" id="puantaj-kasa-container" style="display:none;">
+                <label>Ödeme Yapılan Kasa / Banka *</label>
+                <select id="input-puantaj-kasa" class="form-control">
+                    <option value="">Kasa/banka seçin...</option>
+                </select>
+            </div>
+            <button class="btn btn-primary w-100 mt-4" onclick="savePuantaj()">Kaydet</button>
         </div>
     </div>
 
@@ -1054,6 +2267,17 @@
                 <h5 style="color:var(--text-muted); margin-bottom:8px; font-size:12px; text-transform:uppercase; letter-spacing:1px;">Malzeme Bilgisi</h5>
                 <div id="history-material-details" style="font-size:14px; font-weight:500;"></div>
             </div>
+
+            <section class="order-linked-section" aria-labelledby="order-linked-title">
+                <div class="order-linked-heading">
+                    <div>
+                        <span class="section-kicker">Kayıt Zinciri</span>
+                        <h4 id="order-linked-title">Bağlı Kayıtlar</h4>
+                    </div>
+                    <span class="order-linked-help">Bir kayda gitmek için seçin</span>
+                </div>
+                <div id="history-linked-records" class="order-linked-records"></div>
+            </section>
             
             <h4 style="margin-bottom:12px; color:var(--primary); font-weight:600;">Durum Geçmişi</h4>
             <div style="max-height: 400px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px;">
@@ -1068,6 +2292,85 @@
                         <!-- History rows will be populated here -->
                     </tbody>
                 </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- İş Emri Kârlılık Detayı Modal -->
+    <div id="modal-order-profitability" class="modal-overlay">
+        <div class="modal-content glass-panel profitability-modal">
+            <div class="profitability-modal-header">
+                <div>
+                    <span class="section-kicker">Şirket İçi Maliyet</span>
+                    <h3 id="profitability-modal-order-no">İş Emri Kârlılığı</h3>
+                    <p id="profitability-modal-customer">Müşteri / iş açıklaması</p>
+                </div>
+                <button class="btn-close" onclick="closeModal('modal-order-profitability')" aria-label="Kârlılık penceresini kapat"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <input type="hidden" id="input-profitability-order-id">
+
+            <div class="profitability-modal-summary">
+                <div><span>KDV Hariç Net Satış</span><strong id="profitability-modal-revenue">₺0,00</strong></div>
+                <div><span>Mevcut Durum</span><strong id="profitability-modal-status">Eksik</strong></div>
+            </div>
+
+            <div class="profitability-form-section">
+                <div class="profitability-form-heading">
+                    <h4>Doğrudan Maliyetler</h4>
+                    <p>Satış fiyatları değişmez; yalnızca şirket içi gerçek maliyet hesabı güncellenir.</p>
+                </div>
+                <div class="profitability-form-grid">
+                    <div class="form-group">
+                        <label>Malzeme Maliyeti (₺)</label>
+                        <input type="number" id="input-profit-cost-material" class="form-control" min="0" step="0.01" oninput="updateProfitabilityPreview()">
+                        <small id="profitability-material-help">Stok maliyetinden otomatik hesaplandı.</small>
+                    </div>
+                    <div class="form-group">
+                        <label>Makine Süresi (Dakika)</label>
+                        <input type="number" id="input-profit-machine-minutes" class="form-control" min="0" step="0.01" oninput="updateProfitabilityPreview()">
+                    </div>
+                    <div class="form-group">
+                        <label>Makine Dakika Maliyeti (₺)</label>
+                        <input type="number" id="input-profit-machine-rate" class="form-control" min="0" step="0.01" oninput="updateProfitabilityPreview()">
+                    </div>
+                    <div class="form-group">
+                        <label>İşçilik Süresi (Saat)</label>
+                        <input type="number" id="input-profit-labor-hours" class="form-control" min="0" step="0.01" oninput="updateProfitabilityPreview()">
+                    </div>
+                    <div class="form-group">
+                        <label>İşçilik Saat Maliyeti (₺)</label>
+                        <input type="number" id="input-profit-labor-rate" class="form-control" min="0" step="0.01" oninput="updateProfitabilityPreview()">
+                    </div>
+                    <div class="form-group">
+                        <label>Dış İşlem / Fason (₺)</label>
+                        <input type="number" id="input-profit-external" class="form-control" min="0" step="0.01" value="0" oninput="updateProfitabilityPreview()">
+                    </div>
+                    <div class="form-group">
+                        <label>Nakliye (₺)</label>
+                        <input type="number" id="input-profit-shipping" class="form-control" min="0" step="0.01" value="0" oninput="updateProfitabilityPreview()">
+                    </div>
+                    <div class="form-group">
+                        <label>Diğer Doğrudan Gider (₺)</label>
+                        <input type="number" id="input-profit-other" class="form-control" min="0" step="0.01" value="0" oninput="updateProfitabilityPreview()">
+                    </div>
+                    <div class="form-group">
+                        <label>Fire Geri Kazanım Değeri (₺)</label>
+                        <input type="number" id="input-profit-scrap" class="form-control" min="0" step="0.01" value="0" oninput="updateProfitabilityPreview()">
+                        <small>Hurda veya kullanılabilir parçanın maliyetten düşülecek değeri.</small>
+                    </div>
+                </div>
+            </div>
+
+            <div class="profitability-preview-grid">
+                <div><span>Makine</span><strong id="profit-preview-machine">₺0,00</strong></div>
+                <div><span>İşçilik</span><strong id="profit-preview-labor">₺0,00</strong></div>
+                <div><span>Toplam Maliyet</span><strong id="profit-preview-total-cost">₺0,00</strong></div>
+                <div class="profitability-preview-result"><span>Brüt Kâr</span><strong id="profit-preview-gross-profit">₺0,00</strong></div>
+                <div class="profitability-preview-result"><span>Kâr Marjı</span><strong id="profit-preview-margin">%0,00</strong></div>
+            </div>
+            <div class="profitability-modal-actions">
+                <button class="btn btn-outline" onclick="closeModal('modal-order-profitability')">Vazgeç</button>
+                <button class="btn btn-primary" onclick="saveOrderProfitability()"><i class="fa-solid fa-check"></i> Maliyeti Kesinleştir</button>
             </div>
         </div>
     </div>
@@ -1087,7 +2390,21 @@
         </div>
     </div>
 
-    <div id="debug-log" style="position:fixed; bottom:25px; right:10px; background:rgba(0,0,0,0.8); color:#0f0; padding:8px; font-family:monospace; font-size:9px; z-index:9999; border-radius:4px; max-width:250px;">Sistem Günlüğü: Hazır...</div>
-    <div id="js-status" style="position:fixed; bottom:5px; right:10px; font-size:10px; color:rgba(255,255,255,0.3); pointer-events:none;">JS Durumu: Bekleniyor...</div>
+    <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="false"></div>
+
+    <div id="modal-confirm" class="modal-overlay confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+        <div class="modal-content glass-panel confirm-dialog">
+            <div class="confirm-dialog-icon" aria-hidden="true"><i class="fa-solid fa-triangle-exclamation"></i></div>
+            <div class="confirm-dialog-copy">
+                <h3 id="confirm-title">İşlemi Onaylayın</h3>
+                <p id="confirm-message"></p>
+            </div>
+            <div class="confirm-dialog-actions">
+                <button type="button" id="confirm-cancel" class="btn btn-outline" onclick="resolveConfirmation(false)">Vazgeç</button>
+                <button type="button" id="confirm-accept" class="btn btn-danger" onclick="resolveConfirmation(true)">Onayla</button>
+            </div>
+        </div>
+    </div>
+
 </body>
 </html>

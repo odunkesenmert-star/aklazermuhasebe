@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sac Levha Ağırlık Hesaplama | Sac Ağırlığı ve Lazer Kesim Teklifi</title>
+    <meta name="description" content="Sac levha ağırlık hesaplama aracı. Uzunluk, genişlik, kalınlık, adet ve malzeme yoğunluğuna göre tek parça ve toplam ağırlık hesaplayın.">
+    <link rel="icon" href="../assets/ak-lazer-icon-ui.png">
+    <link rel="stylesheet" href="../node_modules/@fortawesome/fontawesome-free/css/all.min.css">
+    <link rel="stylesheet" href="site.css">
+    <script src="sheetWeight.js" defer></script>
+    <script src="site.js" defer></script>
+</head>
+<body class="simple-nav-page">
+    <header class="site-header"><div class="container header-inner"><a class="brand" href="index.html"><img src="../assets/ak-lazer-icon-ui.png" alt="AK Lazer"><span><strong>AK LAZER</strong><span>FİBER LAZER KESİM</span></span></a><nav class="site-nav"><a href="index.html">Ana Sayfa</a><a href="index.html#services">Hizmetlerimiz</a><a href="sac-levha-agirlik-hesaplama.html" aria-current="page">Hesaplama</a><a href="iletisim.html">İletişim</a></nav><button class="nav-toggle" type="button" aria-label="Menüyü aç" aria-expanded="false" aria-controls="siteMenu"><i class="fa-solid fa-bars"></i><span>Menü</span></button><div class="menu-panel" id="siteMenu" hidden><a href="index.html">Ana Sayfa</a><a href="fiber-lazer-kesim.html">Fiber Lazer</a><a href="sac-bukum.html">Sac Büküm</a><a href="kaynak.html">Kaynak</a><a href="toz-boya.html">Toz Boya</a><a href="endustriyel-boya.html">Endüstriyel Boya</a><a href="sac-levha-agirlik-hesaplama.html">Hesaplama</a><a href="hakkimizda.html">Hakkımızda</a><a href="iletisim.html">İletişim</a></div><div class="header-cta"><a class="btn btn-ghost" href="fiber-lazer-kesim.html">Fiber Lazer</a><a class="btn btn-primary" href="iletisim.html">Teklif Al</a></div></div></header>
+    <main>
+        <section class="page-hero calculator-hero">
+            <div class="container">
+                <div class="page-lead calculator-intro"><span class="eyebrow">Sac ağırlık hesaplama</span><h1>Sac Levha Ağırlık Hesaplama</h1><p>Ölçü, kalınlık, adet ve malzeme yoğunluğuna göre ağırlığı hesaplayın; isterseniz sonucu teklif talebine aktarın.</p></div>
+                <div class="calculator-layout calculator-layout-compact">
+                    <form id="sheetCalculator" class="form-panel" novalidate>
+                    <div id="calculatorError" class="form-error" hidden></div>
+                    <div class="form-grid">
+                        <div class="field"><label for="lengthMm">Sacın A ölçüsü / Uzunluk (mm)</label><input id="lengthMm" name="lengthMm" type="number" min="0.01" step="0.01" value="1000" required></div>
+                        <div class="field"><label for="widthMm">Sacın B ölçüsü / Genişlik (mm)</label><input id="widthMm" name="widthMm" type="number" min="0.01" step="0.01" value="1000" required></div>
+                        <div class="field"><label for="thicknessMm">Kalınlık (mm)</label><input id="thicknessMm" name="thicknessMm" type="number" min="0.01" step="0.01" value="1" required></div>
+                        <div class="field"><label for="quantity">Adet</label><input id="quantity" name="quantity" type="number" min="1" step="1" value="1" required></div>
+                        <div class="field"><label for="material">Malzeme Türü</label><select id="material" name="material" required></select></div>
+                        <div class="field"><label for="density">Yoğunluk (g/cm³)</label><input id="density" name="density" type="number" min="0.01" step="0.01" value="7.85" required></div>
+                        <div class="field full"><label for="pricePerKg">Birim Fiyat (TL/kg) - isteğe bağlı</label><input id="pricePerKg" name="pricePerKg" type="number" min="0" step="0.01" placeholder="Örn: 42.50"></div>
+                    </div>
+                    <div class="action-row">
+                        <button class="btn btn-primary calculator-submit-btn" type="submit">Hesapla</button>
+                        <button class="btn btn-ghost" id="clearCalculator" type="button">Temizle</button>
+                        <button class="btn btn-secondary" id="sendCalculatorQuote" type="button">Teklif Al</button>
+                    </div>
+                    </form>
+                    <aside class="results" aria-live="polite">
+                    <div class="result-box"><span>Tek parça ağırlığı</span><strong id="singleWeightResult">0,000 kg</strong></div>
+                    <div class="result-box"><span>Toplam ağırlık</span><strong id="totalWeightResult">0,000 kg</strong></div>
+                    <div class="result-box"><span>Yaklaşık toplam fiyat</span><strong id="totalPriceResult">Fiyat girilmedi</strong></div>
+                    <div class="result-note" id="resultNote"></div>
+                    <a class="btn btn-primary whatsapp-send-btn" data-whatsapp href="https://wa.me/905375883195">WhatsApp ile Gönder</a>
+                    </aside>
+                </div>
+            </div>
+        </section>
+    </main>
+    <footer class="footer"><div class="container footer-grid"><div><h3>AK LAZER</h3><p>Hesap sonucunu teklif formuna taşıyabilir veya WhatsApp mesajı olarak hazırlayabilirsiniz.</p></div><div><h4>Hizmetler</h4><ul><li><a href="fiber-lazer-kesim.html">Fiber Lazer Kesim</a></li><li><a href="sac-bukum.html">Sac Büküm</a></li></ul></div><div><h4>Hızlı Linkler</h4><ul><li><a href="iletisim.html">Teklif Al</a></li><li><a href="hakkimizda.html">Hakkımızda</a></li></ul></div><div><h4>İletişim</h4><ul><li>+90 537 588 31 95</li><li>info@aklazer.com.tr</li><li>Yavuz Selim Mah., Küçük Sanayi Sitesi, Kahramanmaraş</li><li><a data-whatsapp href="https://wa.me/905375883195">WhatsApp hızlı iletişim</a></li></ul></div></div><div class="container copyright">© 2026 AK LAZER.</div></footer>
+</body>
+</html>
