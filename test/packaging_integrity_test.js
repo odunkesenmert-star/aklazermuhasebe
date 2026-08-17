@@ -19,6 +19,9 @@ assert.strictEqual(packageData.build.mac.gatekeeperAssess, true, 'macOS Gatekeep
 assert.strictEqual(packageData.build.mac.notarize, true, 'macOS noter entegrasyonu açık olmalı.');
 assert.ok(fs.existsSync(path.join(projectRoot, 'scripts/verify-mac-release.js')), 'Dağıtım ön koşulu denetleyicisi bulunmalı.');
 assert.ok(fs.existsSync(path.join(projectRoot, 'scripts/clean-old-builds.js')), 'Eski paketleri güvenli temizleme aracı bulunmalı.');
+assert.ok(fs.existsSync(path.join(projectRoot, 'README.TXT')), 'Son kullanıcı README.TXT kılavuzu bulunmalı.');
+assert.ok(packageData.build.extraResources?.some(item => item.from === 'README.TXT' && item.to === 'README.TXT'), 'README.TXT kurulu uygulamanın kaynaklarında dağıtılmalı.');
+assert.ok(packageData.build.dmg.contents?.some(item => item.type === 'file' && item.path === 'README.TXT'), 'README.TXT macOS DMG içinde görünür olmalı.');
 assert.ok(packageData.scripts['build:mac'].includes('identity=-'), 'Yerel macOS paketi geçersiz geliştirme sertifikasına bağlı olmamalı.');
 assert.ok(packageData.scripts['build:mac:release'].startsWith('node scripts/verify-mac-release.js'), 'Resmî macOS paketi imzalama ön koşulundan geçmeli.');
 
