@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="660" height="430" viewBox="0 0 660 430">
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#071426"/>
+      <stop offset="0.55" stop-color="#0A1B31"/>
+      <stop offset="1" stop-color="#050A13"/>
+    </linearGradient>
+    <radialGradient id="blueGlow" cx="50%" cy="45%" r="58%">
+      <stop offset="0" stop-color="#168BFF" stop-opacity="0.24"/>
+      <stop offset="0.55" stop-color="#0B62C4" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#071426" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#24C8FF"/>
+      <stop offset="1" stop-color="#367CFF"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#17273D" stop-opacity="0.92"/>
+      <stop offset="1" stop-color="#0B1422" stop-opacity="0.94"/>
+    </linearGradient>
+    <pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse">
+      <path d="M 28 0 L 0 0 0 28" fill="none" stroke="#62AFFF" stroke-opacity="0.07" stroke-width="1"/>
+    </pattern>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000814" flood-opacity="0.58"/>
+    </filter>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect width="660" height="430" rx="0" fill="url(#background)"/>
+  <rect width="660" height="430" fill="url(#blueGlow)"/>
+  <rect width="660" height="430" fill="url(#grid)"/>
+  <path d="M0 1 H660" stroke="url(#accent)" stroke-width="3"/>
+
+  <g opacity="0.22">
+    <path d="M-35 350 L205 110" stroke="#299CFF" stroke-width="1"/>
+    <path d="M455 430 L660 225" stroke="#299CFF" stroke-width="1"/>
+    <circle cx="606" cy="58" r="94" fill="none" stroke="#299CFF" stroke-width="1"/>
+    <circle cx="606" cy="58" r="72" fill="none" stroke="#299CFF" stroke-width="1"/>
+  </g>
+
+  <image x="34" y="25" width="234" height="62" xlink:href="../assets/ak-lazer-logo-ui.png" preserveAspectRatio="xMidYMid meet"/>
+
+  <g transform="translate(492 31)">
+    <rect width="136" height="34" rx="17" fill="#10243B" stroke="#2E71B6" stroke-opacity="0.8"/>
+    <circle cx="18" cy="17" r="5" fill="#24C8FF"/>
+    <text x="31" y="21" fill="#C9E7FF" font-family="Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="700" letter-spacing="1">MACOS KURULUM</text>
+  </g>
+
+  <text x="330" y="112" text-anchor="middle" fill="#FFFFFF" font-family="Helvetica Neue, Arial, sans-serif" font-size="24" font-weight="700">Kurulum çok kolay</text>
+  <text x="330" y="139" text-anchor="middle" fill="#AFC4DA" font-family="Helvetica Neue, Arial, sans-serif" font-size="14" font-weight="400">AK LAZER ERP’yi Applications klasörüne sürükleyin.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="68" y="172" width="194" height="174" rx="22" fill="url(#card)" stroke="#2C72AE" stroke-opacity="0.72"/>
+    <rect x="398" y="172" width="194" height="174" rx="22" fill="url(#card)" stroke="#2C72AE" stroke-opacity="0.72"/>
+  </g>
+
+  <g opacity="0.95">
+    <circle cx="165" cy="198" r="4" fill="#24C8FF"/>
+    <text x="165" y="204" text-anchor="middle" fill="#CFEAFF" font-family="Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="700" letter-spacing="1.2">UYGULAMA</text>
+    <circle cx="495" cy="198" r="4" fill="#55D6FF"/>
+    <text x="495" y="204" text-anchor="middle" fill="#CFEAFF" font-family="Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="700" letter-spacing="1.2">HEDEF KLASÖR</text>
+  </g>
+
+  <g transform="translate(284 236)" filter="url(#glow)">
+    <path d="M0 12 H72" fill="none" stroke="url(#accent)" stroke-width="4" stroke-linecap="round"/>
+    <path d="M63 2 L74 12 L63 22" fill="none" stroke="#49CFFF" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text x="330" y="284" text-anchor="middle" fill="#77CFFF" font-family="Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="700" letter-spacing="1.8">SÜRÜKLE VE BIRAK</text>
+
+  <g transform="translate(112 382)">
+    <circle cx="8" cy="8" r="8" fill="#123B45" stroke="#20C99A"/>
+    <path d="M4 8 L7 11 L12 5" fill="none" stroke="#51E3B7" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="25" y="13" fill="#9FB5CB" font-family="Helvetica Neue, Arial, sans-serif" font-size="12">Kurulumdan sonra uygulamayı Applications klasöründen açın.</text>
+  </g>
+  <text x="628" y="407" text-anchor="end" fill="#4F6E8D" font-family="Helvetica Neue, Arial, sans-serif" font-size="10" font-weight="600">AK LAZER ERP</text>
+</svg>

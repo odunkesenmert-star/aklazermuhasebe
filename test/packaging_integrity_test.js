@@ -21,7 +21,9 @@ assert.ok(fs.existsSync(path.join(projectRoot, 'scripts/verify-mac-release.js'))
 assert.ok(fs.existsSync(path.join(projectRoot, 'scripts/clean-old-builds.js')), 'Eski paketleri güvenli temizleme aracı bulunmalı.');
 assert.ok(fs.existsSync(path.join(projectRoot, 'README.TXT')), 'Son kullanıcı README.TXT kılavuzu bulunmalı.');
 assert.ok(packageData.build.extraResources?.some(item => item.from === 'README.TXT' && item.to === 'README.TXT'), 'README.TXT kurulu uygulamanın kaynaklarında dağıtılmalı.');
-assert.ok(packageData.build.dmg.contents?.some(item => item.type === 'file' && item.path === 'README.TXT'), 'README.TXT macOS DMG içinde görünür olmalı.');
+assert.ok(!packageData.build.dmg.contents?.some(item => item.path === 'README.TXT'), 'README.TXT macOS DMG kurulum penceresinde görünmemeli.');
+assert.strictEqual(packageData.build.dmg.background, 'build/dmg-background.png', 'DMG kurulum penceresi kurumsal arka planı kullanmalı.');
+assert.ok(fs.existsSync(path.join(projectRoot, packageData.build.dmg.background)), 'DMG kurulum arka planı bulunmalı.');
 assert.ok(packageData.scripts['build:mac'].includes('identity=-'), 'Yerel macOS paketi geçersiz geliştirme sertifikasına bağlı olmamalı.');
 assert.ok(packageData.scripts['build:mac:release'].startsWith('node scripts/verify-mac-release.js'), 'Resmî macOS paketi imzalama ön koşulundan geçmeli.');
 
