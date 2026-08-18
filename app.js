@@ -7,7 +7,7 @@ window.onerror = function(msg, url, line, col, error) {
 
 // --- Database & Local Storage Logic ---
 const DB_KEY = 'AkLazerDB';
-const CURRENT_SCHEMA_VERSION = 3;
+const CURRENT_SCHEMA_VERSION = 4;
 const APP_LOGO_PATH = 'assets/ak-lazer-logo-wide.png';
 const APP_ICON_PATH = 'assets/ak-lazer-icon-ui.png';
 const SYSTEM_ALERT = window.alert.bind(window);
@@ -253,11 +253,11 @@ function createEmptyDatabase() {
 
 const DB_NUMERIC_FIELDS = {
     cariler: ['bakiye'],
-    stoklar: ['miktar', 'kg', 'maliyet', 'kritikSeviye'],
+    stoklar: ['miktar', 'kg', 'en', 'boy', 'maliyet', 'kritikSeviye'],
     islemler: ['tutar', 'bakiyeDegisimi'],
     teklifler: ['minutes', 'rate', 'kgAmount', 'kgPrice', 'stokQty', 'operationCost', 'materialCost', 'subTotalBeforeDiscount', 'discountPercent', 'discountAmount', 'subTotal', 'taxRate', 'tax', 'total'],
-    giderler: ['tutar'],
-    faturalar: ['tutar', 'cariBakiyeDegisimi'],
+    giderler: ['tutar', 'matrah', 'kdvOrani', 'kdvTutari'],
+    faturalar: ['matrah', 'kdvOrani', 'kdvTutari', 'tutar', 'cariBakiyeDegisimi'],
     isEmirleri: [
         'minutes', 'rate', 'kgAmount', 'kgPrice', 'stokQty', 'operationCost', 'materialCost',
         'subTotalBeforeDiscount', 'discountPercent', 'discountAmount', 'subTotal', 'taxRate', 'tax', 'total',
@@ -265,7 +265,8 @@ const DB_NUMERIC_FIELDS = {
         'costLaborHours', 'costLaborRate', 'costLabor', 'costExternal', 'costShipping', 'costOther',
         'costScrapRecovery', 'costTotal', 'grossProfit', 'profitMargin'
     ],
-    personeller: ['maas'],
+    fireler: ['miktar', 'kg', 'mm', 'en', 'boy'],
+    personeller: ['maas', 'varsayilanCalismaGunu'],
     personelPuantajlari: ['geldiGun', 'izinGun', 'eksikGun', 'mesaiSaat', 'mesaiSaatUcreti', 'avans', 'prim', 'brutMaas', 'kesinti', 'ekOdeme', 'netMaas'],
     cekSenetler: ['tutar', 'cariBakiyeDegisimi'],
     odemePlanlari: ['tutar'],
@@ -382,6 +383,27 @@ function migrateDatabase(rawData) {
         if (Array.isArray(migrated.isEmirleri)) {
             migrated.isEmirleri.forEach(order => {
                 if (order && !order.costStatus) order.costStatus = 'Eksik';
+            });
+        }
+    }
+
+    if (version < 4) {
+        if (Array.isArray(migrated.stoklar)) {
+            migrated.stoklar.forEach(stok => {
+                const match = String(stok?.ebat || '').match(/^\s*([\d.,]+)\s*[xX×]\s*([\d.,]+)\s*$/);
+                if (stok && stok.en === undefined) stok.en = match ? Number(match[1].replace(',', '.')) || 0 : 0;
+                if (stok && stok.boy === undefined) stok.boy = match ? Number(match[2].replace(',', '.')) || 0 : 0;
+            });
+        }
+        if (Array.isArray(migrated.cekSenetler)) {
+            migrated.cekSenetler.forEach(record => {
+                if (record && !Array.isArray(record.durumGecmisi)) {
+                    record.durumGecmisi = [{
+                        durum: record.durum || 'beklemede',
+                        tarih: record.tarih || new Date().toLocaleString('tr-TR'),
+                        aciklama: 'Eski kayıttan aktarılan durum'
+                    }];
+                }
             });
         }
     }
@@ -870,6 +892,111 @@ function addAuditLog(action, entityType, entityId, detail = '') {
     return record;
 }
 
+function getAuditActionPresentation(action) {
+    const value = normalizeLookupText(action);
+    if (value.includes('silindi')) return { className: 'is-delete', icon: 'fa-trash-can' };
+    if (value.includes('geri alındı') || value.includes('ters')) return { className: 'is-reversal', icon: 'fa-rotate-left' };
+    if (value.includes('oluşturuldu')) return { className: 'is-create', icon: 'fa-plus' };
+    if (value.includes('güncellendi') || value.includes('değişti')) return { className: 'is-update', icon: 'fa-pen' };
+    if (value.includes('onaylandı') || value.includes('kapatıldı') || value.includes('kesinleştirildi')) return { className: 'is-success', icon: 'fa-check' };
+    return { className: 'is-neutral', icon: 'fa-circle' };
+}
+
+function syncAuditFilterOptions(records = []) {
+    const configs = [
+        ['audit-entity-filter', records.map(record => plainText(record.entityType || 'Genel'))],
+        ['audit-action-filter', records.map(record => plainText(record.action || 'İşlem'))]
+    ];
+    configs.forEach(([id, values]) => {
+        const select = document.getElementById(id);
+        if (!select) return;
+        const current = select.value || 'all';
+        const unique = [...new Set(values.filter(Boolean))].sort((left, right) => left.localeCompare(right, 'tr'));
+        select.innerHTML = `<option value="all">Tümü</option>${unique.map(value => `<option value="${escapeHTML(value)}">${escapeHTML(value)}</option>`).join('')}`;
+        select.value = unique.includes(current) ? current : 'all';
+    });
+}
+
+function getFilteredAuditRecordsForReport() {
+    const search = normalizeLookupText(document.getElementById('audit-search')?.value || '');
+    const entityFilter = document.getElementById('audit-entity-filter')?.value || 'all';
+    const actionFilter = document.getElementById('audit-action-filter')?.value || 'all';
+    let records = filterByReportDate('audit', getDBArray('denetimKayitlari'));
+    if (search) {
+        records = records.filter(record => [record.action, record.entityType, record.detail, record.actor, record.tarih]
+            .some(value => normalizeLookupText(value).includes(search)));
+    }
+    if (entityFilter !== 'all') records = records.filter(record => record.entityType === entityFilter);
+    if (actionFilter !== 'all') records = records.filter(record => record.action === actionFilter);
+    return records;
+}
+
+function getSortedAuditRecords() {
+    const rows = getFilteredAuditRecordsForReport();
+    const sorted = applyListSort('audit', rows, {
+        date: record => parseTRDate(record.tarih || ''),
+        action: record => record.action || '',
+        entity: record => record.entityType || '',
+        detail: record => record.detail || '',
+        actor: record => record.actor || ''
+    });
+    return LIST_SORT_STATE.audit ? sorted : sorted.reverse();
+}
+
+window.renderAuditTrail = function() {
+    const tbody = document.getElementById('audit-tbody');
+    if (!tbody) return;
+    const allRecords = getDBArray('denetimKayitlari');
+    syncAuditFilterOptions(allRecords);
+    const rows = getSortedAuditRecords();
+    const pageSize = getListPageSize('audit');
+    const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+    window.pageAudit = Math.min(Math.max(Number(window.pageAudit) || 1, 1), totalPages);
+    const startIndex = (window.pageAudit - 1) * pageSize;
+    const paginated = rows.slice(startIndex, startIndex + pageSize);
+    const today = new Date().toLocaleDateString('tr-TR');
+
+    const setText = (id, value) => {
+        const element = document.getElementById(id);
+        if (element) element.textContent = String(value);
+    };
+    setText('audit-stat-total', allRecords.length);
+    setText('audit-stat-today', allRecords.filter(record => parseTRDate(record.tarih || '').toLocaleDateString('tr-TR') === today).length);
+    setText('audit-stat-reversed', allRecords.filter(record => normalizeLookupText(record.action).includes('geri alındı')).length);
+    setText('audit-stat-modules', new Set(allRecords.map(record => record.entityType).filter(Boolean)).size);
+    setText('audit-page-info', formatListPagination(window.pageAudit, totalPages, rows.length, pageSize));
+
+    const previousButton = document.getElementById('btn-audit-prev');
+    const nextButton = document.getElementById('btn-audit-next');
+    if (previousButton) previousButton.disabled = window.pageAudit <= 1;
+    if (nextButton) nextButton.disabled = window.pageAudit >= totalPages;
+
+    tbody.innerHTML = paginated.length ? paginated.map(record => {
+        const presentation = getAuditActionPresentation(record.action);
+        return `<tr>
+            ${renderSelectionCell('audit', record.id)}
+            <td class="audit-date-cell"><strong>${escapeHTML(record.tarih || '-')}</strong><small>#${escapeHTML(record.id)}</small></td>
+            <td><span class="audit-action-badge ${presentation.className}"><i class="fa-solid ${presentation.icon}" aria-hidden="true"></i>${escapeHTML(record.action || 'İşlem')}</span></td>
+            <td><span class="audit-entity-badge">${escapeHTML(record.entityType || 'Genel')}</span></td>
+            <td class="audit-detail-cell">${escapeHTML(record.detail || 'Açıklama bulunmuyor')}</td>
+            <td class="audit-actor-cell"><i class="fa-solid fa-desktop" aria-hidden="true"></i>${escapeHTML(record.actor || 'Yerel Kullanıcı')}</td>
+        </tr>`;
+    }).join('') : renderTableEmptyState(6, 'Denetim kaydı bulunamadı', 'Filtreleri temizleyin veya yeni bir işlem gerçekleştirin.', 'fa-clock-rotate-left');
+
+    updateReportSelectionUI('audit');
+    enhanceSortableTableHeaders('audit');
+};
+
+window.clearAuditFilters = function() {
+    const search = document.getElementById('audit-search');
+    const entity = document.getElementById('audit-entity-filter');
+    const action = document.getElementById('audit-action-filter');
+    if (search) search.value = '';
+    if (entity) entity.value = 'all';
+    if (action) action.value = 'all';
+    clearReportDateRange('audit');
+};
+
 function addCariMovement(cari, movement) {
     if (!cari) return null;
 
@@ -966,6 +1093,26 @@ function reverseCashMovement(movementId, reason = 'İşlem geri alındı') {
     });
     if (reversal) original.reversedBy = reversal.id;
     return reversal;
+}
+
+function getCashAccountReferences(accountId) {
+    const ignoredCollections = new Set(['kasaHesaplari', 'kasaHareketleri', 'denetimKayitlari']);
+    return DB_ARRAY_KEYS
+        .filter(key => !ignoredCollections.has(key))
+        .flatMap(key => getDBArray(key)
+            .filter(item => String(item?.kasaId || '') === String(accountId))
+            .map(item => ({ collection: key, id: item.id })));
+}
+
+function getCashAccountUsage(accountId) {
+    return {
+        movements: getDBArray('kasaHareketleri').filter(item => String(item.kasaId) === String(accountId)),
+        references: getCashAccountReferences(accountId)
+    };
+}
+
+function isCashAccountActive(account) {
+    return account?.isPasif !== true;
 }
 
 function scheduleAttachmentArchive(ek, category, ownerName) {
@@ -1260,7 +1407,10 @@ function getAttachmentFromInputs(fileInputId, noteInputId) {
 function resetAttachmentInputs(fileInputId, noteInputId) {
     const fileInput = document.getElementById(fileInputId);
     const noteInput = document.getElementById(noteInputId);
-    if (fileInput) fileInput.value = '';
+    if (fileInput) {
+        fileInput.value = '';
+        if (fileInput._fileSummary) renderFileInputSummary(fileInput);
+    }
     if (noteInput) noteInput.value = '';
 }
 
@@ -1555,6 +1705,7 @@ const LIST_SCOPE_CONFIG = Object.freeze({
     expenses: { pageKey: 'pageExpenses', render: () => renderExpenses() },
     profitability: { pageKey: 'pageProfitability', render: () => renderProfitability() },
     personnel: { pageKey: 'pagePersonnel', render: () => renderPersonnel() },
+    audit: { pageKey: 'pageAudit', render: () => renderAuditTrail() },
     cheques: { pageKey: 'pageCheques', render: () => renderCekSenetler() },
     invoices: { pageKey: 'pageInvoices', render: () => renderInvoices() },
     quotes: { pageKey: 'pageQuoteHistory', render: () => renderQuoteHistory() },
@@ -1574,6 +1725,7 @@ const LIST_SORT_TABLES = Object.freeze({
     expenses: { tbodyId: 'expenses-tbody', columns: { 'Tarih': 'date', 'Kategori': 'category', 'Açıklama': 'description', 'Tutar': 'amount' } },
     profitability: { tbodyId: 'profitability-tbody', columns: { 'İş Emri': 'number', 'Tarih': 'date', 'Müşteri / İş': 'customer', 'Net Satış': 'revenue', 'Maliyet': 'cost', 'Kâr': 'profit', 'Marj': 'margin', 'Maliyet Durumu': 'status' } },
     personnel: { tbodyId: 'personnel-tbody', columns: { 'Dönem': 'period', 'Personel': 'person', 'Gün / İzin / Eksik': 'attendance', 'Net Maaş': 'salary', 'Durum': 'status', 'Telefon': 'phone', 'Görev': 'role', 'Maaş': 'salary', 'Son Puantaj': 'period' } },
+    audit: { tbodyId: 'audit-tbody', columns: { 'Tarih': 'date', 'İşlem': 'action', 'Kayıt Türü': 'entity', 'Açıklama': 'detail', 'Kullanıcı': 'actor' } },
     cheques: { tbodyId: 'cheques-tbody', columns: { 'Tip': 'type', 'Firma / Belge No': 'company', 'Vade': 'date', 'Banka': 'bank', 'Tutar': 'amount', 'Durum': 'status' } },
     invoices: { tbodyId: 'invoices-tbody', columns: { 'Fatura No': 'number', 'Tarih': 'date', 'Firma': 'company', 'Açıklama': 'description', 'Tutar': 'amount' } }
 });
@@ -1861,6 +2013,10 @@ const reportDateRenderers = {
         window.pagePersonnel = 1;
         renderPersonnel();
     },
+    audit: () => {
+        window.pageAudit = 1;
+        renderAuditTrail();
+    },
     cheques: () => {
         window.pageCheques = 1;
         renderCekSenetler();
@@ -2083,14 +2239,18 @@ function getListReport(type) {
             type: 'scraps',
             title: 'Fireler ve Artık Parçalar',
             dateRangeLabel: getReportDateRangeLabel('scraps'),
-            headers: ['Cinsi', 'Kalınlık (mm)', 'Ebat', 'Sahibi', 'Tarih'],
+            headers: ['Tür', 'Cinsi', 'Kalınlık (mm)', 'Ebat', 'Miktar', 'Ağırlık', 'Sahibi', 'İş Emri', 'Tarih'],
             rows: [...getFilteredFirelerForReport()].reverse().map(f => ({
                 id: String(f.id),
                 values: [
+                    f.tur === 'kullanilabilir' ? 'Kullanılabilir Parça' : (f.tur === 'hurda' ? 'Hurda' : 'Fire'),
                     f.cinsi || '-',
                     f.mm || '-',
                     `${f.en || '-'}x${f.boy || '-'}`,
+                    f.miktar || 0,
+                    f.kg || 0,
                     f.sahibi || 'Biz',
+                    f.isEmriNo || '-',
                     f.tarih || '-'
                 ]
             }))
@@ -2099,13 +2259,17 @@ function getListReport(type) {
             type: 'expenses',
             title: 'Gider Kayıtları',
             dateRangeLabel: getReportDateRangeLabel('expenses'),
-            headers: ['Tarih', 'Kategori', 'Açıklama', 'Tutar'],
+            headers: ['Tarih', 'Kategori', 'Belge No', 'Cari', 'Açıklama', 'Matrah', 'KDV', 'Toplam'],
             rows: [...getFilteredExpensesForReport()].reverse().map(g => ({
                 id: String(g.id),
                 values: [
                     g.tarih || '-',
                     g.kategori || '-',
+                    g.belgeNo || '-',
+                    g.cariAdi || '-',
                     g.aciklama || '-',
+                    formatCurrency(g.matrah ?? g.tutar ?? 0),
+                    formatCurrency(g.kdvTutari || 0),
                     formatCurrency(g.tutar || 0)
                 ]
             }))
@@ -2116,15 +2280,18 @@ function getListReport(type) {
                 type: 'invoices',
                 title: invoiceTabFilter === 'kesilen' ? 'Kesilen Faturalar' : 'Alınan Faturalar',
                 dateRangeLabel: getReportDateRangeLabel('invoices'),
-                headers: ['Fatura No', 'Tarih', 'Firma', 'Açıklama', 'Tutar', 'Ek'],
+                headers: ['Fatura No', 'Tarih', 'Vade', 'Firma', 'Matrah', 'KDV', 'Genel Toplam', 'Ödeme Durumu', 'Ek'],
                 rows: [...filtered].reverse().map(f => ({
                     id: String(f.id),
                     values: [
                         f.faturaNo || '-',
-                        f.tarih || '-',
+                        f.faturaTarihi || f.tarih || '-',
+                        f.vadeTarihi || '-',
                         f.firma || '-',
-                        f.aciklama || '-',
+                        formatCurrency(f.matrah ?? ((f.tutar || 0) / (1 + (Number(f.kdvOrani ?? 20) / 100)))),
+                        `%${f.kdvOrani ?? 20} / ${formatCurrency(f.kdvTutari ?? ((f.tutar || 0) - ((f.tutar || 0) / 1.2)))}`,
                         `${f.tur === 'kesilen' ? '+' : '-'}${formatCurrency(f.tutar || 0)}`,
+                        f.odemeDurumu === 'odendi' ? 'Ödendi' : (f.odemeDurumu === 'kismi' ? 'Kısmi Ödendi' : 'Ödenmedi'),
                         f.ek ? (f.ek.name || 'Var') : '-'
                     ]
                 }))
@@ -2182,11 +2349,27 @@ function getListReport(type) {
                 rows
             };
         },
+        audit: () => ({
+            type: 'audit',
+            title: 'Denetim Geçmişi',
+            dateRangeLabel: getReportDateRangeLabel('audit'),
+            headers: ['Tarih', 'İşlem', 'Kayıt Türü', 'Açıklama', 'Kullanıcı'],
+            rows: getSortedAuditRecords().map(record => ({
+                id: String(record.id),
+                values: [
+                    record.tarih || '-',
+                    record.action || 'İşlem',
+                    record.entityType || 'Genel',
+                    record.detail || '-',
+                    record.actor || 'Yerel Kullanıcı'
+                ]
+            }))
+        }),
         cheques: () => ({
             type: 'cheques',
             title: 'Çek / Senet Takibi',
             dateRangeLabel: getReportDateRangeLabel('cheques'),
-            headers: ['Vade', 'Tip', 'Firma', 'Belge No', 'Banka', 'Tutar', 'Durum', 'Ek'],
+            headers: ['Vade', 'Tip', 'Firma', 'Belge No', 'Seri', 'Keşideci', 'Lehtar', 'Banka', 'Tutar', 'Durum', 'Ciro', 'Teslim', 'Ek'],
             rows: [...getFilteredCekSenetlerForReport()].reverse().map(record => ({
                 id: String(record.id),
                 values: [
@@ -2194,9 +2377,14 @@ function getListReport(type) {
                     getCekSenetTypeLabel(record.tip),
                     record.firma || '-',
                     record.belgeNo || '-',
+                    record.seriNo || '-',
+                    record.kesideci || '-',
+                    record.lehtar || '-',
                     record.banka || '-',
                     formatCurrency(record.tutar || 0),
                     getCekSenetStatusLabel(record.durum),
+                    record.ciroDurumu === 'ciro_edildi' ? 'Ciro Edildi' : (record.ciroDurumu === 'ciro_alindi' ? 'Ciro ile Alındı' : 'Ciro Yok'),
+                    record.teslimAlan || '-',
                     record.ek ? (record.ek.name || 'Var') : '-'
                 ]
             }))
@@ -2529,6 +2717,14 @@ const INNER_PAGE_LAYOUTS = Object.freeze({
         icon: 'fa-user-clock',
         accent: '156, 125, 255'
     },
+    audit: {
+        category: 'Yönetim',
+        title: 'Denetim Geçmişi',
+        description: 'Oluşturma, düzenleme, durum değişikliği ve geri alma işlemlerini kronolojik olarak inceleyin.',
+        context: 'Ara · Filtrele · Dışa aktar',
+        icon: 'fa-clock-rotate-left',
+        accent: '76, 201, 240'
+    },
     cheques: {
         category: 'Finans',
         title: 'Çek ve Senet Takibi',
@@ -2577,6 +2773,172 @@ const MODAL_PRESENTATION = Object.freeze({
 });
 
 const modalReturnFocus = new WeakMap();
+const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
+
+function getModalFormSnapshot(modal) {
+    if (!modal) return '';
+    return JSON.stringify([...modal.querySelectorAll('input, select, textarea')]
+        .filter(control => !control.disabled && control.type !== 'file')
+        .map(control => [control.id || control.name, control.type === 'checkbox' ? control.checked : control.value]));
+}
+
+function markModalFormClean(modalOrId) {
+    const modal = typeof modalOrId === 'string' ? document.getElementById(modalOrId) : modalOrId;
+    if (!modal) return;
+    modal.dataset.formSnapshot = getModalFormSnapshot(modal);
+}
+
+function isModalFormDirty(modal) {
+    if (!modal?.querySelector('.modal-content.modal-form-shell') || !modal.dataset.formSnapshot) return false;
+    const fileChanged = [...modal.querySelectorAll('input[type="file"]')].some(input => input.files?.length);
+    return fileChanged || getModalFormSnapshot(modal) !== modal.dataset.formSnapshot;
+}
+
+function requestCloseModal(id) {
+    const modal = document.getElementById(id);
+    if (!modal) return;
+    if (!isModalFormDirty(modal)) {
+        closeModal(id);
+        return;
+    }
+    confirmAction('Bu pencerede kaydedilmemiş değişiklikler var. Değişiklikler silinerek pencere kapatılsın mı?', () => closeModal(id), {
+        title: 'Kaydedilmemiş Değişiklikler',
+        confirmLabel: 'Değişiklikleri Sil',
+        cancelLabel: 'Düzenlemeye Dön'
+    });
+}
+window.requestCloseModal = requestCloseModal;
+
+function clearFieldError(controlOrId) {
+    const control = typeof controlOrId === 'string' ? document.getElementById(controlOrId) : controlOrId;
+    if (!control) return;
+    const errorId = `${control.id || 'field'}-error`;
+    document.getElementById(errorId)?.remove();
+    control.removeAttribute('aria-invalid');
+    if (control.getAttribute('aria-describedby') === errorId) control.removeAttribute('aria-describedby');
+}
+
+function setFieldError(controlOrId, message) {
+    const control = typeof controlOrId === 'string' ? document.getElementById(controlOrId) : controlOrId;
+    if (!control) return false;
+    clearFieldError(control);
+    const error = document.createElement('span');
+    error.id = `${control.id || `field-${Date.now()}`}-error`;
+    error.className = 'field-error';
+    error.setAttribute('role', 'alert');
+    error.textContent = message;
+    control.setAttribute('aria-invalid', 'true');
+    control.setAttribute('aria-describedby', error.id);
+    (control.closest('.form-group') || control.parentElement)?.appendChild(error);
+    return false;
+}
+
+function validateModalFields(modalId, rules = []) {
+    const modal = document.getElementById(modalId);
+    if (!modal) return false;
+    modal.querySelector('.form-error-summary')?.remove();
+    rules.forEach(rule => clearFieldError(rule.id));
+    const invalid = [];
+    rules.forEach(rule => {
+        const control = document.getElementById(rule.id);
+        const valid = control && rule.test(control.value, control);
+        if (!valid) {
+            setFieldError(control, rule.message);
+            invalid.push({ control, message: rule.message });
+        }
+    });
+    if (!invalid.length) return true;
+    const summary = document.createElement('div');
+    summary.className = 'form-error-summary';
+    summary.setAttribute('role', 'alert');
+    summary.innerHTML = `<i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><span>${invalid.length} alanı kontrol edip yeniden deneyin.</span>`;
+    modal.querySelector('.modal-body')?.prepend(summary);
+    invalid[0].control?.focus();
+    invalid[0].control?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+    return false;
+}
+window.validateModalFields = validateModalFields;
+
+function beginModalSubmit(modalId, loadingLabel = 'Kaydediliyor...') {
+    const modal = document.getElementById(modalId);
+    if (modal && !modal.querySelector('.modal-submit-action')) enhanceModalLayout(modal);
+    const button = modal?.querySelector('.modal-submit-action');
+    if (!button || button.dataset.submitting === 'true') return null;
+    button.dataset.submitting = 'true';
+    button.dataset.originalHtml = button.innerHTML;
+    button.disabled = true;
+    button.classList.add('is-loading');
+    button.innerHTML = `<i class="fa-solid fa-circle-notch" aria-hidden="true"></i> ${escapeHTML(loadingLabel)}`;
+    return () => {
+        button.disabled = false;
+        button.classList.remove('is-loading');
+        button.innerHTML = button.dataset.originalHtml || 'Kaydet';
+        delete button.dataset.originalHtml;
+        delete button.dataset.submitting;
+    };
+}
+window.beginModalSubmit = beginModalSubmit;
+
+function formatFileSize(bytes) {
+    if (!Number.isFinite(bytes) || bytes <= 0) return '0 KB';
+    if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toLocaleString('tr-TR', { maximumFractionDigits: 1 })} MB`;
+    return `${Math.ceil(bytes / 1024).toLocaleString('tr-TR')} KB`;
+}
+
+function renderFileInputSummary(input) {
+    const summary = input?._fileSummary;
+    if (!input || !summary) return;
+    const file = input.files?.[0] || null;
+    if (!file) {
+        summary.hidden = true;
+        summary.innerHTML = '';
+        return;
+    }
+    summary.hidden = false;
+    const preview = file.type?.startsWith('image/') ? `<img src="${URL.createObjectURL(file)}" alt="Seçilen dosya önizlemesi" style="width:36px;height:36px;object-fit:cover;border-radius:7px;">` : '<i class="fa-solid fa-file-lines" aria-hidden="true"></i>';
+    summary.innerHTML = `<span style="display:flex;align-items:center;gap:8px;min-width:0;">${preview}<span><strong>${escapeHTML(file.name)}</strong><br>${formatFileSize(file.size)}</span></span><button type="button" aria-label="Seçilen dosyayı kaldır" title="Dosyayı kaldır"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>`;
+    summary.querySelector('button')?.addEventListener('click', () => {
+        input.value = '';
+        renderFileInputSummary(input);
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+}
+
+function enhanceFileInput(input) {
+    if (!input || input.dataset.fileEnhanced === 'true') return;
+    input.dataset.fileEnhanced = 'true';
+    const summary = document.createElement('div');
+    summary.className = 'file-input-summary';
+    summary.hidden = true;
+    input.insertAdjacentElement('afterend', summary);
+    input._fileSummary = summary;
+    input.addEventListener('change', () => {
+        clearFieldError(input);
+        const file = input.files?.[0];
+        if (file && file.size > MAX_ATTACHMENT_SIZE) {
+            input.value = '';
+            setFieldError(input, 'Dosya en fazla 10 MB olabilir. Daha küçük bir belge seçin.');
+        }
+        renderFileInputSummary(input);
+    });
+}
+
+function enhanceCurrencyInput(input) {
+    if (!input || input.dataset.currencyEnhanced === 'true') return;
+    const label = input.closest('.form-group')?.querySelector('label')?.textContent || '';
+    if (!label.includes('₺')) return;
+    input.dataset.currencyEnhanced = 'true';
+    const preview = document.createElement('span');
+    preview.className = 'currency-input-preview';
+    input.insertAdjacentElement('afterend', preview);
+    const update = () => {
+        const value = Number(input.value);
+        preview.textContent = Number.isFinite(value) && input.value !== '' ? `Türkçe gösterim: ${formatCurrency(value)}` : '';
+    };
+    input.addEventListener('input', update);
+    input.addEventListener('blur', update);
+    update();
+}
 
 function getModalFocusables(modal) {
     return [...modal.querySelectorAll('button:not([disabled]), [href], input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
@@ -2589,7 +2951,7 @@ function enhanceModalLayout(modal) {
 
     const meta = MODAL_PRESENTATION[modal.id] || { icon: 'fa-window-maximize', accent: '76, 201, 240', width: 620 };
     const specialLayout = content.matches('.settings-modal, .profitability-modal, .quote-detail-modal, .stat-detail-modal, .confirm-dialog');
-    const header = content.querySelector(':scope > .modal-titlebar, :scope > .flex-between.mb-4:first-child');
+    const header = content.querySelector(':scope > .modal-titlebar, :scope > .flex-between.mb-4');
     const title = header?.querySelector('h3');
 
     modal.setAttribute('role', modal.getAttribute('role') || 'dialog');
@@ -2605,6 +2967,11 @@ function enhanceModalLayout(modal) {
         button.type = 'button';
         if (!button.getAttribute('aria-label')) button.setAttribute('aria-label', 'Pencereyi kapat');
         if (!button.title) button.title = 'Kapat';
+        if (button.dataset.safeClose !== 'true' && modal.id !== 'modal-confirm') {
+            button.dataset.safeClose = 'true';
+            button.removeAttribute('onclick');
+            button.addEventListener('click', () => requestCloseModal(modal.id));
+        }
     });
 
     content.querySelectorAll('.form-group .form-control').forEach(control => {
@@ -2649,7 +3016,7 @@ function enhanceModalLayout(modal) {
         }
     }
 
-    let actions = content.querySelector(':scope > .modal-actions');
+    let actions = content.querySelector(':scope > .modal-actions, :scope > form.modal-form-element > .modal-actions');
     if (!actions) {
         const primaryAction = [...content.children].reverse().find(child =>
             child.matches?.('button.btn') && !child.classList.contains('btn-close')
@@ -2661,7 +3028,7 @@ function enhanceModalLayout(modal) {
             cancelButton.type = 'button';
             cancelButton.className = 'btn btn-outline modal-cancel-action';
             cancelButton.innerHTML = '<i class="fa-solid fa-xmark" aria-hidden="true"></i> Vazgeç';
-            cancelButton.addEventListener('click', () => closeModal(modal.id));
+            cancelButton.addEventListener('click', () => requestCloseModal(modal.id));
             primaryAction.classList.remove('w-100', 'mt-4');
             primaryAction.classList.add('modal-submit-action');
             actions.append(cancelButton, primaryAction);
@@ -2669,7 +3036,7 @@ function enhanceModalLayout(modal) {
         }
     }
 
-    if (!content.querySelector(':scope > .modal-body')) {
+    if (!content.querySelector(':scope > .modal-body, :scope > form.modal-form-element > .modal-body')) {
         const body = document.createElement('div');
         body.className = 'modal-body';
         if (content.classList.contains('modal-form-shell')) body.classList.add('modal-form-body');
@@ -2677,6 +3044,36 @@ function enhanceModalLayout(modal) {
         header.after(body);
         bodyNodes.forEach(child => body.appendChild(child));
     }
+
+    const body = content.querySelector(':scope > .modal-body, :scope > form.modal-form-element > .modal-body');
+    actions = content.querySelector(':scope > .modal-actions, :scope > form.modal-form-element > .modal-actions');
+    if (content.classList.contains('modal-form-shell') && body && actions && !content.querySelector(':scope > form.modal-form-element')) {
+        const form = document.createElement('form');
+        form.className = 'modal-form-element';
+        form.noValidate = true;
+        content.insertBefore(form, body);
+        form.append(body, actions);
+        const primary = actions.querySelector('.modal-submit-action');
+        if (primary) primary.type = 'button';
+        form.addEventListener('submit', event => {
+            event.preventDefault();
+            if (!primary?.disabled) primary?.click();
+        });
+        form.addEventListener('keydown', event => {
+            if (event.key !== 'Enter' || event.shiftKey || event.target.matches('textarea, button')) return;
+            event.preventDefault();
+            form.requestSubmit();
+        });
+    }
+
+    content.querySelectorAll('input[type="file"]').forEach(enhanceFileInput);
+    content.querySelectorAll('input[type="number"]').forEach(enhanceCurrencyInput);
+    content.querySelectorAll('.form-control').forEach(control => {
+        if (control.dataset.inlineValidation === 'true') return;
+        control.dataset.inlineValidation = 'true';
+        control.addEventListener('input', () => clearFieldError(control));
+        control.addEventListener('change', () => clearFieldError(control));
+    });
 }
 
 function enhanceContentPageLayouts() {
@@ -3249,15 +3646,18 @@ function getInvoiceDocumentLine(fatura) {
     }
 
     const total = roundMoney(fatura.tutar || 0);
+    const taxRate = Number(fatura.kdvOrani ?? 20);
+    const subTotal = roundMoney(fatura.matrah ?? (total / (1 + taxRate / 100)));
+    const tax = roundMoney(fatura.kdvTutari ?? (total - subTotal));
     return {
         description: fatura.aciklama || 'Fatura kalemi',
         orderNo: fatura.orderNo || '',
-        gross: total,
+        gross: subTotal,
         discountPercent: null,
         discountAmount: 0,
-        subTotal: total,
-        taxRate: null,
-        tax: 0,
+        subTotal,
+        taxRate,
+        tax,
         total
     };
 }
@@ -3274,7 +3674,9 @@ window.printInvoiceDocument = function(faturaId) {
     const contentHTML = `
         ${getPrintBrandHTML(title, getPrintMetaHTML([
             ['Fatura No', fatura.faturaNo || '-'],
-            ['Tarih', fatura.tarih || new Date().toLocaleDateString('tr-TR')],
+            ['Tarih', fatura.faturaTarihi || fatura.tarih || new Date().toLocaleDateString('tr-TR')],
+            ['Vade', fatura.vadeTarihi || '-'],
+            ['Ödeme', fatura.odemeDurumu === 'odendi' ? 'Ödendi' : (fatura.odemeDurumu === 'kismi' ? 'Kısmi Ödendi' : 'Ödenmedi')],
             ['Belge Tipi', directionLabel]
         ]))}
         <div class="document-intro-grid">
@@ -3452,7 +3854,7 @@ window.printList = function(type, selectedOnly = false) {
         </table>
     `;
 
-    const landscapeReports = new Set(['inventory', 'profitability', 'cheques']);
+    const landscapeReports = new Set(['inventory', 'profitability', 'cheques', 'expenses', 'invoices', 'scraps']);
     const orientation = landscapeReports.has(type) ? 'landscape' : 'portrait';
     const reportStyles = `
         .report-section-heading { margin-top: ${isProfitabilityReport ? '18px' : '0'}; }
@@ -3492,6 +3894,7 @@ window.openModal = function(id) {
     el.classList.add('active');
     document.body.classList.add('modal-open');
     setTimeout(() => {
+        markModalFormClean(el);
         const preferred = el.querySelector('.modal-body .form-control:not([type="hidden"]):not([disabled]), .modal-body button:not([disabled]), .btn-close');
         preferred?.focus();
     }, 0);
@@ -3516,7 +3919,7 @@ document.addEventListener('keydown', event => {
 
     if (event.key === 'Escape') {
         event.preventDefault();
-        closeModal(modal.id);
+        requestCloseModal(modal.id);
         return;
     }
 
@@ -3543,29 +3946,68 @@ document.addEventListener('keydown', event => {
     }
 });
 
-window.saveCari = function() {
-    try {
-        const adi = plainText(document.getElementById('input-cari-adi').value);
-        const tel = plainText(document.getElementById('input-cari-tel').value);
-        if (!adi) return alert("Firma adı zorunludur!");
+function getCariFormPayload(prefix = 'input-cari') {
+    const value = suffix => document.getElementById(`${prefix}-${suffix}`)?.value || '';
+    return {
+        adi: plainText(value('adi')),
+        tel: plainText(value('tel')) || '-',
+        cariTuru: value('tur') || 'musteri',
+        yetkili: plainText(value('yetkili')),
+        email: plainText(value('email')).toLocaleLowerCase('tr-TR'),
+        adres: plainText(value('adres')),
+        vergiDairesi: plainText(value('vergi-dairesi')),
+        vergiNo: plainText(value('vergi-no')),
+        vadeGun: Math.max(0, parseInt(value('vade'), 10) || 0),
+        iban: plainText(value('iban')).replace(/\s+/g, '').toLocaleUpperCase('tr-TR')
+    };
+}
 
-        db.cariler.push({
+function setCariFormPayload(prefix, cari = {}) {
+    const set = (suffix, value) => {
+        const el = document.getElementById(`${prefix}-${suffix}`);
+        if (el) el.value = value ?? '';
+    };
+    set('adi', cari.adi || '');
+    set('tel', cari.tel === '-' ? '' : (cari.tel || ''));
+    set('tur', cari.cariTuru || 'musteri');
+    set('yetkili', cari.yetkili || '');
+    set('email', cari.email || '');
+    set('adres', cari.adres || '');
+    set('vergi-dairesi', cari.vergiDairesi || '');
+    set('vergi-no', cari.vergiNo || '');
+    set('vade', cari.vadeGun || 0);
+    set('iban', cari.iban || '');
+}
+
+window.saveCari = function() {
+    const unlock = beginModalSubmit('modal-cari');
+    if (!unlock) return;
+    try {
+        const payload = getCariFormPayload('input-cari');
+        if (!validateModalFields('modal-cari', [
+            { id: 'input-cari-adi', test: value => !!plainText(value), message: 'Firma adı zorunludur.' },
+            { id: 'input-cari-email', test: value => !plainText(value) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value), message: 'Geçerli bir e-posta adresi girin.' }
+        ])) return;
+
+        const cari = {
             id: createRecordId(),
             kodu: generateSerialNo('cari'),
-            adi: adi,
-            tel: tel || '-',
+            ...payload,
             bakiye: 0,
             durum: 'Temiz'
-        });
+        };
+        db.cariler.push(cari);
+        addAuditLog('Oluşturuldu', 'Cari', cari.id, `${cari.kodu} / ${cari.adi}`);
         saveDB();
         closeModal('modal-cari');
         renderCariler();
         updateQuoteMaterials();
-        
-        document.getElementById('input-cari-adi').value = '';
-        document.getElementById('input-cari-tel').value = '';
+        setCariFormPayload('input-cari', {});
+        showToast({ type: 'success', title: 'Cari oluşturuldu', message: `${payload.adi} hesabı kullanıma hazır.` });
     } catch(e) {
         alert("Cari kaydedilirken hata oluştu: " + e.message);
+    } finally {
+        unlock();
     }
 }
 
@@ -3574,21 +4016,23 @@ window.editCari = function(id) {
     if (!cari) return;
 
     document.getElementById('input-duzenle-id').value = cari.id;
-    document.getElementById('input-duzenle-adi').value = cari.adi;
-    document.getElementById('input-duzenle-tel').value = cari.tel;
+    setCariFormPayload('input-duzenle', cari);
     document.getElementById('input-duzenle-pasif').checked = !!cari.isPasif;
     
     openModal('modal-cari-duzenle');
 }
 
 window.updateCari = function() {
+    const unlock = beginModalSubmit('modal-cari-duzenle', 'Güncelleniyor...');
+    if (!unlock) return;
     try {
         const id = document.getElementById('input-duzenle-id').value;
-        const adi = plainText(document.getElementById('input-duzenle-adi').value);
-        const tel = plainText(document.getElementById('input-duzenle-tel').value);
+        const payload = getCariFormPayload('input-duzenle');
         const isPasif = document.getElementById('input-duzenle-pasif').checked;
-        
-        if (!adi) return alert("Firma adı zorunludur!");
+        if (!validateModalFields('modal-cari-duzenle', [
+            { id: 'input-duzenle-adi', test: value => !!plainText(value), message: 'Firma adı zorunludur.' },
+            { id: 'input-duzenle-email', test: value => !plainText(value) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value), message: 'Geçerli bir e-posta adresi girin.' }
+        ])) return;
         
         const cari = db.cariler.find(c => c.id == id);
         if (cari) {
@@ -3597,17 +4041,17 @@ window.updateCari = function() {
             }
 
             const oldName = cari.adi;
-            if (oldName !== adi) {
+            if (oldName !== payload.adi) {
                 (db.islemler || []).forEach(islem => {
                     if (islem.firma === oldName) {
-                        islem.firma = adi;
+                        islem.firma = payload.adi;
                     }
                 });
             }
 
-            cari.adi = adi;
-            cari.tel = tel;
+            Object.assign(cari, payload);
             cari.isPasif = isPasif;
+            addAuditLog('Güncellendi', 'Cari', cari.id, `${oldName} -> ${cari.adi} / ${isPasif ? 'Pasif' : 'Aktif'}`);
             saveDB();
             closeModal('modal-cari-duzenle');
             renderCariler();
@@ -3615,6 +4059,8 @@ window.updateCari = function() {
         }
     } catch(e) {
         alert("Cari güncellenirken hata oluştu: " + e.message);
+    } finally {
+        unlock();
     }
 }
 
@@ -3643,6 +4089,7 @@ window.deleteCari = function(id) {
 
     confirmAction('Bu müşteri kaydı kalıcı olarak silinsin mi?', () => {
         db.cariler = db.cariler.filter(c => c.id != id);
+        addAuditLog('Silindi', 'Cari', cari.id, `${cari.kodu || '-'} / ${cari.adi}`);
         saveDB();
         renderCariler();
         updateQuoteMaterials();
@@ -3665,7 +4112,18 @@ window.toggleStokCariSelect = function() {
     }
 };
 
+window.toggleDuzenleStokCariSelect = function() {
+    const sahibi = document.getElementById('input-duzenle-stok-sahibi')?.value || 'biz';
+    const cariContainer = document.getElementById('duzenle-stok-cari-container');
+    const maliyetContainer = document.getElementById('duzenle-stok-maliyet-container');
+    if (cariContainer) cariContainer.style.display = sahibi === 'musteri' ? 'block' : 'none';
+    if (maliyetContainer) maliyetContainer.style.display = sahibi === 'musteri' ? 'none' : 'block';
+    if (sahibi === 'musteri') document.getElementById('input-duzenle-stok-maliyet').value = '0';
+};
+
 window.saveStok = function() {
+    const unlock = beginModalSubmit('modal-stok');
+    if (!unlock) return;
     try {
         const sahibi = document.getElementById('input-stok-sahibi').value;
         const cariId = document.getElementById('input-stok-cari').value;
@@ -3674,16 +4132,23 @@ window.saveStok = function() {
         const miktar = Number(document.getElementById('input-stok-miktar').value || 0);
         const kgRaw = document.getElementById('input-stok-kg').value;
         const kg = Number(kgRaw);
-        const en = document.getElementById('input-stok-en').value;
-        const boy = document.getElementById('input-stok-boy').value;
+        const en = Number(document.getElementById('input-stok-en').value || 0);
+        const boy = Number(document.getElementById('input-stok-boy').value || 0);
         const girilenMaliyet = Number(document.getElementById('input-stok-maliyet').value || 0);
         const maliyet = sahibi === 'musteri' ? 0 : girilenMaliyet;
         const kritikSeviye = Number(document.getElementById('input-stok-kritik')?.value || 0);
 
-        if (!cinsi || !plainText(kgRaw)) return alert("Lütfen Cinsi ve Ağırlık (KG) alanlarını doldurun!");
-        if (![miktar, kg, girilenMaliyet, kritikSeviye].every(Number.isFinite)) return alert('Stok alanlarına geçerli sayılar girin!');
-        if ([miktar, kg, girilenMaliyet, kritikSeviye].some(value => value < 0)) return alert('Stok miktarı, ağırlık, maliyet ve kritik seviye negatif olamaz!');
-        if (sahibi === 'musteri' && !cariId) return alert("Lütfen bir müşteri seçin!");
+        if (!validateModalFields('modal-stok', [
+            { id: 'input-stok-cinsi', test: value => !!plainText(value), message: 'Malzeme cinsi zorunludur.' },
+            { id: 'input-stok-miktar', test: value => Number(value || 0) >= 0, message: 'Miktar negatif olamaz.' },
+            { id: 'input-stok-kg', test: value => plainText(value) !== '' && Number(value) >= 0, message: 'Geçerli bir ağırlık girin.' },
+            { id: 'input-stok-en', test: value => Number(value || 0) >= 0, message: 'En ölçüsü negatif olamaz.' },
+            { id: 'input-stok-boy', test: value => Number(value || 0) >= 0, message: 'Boy ölçüsü negatif olamaz.' },
+            { id: 'input-stok-maliyet', test: value => Number(value || 0) >= 0, message: 'Maliyet negatif olamaz.' },
+            { id: 'input-stok-kritik', test: value => Number(value || 0) >= 0, message: 'Kritik seviye negatif olamaz.' },
+            { id: 'input-stok-cari', test: value => sahibi !== 'musteri' || !!value, message: 'Müşteri malzemesi için sahibi seçin.' }
+        ])) return;
+        if (![miktar, kg, en, boy, girilenMaliyet, kritikSeviye].every(Number.isFinite)) return;
 
         let sahibiText = "Biz";
         if (sahibi === 'musteri') {
@@ -3696,7 +4161,9 @@ window.saveStok = function() {
             kodu: generateSerialNo('stok'),
             cinsi: cinsi,
             mm: mm,
-            ebat: `${en}x${boy}`,
+            en,
+            boy,
+            ebat: `${en || ''}x${boy || ''}`,
             miktar: miktar,
             kg: kg,
             maliyet: maliyet,
@@ -3716,6 +4183,7 @@ window.saveStok = function() {
             aciklama: sahibi === 'musteri' ? `${sahibiText} emanet malzeme girişi` : 'Yeni malzeme girişi',
             ref: stok.kodu
         });
+        addAuditLog('Oluşturuldu', 'Stok', stok.id, `${stok.kodu} / ${stok.cinsi} / ${stok.miktar} adet`);
         
         saveDB();
         closeModal('modal-stok');
@@ -3733,6 +4201,8 @@ window.saveStok = function() {
         if (kritikEl) kritikEl.value = '0';
     } catch(e) {
         alert("Stok kaydedilirken hata oluştu: " + e.message);
+    } finally {
+        unlock();
     }
 }
 
@@ -3744,32 +4214,48 @@ window.openStokDuzenleModal = function(id) {
     document.getElementById('input-duzenle-stok-cinsi').value = stok.cinsi;
     document.getElementById('input-duzenle-stok-mm').value = stok.mm || '';
     document.getElementById('input-duzenle-stok-miktar').value = stok.miktar;
-    document.getElementById('input-duzenle-stok-ebat').value = stok.ebat || '';
+    const legacyEbat = String(stok.ebat || '').match(/^\s*([\d.,]+)\s*[xX×]\s*([\d.,]+)\s*$/);
+    document.getElementById('input-duzenle-stok-en').value = stok.en ?? (legacyEbat ? Number(legacyEbat[1].replace(',', '.')) : '');
+    document.getElementById('input-duzenle-stok-boy').value = stok.boy ?? (legacyEbat ? Number(legacyEbat[2].replace(',', '.')) : '');
+    document.getElementById('input-duzenle-stok-kg').value = stok.kg ?? '';
     document.getElementById('input-duzenle-stok-maliyet').value = stok.maliyet || 0;
+    document.getElementById('input-duzenle-stok-sahibi').value = stok.sahibiTipi || 'biz';
+    document.getElementById('input-duzenle-stok-cari').value = stok.cariId || '';
     const kritikEl = document.getElementById('input-duzenle-stok-kritik');
     if (kritikEl) kritikEl.value = stok.kritikSeviye || 0;
 
-    const maliyetContainer = document.getElementById('duzenle-stok-maliyet-container');
-    if (maliyetContainer) {
-        maliyetContainer.style.display = stok.sahibiTipi === 'musteri' ? 'none' : 'block';
-    }
+    toggleDuzenleStokCariSelect();
 
     openModal('modal-stok-duzenle');
 };
 
 window.updateStok = function() {
+    const unlock = beginModalSubmit('modal-stok-duzenle', 'Güncelleniyor...');
+    if (!unlock) return;
     try {
         const id = parseInt(document.getElementById('input-duzenle-stok-id').value);
         const cinsi = plainText(document.getElementById('input-duzenle-stok-cinsi').value);
         const mm = document.getElementById('input-duzenle-stok-mm').value;
         const miktar = Number(document.getElementById('input-duzenle-stok-miktar').value || 0);
-        const ebat = document.getElementById('input-duzenle-stok-ebat').value;
+        const kg = Number(document.getElementById('input-duzenle-stok-kg').value || 0);
+        const en = Number(document.getElementById('input-duzenle-stok-en').value || 0);
+        const boy = Number(document.getElementById('input-duzenle-stok-boy').value || 0);
+        const sahibiTipi = document.getElementById('input-duzenle-stok-sahibi').value || 'biz';
+        const cariId = document.getElementById('input-duzenle-stok-cari').value || '';
         const maliyet = Number(document.getElementById('input-duzenle-stok-maliyet').value || 0);
         const kritikSeviye = Number(document.getElementById('input-duzenle-stok-kritik')?.value || 0);
 
-        if (!cinsi) return alert('Malzeme cinsi zorunludur!');
-        if (![miktar, maliyet, kritikSeviye].every(Number.isFinite)) return alert('Stok alanlarına geçerli sayılar girin!');
-        if ([miktar, maliyet, kritikSeviye].some(value => value < 0)) return alert('Stok miktarı, maliyet ve kritik seviye negatif olamaz!');
+        if (!validateModalFields('modal-stok-duzenle', [
+            { id: 'input-duzenle-stok-cinsi', test: value => !!plainText(value), message: 'Malzeme cinsi zorunludur.' },
+            { id: 'input-duzenle-stok-miktar', test: value => Number(value || 0) >= 0, message: 'Miktar negatif olamaz.' },
+            { id: 'input-duzenle-stok-kg', test: value => plainText(value) !== '' && Number(value) >= 0, message: 'Geçerli bir ağırlık girin.' },
+            { id: 'input-duzenle-stok-en', test: value => Number(value || 0) >= 0, message: 'En ölçüsü negatif olamaz.' },
+            { id: 'input-duzenle-stok-boy', test: value => Number(value || 0) >= 0, message: 'Boy ölçüsü negatif olamaz.' },
+            { id: 'input-duzenle-stok-maliyet', test: value => Number(value || 0) >= 0, message: 'Maliyet negatif olamaz.' },
+            { id: 'input-duzenle-stok-kritik', test: value => Number(value || 0) >= 0, message: 'Kritik seviye negatif olamaz.' },
+            { id: 'input-duzenle-stok-cari', test: value => sahibiTipi !== 'musteri' || !!value, message: 'Müşteri malzemesi için sahibi seçin.' }
+        ])) return;
+        if (![miktar, kg, en, boy, maliyet, kritikSeviye].every(Number.isFinite)) return;
 
         const stok = db.stoklar.find(s => s.id === id);
         if (!stok) return;
@@ -3782,11 +4268,15 @@ window.updateStok = function() {
         stok.cinsi = cinsi;
         stok.mm = mm;
         stok.miktar = miktar;
-        stok.ebat = ebat;
+        stok.kg = kg;
+        stok.en = en;
+        stok.boy = boy;
+        stok.ebat = `${en || ''}x${boy || ''}`;
+        stok.sahibiTipi = sahibiTipi;
+        stok.cariId = sahibiTipi === 'musteri' ? cariId : '';
+        stok.sahibi = sahibiTipi === 'musteri' ? (findCariByReference(cariId)?.adi || 'Müşteri') : 'Biz';
         stok.kritikSeviye = kritikSeviye;
-        if (stok.sahibiTipi !== 'musteri') {
-            stok.maliyet = maliyet;
-        }
+        stok.maliyet = sahibiTipi === 'musteri' ? 0 : maliyet;
         if (roundMoney(eskiMiktar) !== roundMoney(miktar)) {
             addStokMovement(stok, {
                 tip: 'Stok Düzeltme',
@@ -3798,12 +4288,15 @@ window.updateStok = function() {
                 ref: stok.kodu
             });
         }
+        addAuditLog('Güncellendi', 'Stok', stok.id, `${stok.kodu || '-'} / ${stok.cinsi} / ${eskiMiktar} -> ${miktar} adet`);
 
         saveDB();
         closeModal('modal-stok-duzenle');
         renderStoklar();
     } catch(e) {
         alert("Stok güncellenirken hata oluştu: " + e.message);
+    } finally {
+        unlock();
     }
 };
 
@@ -3832,6 +4325,7 @@ window.deleteStok = function(id) {
             ref: stok.kodu || ''
         });
         db.stoklar = db.stoklar.filter(s => s.id !== id);
+        addAuditLog('Silindi', 'Stok', stok.id, `${stok.kodu || '-'} / ${stok.cinsi || 'Malzeme'}`);
         saveDB();
         renderStoklar();
         showToast({ type: 'success', title: 'Stok silindi', message: `${stok.cinsi || stok.kodu || 'Malzeme'} kaydı kaldırıldı.` });
@@ -3844,17 +4338,76 @@ window.toggleFireCariSelect = function() {
     container.style.display = sahibi === 'musteri' ? 'block' : 'none';
 };
 
+window.openFireModal = function(id = '') {
+    const record = id ? getDBArray('fireler').find(item => String(item.id) === String(id)) : null;
+    const orderSelect = document.getElementById('input-fire-is-emri');
+    if (orderSelect) {
+        orderSelect.innerHTML = '<option value="">İş emrine bağlı değil</option>' + getDBArray('isEmirleri')
+            .filter(order => order.durum !== 'İptal')
+            .slice().reverse()
+            .map(order => `<option value="${order.id}">${escapeHTML(order.orderNo || 'İş emri')} · ${escapeHTML(order.customerName || '-')}</option>`).join('');
+    }
+    resetAttachmentInputs('input-fire-ek', 'input-fire-ek-not');
+    const cariSelect = document.getElementById('input-fire-cari');
+    if (cariSelect) {
+        cariSelect.innerHTML = '<option value="">Müşteri seçin...</option>' + getDBArray('cariler')
+            .filter(cari => !cari.isPasif || String(cari.id) === String(record?.cariId || ''))
+            .map(cari => `<option value="${cari.id}">${escapeHTML(cari.adi)} (${escapeHTML(cari.kodu || '-')})</option>`).join('');
+    }
+    document.getElementById('input-fire-id').value = record?.id || '';
+    document.getElementById('input-fire-sahibi').value = record?.sahibiTipi || 'biz';
+    document.getElementById('input-fire-tur').value = record?.tur || 'fire';
+    document.getElementById('input-fire-cari').value = record?.cariId || '';
+    document.getElementById('input-fire-cinsi').value = record?.cinsi || '';
+    document.getElementById('input-fire-mm').value = record?.mm || '';
+    document.getElementById('input-fire-en').value = record?.en || '';
+    document.getElementById('input-fire-boy').value = record?.boy || '';
+    document.getElementById('input-fire-miktar').value = record?.miktar ?? 1;
+    document.getElementById('input-fire-kg').value = record?.kg || '';
+    document.getElementById('input-fire-is-emri').value = record?.isEmriId || '';
+    document.getElementById('input-fire-neden').value = record?.neden || '';
+    document.getElementById('input-fire-ek-not').value = record?.ek?.note || '';
+    document.getElementById('modal-fire-title').textContent = record ? 'Fire / Parça Kaydını Düzenle' : 'Yeni Fire / Parça Kaydı';
+    document.getElementById('btn-fire-save').textContent = record ? 'Değişiklikleri Kaydet' : 'Kaydet';
+    toggleFireCariSelect();
+    openModal('modal-fire');
+};
+
 window.saveFire = function() {
+    const unlock = beginModalSubmit('modal-fire');
+    if (!unlock) return;
     try {
+        const id = document.getElementById('input-fire-id')?.value || '';
+        const existing = id ? getDBArray('fireler').find(item => String(item.id) === String(id)) : null;
         const sahibi = document.getElementById('input-fire-sahibi').value;
         const cariId = document.getElementById('input-fire-cari').value;
-        const cinsi = document.getElementById('input-fire-cinsi').value;
-        const mm = document.getElementById('input-fire-mm').value;
-        const en = document.getElementById('input-fire-en').value;
-        const boy = document.getElementById('input-fire-boy').value;
+        const cinsi = plainText(document.getElementById('input-fire-cinsi').value);
+        const mm = Number(document.getElementById('input-fire-mm').value || 0);
+        const en = Number(document.getElementById('input-fire-en').value || 0);
+        const boy = Number(document.getElementById('input-fire-boy').value || 0);
+        const miktar = Number(document.getElementById('input-fire-miktar').value || 0);
+        const kg = Number(document.getElementById('input-fire-kg').value || 0);
+        const tur = document.getElementById('input-fire-tur').value || 'fire';
+        const isEmriId = document.getElementById('input-fire-is-emri').value || '';
+        const neden = plainText(document.getElementById('input-fire-neden').value);
+        const attachmentInput = document.getElementById('input-fire-ek');
+        const attachmentNote = plainText(document.getElementById('input-fire-ek-not')?.value || '');
+        const hasNewAttachment = !!attachmentInput?.files?.[0];
+        const newAttachment = getAttachmentFromInputs('input-fire-ek', 'input-fire-ek-not');
+        const ek = existing?.ek && !hasNewAttachment
+            ? { ...existing.ek, note: attachmentNote }
+            : newAttachment;
 
-        if (!cinsi || !mm || !en || !boy) return alert("Lütfen tüm alanları doldurun!");
-        if (sahibi === 'musteri' && !cariId) return alert("Lütfen müşteri seçin!");
+        if (!validateModalFields('modal-fire', [
+            { id: 'input-fire-cinsi', test: value => !!plainText(value), message: 'Malzeme cinsi zorunludur.' },
+            { id: 'input-fire-mm', test: value => Number(value) > 0, message: 'Kalınlığı sıfırdan büyük girin.' },
+            { id: 'input-fire-en', test: value => Number(value) > 0, message: 'En ölçüsünü sıfırdan büyük girin.' },
+            { id: 'input-fire-boy', test: value => Number(value) > 0, message: 'Boy ölçüsünü sıfırdan büyük girin.' },
+            { id: 'input-fire-miktar', test: value => Number(value || 0) >= 0, message: 'Miktar negatif olamaz.' },
+            { id: 'input-fire-kg', test: value => Number(value || 0) >= 0, message: 'Ağırlık negatif olamaz.' },
+            { id: 'input-fire-cari', test: value => sahibi !== 'musteri' || !!value, message: 'Müşteri parçası için sahibi seçin.' }
+        ])) return;
+        if (![mm, en, boy, miktar, kg].every(Number.isFinite)) return;
 
         let sahibiText = "Biz";
         if (sahibi === 'musteri') {
@@ -3862,26 +4415,43 @@ window.saveFire = function() {
             sahibiText = cari ? cari.adi : "Müşteri";
         }
 
-        db.fireler.push({
+        const order = isEmriId ? getDBArray('isEmirleri').find(item => item.id == isEmriId) : null;
+        const record = existing || {
             id: createRecordId(),
-            cinsi, mm, en, boy,
+            tarih: new Date().toLocaleDateString('tr-TR')
+        };
+        Object.assign(record, {
+            cinsi, mm, en, boy, miktar, kg, tur, neden,
             sahibi: sahibiText,
             sahibiTipi: sahibi,
             cariId: cariId,
-            tarih: new Date().toLocaleDateString('tr-TR')
+            isEmriId: order?.id || null,
+            isEmriNo: order?.orderNo || '',
+            ek
         });
+        if (!existing) db.fireler.push(record);
+        if (!existing || hasNewAttachment) scheduleAttachmentArchive(ek, 'Fire ve Parcalar', sahibiText);
+        addAuditLog(existing ? 'Güncellendi' : 'Oluşturuldu', 'Fire / Parça', record.id, `${tur} / ${cinsi}${order ? ` / ${order.orderNo}` : ''}`);
 
         saveDB();
         closeModal('modal-fire');
         renderFireler();
+        showToast({ type: 'success', title: existing ? 'Fire / parça güncellendi' : 'Fire / parça kaydedildi', message: `${cinsi} bilgileri kaydedildi.` });
         
         // Reset
         document.getElementById('input-fire-cinsi').value = '';
         document.getElementById('input-fire-mm').value = '';
         document.getElementById('input-fire-en').value = '';
         document.getElementById('input-fire-boy').value = '';
+        document.getElementById('input-fire-miktar').value = '1';
+        document.getElementById('input-fire-kg').value = '';
+        document.getElementById('input-fire-neden').value = '';
+        document.getElementById('input-fire-id').value = '';
+        resetAttachmentInputs('input-fire-ek', 'input-fire-ek-not');
     } catch(e) {
         alert("Fire kaydedilirken hata oluştu: " + e.message);
+    } finally {
+        unlock();
     }
 }
 
@@ -3890,6 +4460,7 @@ window.deleteFire = function(id) {
     if (!fire) return alert('Fire kaydı bulunamadı.');
     confirmAction('Bu fire/parça kaydı silinsin mi?', () => {
         db.fireler = db.fireler.filter(f => f.id !== id);
+        addAuditLog('Silindi', 'Fire / Parça', fire.id, `${fire.tur || 'fire'} / ${fire.cinsi || '-'}`);
         saveDB();
         renderFireler();
         showToast({ type: 'success', title: 'Fire kaydı silindi', message: `${fire.cinsi || 'Fire/parça'} kaydı kaldırıldı.` });
@@ -3934,12 +4505,13 @@ function renderFireler() {
         tbody.innerHTML = paginatedItems.length ? paginatedItems.map(f => `
             <tr>
                 ${renderSelectionCell('scraps', f.id)}
-                <td>${escapeHTML(f.cinsi || '-')}</td>
+                <td>${escapeHTML(f.cinsi || '-')}<br><span class="dashboard-muted-text">${f.tur === 'kullanilabilir' ? 'Kullanılabilir Parça' : (f.tur === 'hurda' ? 'Hurda' : 'Fire')}${f.miktar ? ` · ${escapeHTML(f.miktar)} adet` : ''}${f.kg ? ` · ${escapeHTML(f.kg)} kg` : ''}</span>${renderAttachmentBadge(f)}</td>
                 <td>${escapeHTML(f.mm || '-')} mm</td>
                 <td>${escapeHTML(f.en || '-')}x${escapeHTML(f.boy || '-')}</td>
-                <td><span class="badge ${f.sahibiTipi === 'musteri' ? 'info' : 'success'}">${escapeHTML(f.sahibi || 'Biz')}</span></td>
-                <td>${escapeHTML(f.tarih || '-')}</td>
+                <td><span class="badge ${f.sahibiTipi === 'musteri' ? 'info' : 'success'}">${escapeHTML(f.sahibi || 'Biz')}</span>${f.isEmriNo ? `<br><button type="button" class="linked-record-button" onclick="openOrderHistory('${f.isEmriId}')">${escapeHTML(f.isEmriNo)}</button>` : ''}</td>
+                <td>${escapeHTML(f.tarih || '-')}${f.neden ? `<br><span class="dashboard-muted-text">${escapeHTML(f.neden)}</span>` : ''}</td>
                 <td><div class="table-actions destructive-actions">
+                    <button class="btn btn-outline table-action-button" aria-label="Fire veya parça kaydını düzenle" title="Düzenle" onclick="openFireModal('${f.id}')"><i class="fa-solid fa-pen-to-square" aria-hidden="true"></i> Düzenle</button>
                     <button class="btn btn-danger table-action-button" aria-label="Fire veya parça kaydını sil" title="Sil" onclick="deleteFire(${f.id})"><i class="fa-solid fa-trash" aria-hidden="true"></i> Sil</button>
                 </div></td>
             </tr>
@@ -3989,12 +4561,13 @@ window.openAyarlarModal = function() {
     const resetButton = document.getElementById('btn-safe-reset');
     if (resetInput) resetInput.value = '';
     if (resetButton) resetButton.disabled = true;
+    renderUpdateState();
     setSettingsTab('company');
     openModal('modal-ayarlar');
 }
 
 window.setSettingsTab = function(tab = 'company') {
-    const validTab = ['company', 'numbering', 'backup'].includes(tab) ? tab : 'company';
+    const validTab = ['company', 'numbering', 'backup', 'update'].includes(tab) ? tab : 'company';
     document.querySelectorAll('#modal-ayarlar .settings-tab').forEach(button => {
         const active = button.id === `settings-tab-${validTab}`;
         button.classList.toggle('active', active);
@@ -4007,7 +4580,7 @@ window.setSettingsTab = function(tab = 'company') {
         panel.hidden = !active;
     });
     const footer = document.querySelector('#modal-ayarlar .settings-modal-footer');
-    if (footer) footer.hidden = validTab === 'backup';
+    if (footer) footer.hidden = validTab === 'backup' || validTab === 'update';
 };
 
 window.saveAyarlar = function() {
@@ -4328,6 +4901,22 @@ window.openDetayModal = function(id) {
     if (cari.bakiye < 0) durumClass = 'warning';
     else if (cari.bakiye > 0) durumClass = 'info';
     badgeContainer.innerHTML = `<span class="badge ${durumClass}" style="padding:8px 16px; font-size:14px;">${escapeHTML(cari.durum)}</span>`;
+
+    const details = document.getElementById('detay-cari-bilgileri');
+    if (details) {
+        const typeLabel = cari.cariTuru === 'tedarikci' ? 'Tedarikçi' : (['her_ikisi', 'musteri_tedarikci'].includes(cari.cariTuru) ? 'Müşteri + Tedarikçi' : 'Müşteri');
+        const facts = [
+            ['Cari tipi', typeLabel],
+            ['Yetkili', cari.yetkili || '-'],
+            ['Telefon', cari.tel || '-'],
+            ['E-posta', cari.email || '-'],
+            ['Vergi bilgisi', [cari.vergiDairesi, cari.vergiNo].filter(Boolean).join(' / ') || '-'],
+            ['Vade', `${Math.max(0, Number(cari.vadeGun) || 0)} gün`],
+            ['IBAN', cari.iban || '-'],
+            ['Adres', cari.adres || '-']
+        ];
+        details.innerHTML = facts.map(([label, value]) => `<div class="detail-fact"><span>${escapeHTML(label)}</span><strong>${escapeHTML(value)}</strong></div>`).join('');
+    }
 
     // Transactions
     const tbody = document.getElementById('detay-tbody');
@@ -4761,7 +5350,7 @@ function renderCariler() {
         '<option value="internal" style="font-weight:bold; color:var(--primary);">--- Kendi İşletmem (Firma İçi Üretim) ---</option>' +
         aktifCariler.map(c => `<option value="${c.id}">${escapeHTML(c.adi)} (${escapeHTML(c.kodu)})</option>`).join('');
     
-    ['quote-customer', 'input-stok-cari', 'input-fire-cari', 'input-fatura-firma', 'input-ceksenet-cari', 'input-plan-cari'].forEach(id => {
+    ['quote-customer', 'input-stok-cari', 'input-duzenle-stok-cari', 'input-fire-cari', 'input-fatura-firma', 'input-ceksenet-cari', 'input-plan-cari', 'input-gider-cari'].forEach(id => {
         const el = document.getElementById(id);
         if (el) {
             const currentVal = el.value;
@@ -5720,11 +6309,20 @@ window.openPersonnelModal = function(id = '') {
     document.getElementById('input-personel-maas').value = personel?.maas || '';
     document.getElementById('input-personel-giris').value = personel?.girisTarihiInput || '';
     document.getElementById('input-personel-durum').value = personel?.durum || 'Aktif';
+    document.getElementById('input-personel-bolum').value = personel?.bolum || '';
+    document.getElementById('input-personel-tc').value = personel?.tcKimlikNo || '';
+    document.getElementById('input-personel-sgk').value = personel?.sgkSicilNo || '';
+    document.getElementById('input-personel-ucret-tarih').value = personel?.ucretGecerlilikTarihiInput || '';
+    document.getElementById('input-personel-cikis').value = personel?.cikisTarihiInput || '';
+    document.getElementById('input-personel-cikis-nedeni').value = personel?.cikisNedeni || '';
     openModal('modal-personel');
     refreshDateInputDisplay();
 };
 
 window.savePersonel = function() {
+    const unlock = beginModalSubmit('modal-personel');
+    if (!unlock) return;
+    try {
     const id = document.getElementById('input-personel-id')?.value || '';
     const ad = plainText(document.getElementById('input-personel-ad')?.value || '');
     const tel = plainText(document.getElementById('input-personel-tel')?.value || '');
@@ -5733,31 +6331,55 @@ window.savePersonel = function() {
     const maas = roundMoney(parseFloat(document.getElementById('input-personel-maas')?.value || '0') || 0);
     const girisTarihiInput = document.getElementById('input-personel-giris')?.value || '';
     const durum = document.getElementById('input-personel-durum')?.value || 'Aktif';
+    const bolum = plainText(document.getElementById('input-personel-bolum')?.value || '');
+    const tcKimlikNo = plainText(document.getElementById('input-personel-tc')?.value || '');
+    const sgkSicilNo = plainText(document.getElementById('input-personel-sgk')?.value || '');
+    const ucretGecerlilikTarihiInput = document.getElementById('input-personel-ucret-tarih')?.value || '';
+    const cikisTarihiInput = document.getElementById('input-personel-cikis')?.value || '';
+    const cikisNedeni = plainText(document.getElementById('input-personel-cikis-nedeni')?.value || '');
 
-    if (!ad) return alert('Personel adı zorunludur.');
-    if (maas <= 0) return alert('Geçerli bir maaş / ücret girin.');
+    if (!validateModalFields('modal-personel', [
+        { id: 'input-personel-ad', test: value => !!plainText(value), message: 'Personel adı zorunludur.' },
+        { id: 'input-personel-maas', test: value => Number(value) > 0, message: 'Sıfırdan büyük maaş veya ücret girin.' },
+        { id: 'input-personel-tc', test: value => !plainText(value) || /^\d{11}$/.test(plainText(value)), message: 'T.C. kimlik numarası 11 rakam olmalıdır.' }
+    ])) return;
 
     const payload = {
         ad, tel: tel || '-', gorev: gorev || '-',
         maasTipi, maas, durum,
         girisTarihiInput,
-        girisTarihi: girisTarihiInput ? formatDateInputDisplay(girisTarihiInput) : ''
+        girisTarihi: girisTarihiInput ? formatDateInputDisplay(girisTarihiInput) : '',
+        bolum, tcKimlikNo, sgkSicilNo, cikisNedeni,
+        ucretGecerlilikTarihiInput,
+        ucretGecerlilikTarihi: ucretGecerlilikTarihiInput ? formatDateInputDisplay(ucretGecerlilikTarihiInput) : '',
+        cikisTarihiInput,
+        cikisTarihi: cikisTarihiInput ? formatDateInputDisplay(cikisTarihiInput) : ''
     };
 
+    let savedPersonel;
     if (id) {
         const personel = getPersonelById(id);
-        if (personel) Object.assign(personel, payload);
+        if (personel) {
+            Object.assign(personel, payload);
+            savedPersonel = personel;
+            addAuditLog('Güncellendi', 'Personel', personel.id, `${personel.kodu || '-'} / ${personel.ad} / ${personel.durum}`);
+        }
     } else {
-        db.personeller.push({
+        savedPersonel = {
             id: createRecordId(),
             kodu: `P-${String(getDBArray('personeller').length + 1).padStart(3, '0')}`,
             ...payload
-        });
+        };
+        db.personeller.push(savedPersonel);
+        addAuditLog('Oluşturuldu', 'Personel', savedPersonel.id, `${savedPersonel.kodu} / ${savedPersonel.ad}`);
     }
 
     saveDB();
     closeModal('modal-personel');
     renderPersonnel();
+    } finally {
+        unlock();
+    }
 };
 
 window.deletePersonel = function(id) {
@@ -5767,6 +6389,7 @@ window.deletePersonel = function(id) {
     if (hasPayroll) {
         confirmAction('Bu personelin maaş kayıtları var. Geçmişi korumak için durumu “Ayrıldı” yapılsın mı?', () => {
             personel.durum = 'Ayrıldı';
+            addAuditLog('Durum Değişti', 'Personel', personel.id, `${personel.ad} / Aktif -> Ayrıldı`);
             saveDB();
             renderPersonnel();
             showToast({ type: 'success', title: 'Personel güncellendi', message: `${personel.ad} “Ayrıldı” durumuna alındı.` });
@@ -5774,6 +6397,7 @@ window.deletePersonel = function(id) {
     } else {
         confirmAction('Bu personel kaydı silinsin mi?', () => {
             db.personeller = getDBArray('personeller').filter(p => String(p.id) !== String(id));
+            addAuditLog('Silindi', 'Personel', personel.id, `${personel.kodu || '-'} / ${personel.ad}`);
             saveDB();
             renderPersonnel();
             showToast({ type: 'success', title: 'Personel silindi', message: `${personel.ad} kaydı kaldırıldı.` });
@@ -5812,22 +6436,47 @@ window.togglePayrollPaymentAccount = function() {
 };
 
 window.savePuantaj = function() {
+    const unlock = beginModalSubmit('modal-puantaj');
+    if (!unlock) return;
+    try {
     const id = document.getElementById('input-puantaj-id')?.value || '';
     const data = getPayrollInputs();
     const personel = getPersonelById(data.personelId);
-    if (!personel) return alert('Personel seçin.');
-    if (!data.donem) return alert('Dönem ayı seçin.');
-    const numericValues = [data.geldiGun, data.izinGun, data.eksikGun, data.mesaiSaat, data.mesaiSaatUcreti, data.avans, data.prim];
-    if (numericValues.some(value => !Number.isFinite(value) || value < 0)) return alert('Puantaj, mesai, avans ve prim değerleri negatif olamaz.');
+    if (!validateModalFields('modal-puantaj', [
+        { id: 'input-puantaj-personel', test: value => !!getPersonelById(value), message: 'Personel seçin.' },
+        { id: 'input-puantaj-ay', test: value => /^\d{4}-\d{2}$/.test(value), message: 'Dönem ayını seçin.' }
+    ])) return;
+    if (!personel) return;
+    const numericFields = [
+        ['input-puantaj-gun', data.geldiGun],
+        ['input-puantaj-izin', data.izinGun],
+        ['input-puantaj-eksik', data.eksikGun],
+        ['input-puantaj-mesai-saat', data.mesaiSaat],
+        ['input-puantaj-mesai-ucret', data.mesaiSaatUcreti],
+        ['input-puantaj-avans', data.avans],
+        ['input-puantaj-prim', data.prim]
+    ];
+    const invalidNumeric = numericFields.find(([, value]) => !Number.isFinite(value) || value < 0);
+    if (invalidNumeric) {
+        setFieldError(invalidNumeric[0], 'Bu alan negatif olamaz. Sıfır veya daha büyük bir değer girin.');
+        document.getElementById(invalidNumeric[0])?.focus();
+        return;
+    }
     const [year, month] = data.donem.split('-').map(Number);
     const daysInMonth = new Date(year, month, 0).getDate();
     if (!Number.isFinite(daysInMonth) || data.geldiGun + data.izinGun + data.eksikGun > daysInMonth) {
-        return alert(`Geldiği, izinli ve raporlu günlerin toplamı bu ayın ${daysInMonth || 31} gününü aşamaz.`);
+        setFieldError('input-puantaj-gun', `Gün toplamı bu ayın ${daysInMonth || 31} gününü aşamaz.`);
+        setFieldError('input-puantaj-izin', 'Geldiği, izinli ve raporlu günleri birlikte azaltın.');
+        setFieldError('input-puantaj-eksik', 'Dönem gün sayısı aşıldı.');
+        document.getElementById('input-puantaj-gun')?.focus();
+        return;
     }
     const odendi = !!document.getElementById('input-puantaj-odendi')?.checked;
     const kasaId = document.getElementById('input-puantaj-kasa')?.value || '';
     if (odendi && !getDBArray('kasaHesaplari').some(kasa => kasa.id == kasaId)) {
-        return alert('Maaş ödendi olarak kaydedilecekse kasa/banka hesabı seçin.');
+        setFieldError('input-puantaj-kasa', 'Maaş ödendi olarak kaydedilecekse kasa/banka hesabı seçin.');
+        document.getElementById('input-puantaj-kasa')?.focus();
+        return;
     }
 
     const calc = calculatePayroll(personel, data);
@@ -5860,7 +6509,11 @@ window.savePuantaj = function() {
         Object.assign(record, payload);
     } else {
         const existing = getDBArray('personelPuantajlari').find(r => String(r.personelId) === String(personel.id) && r.donem === data.donem);
-        if (existing) return alert('Bu personel için seçilen dönemde zaten maaş / puantaj kaydı var. Mevcut kaydı düzenleyin.');
+        if (existing) {
+            setFieldError('input-puantaj-ay', 'Bu personelin seçilen dönemde kaydı var. Mevcut kaydı düzenleyin.');
+            document.getElementById('input-puantaj-ay')?.focus();
+            return;
+        }
         record = { id: createRecordId(), ...payload };
         db.personelPuantajlari.push(record);
     }
@@ -5881,6 +6534,9 @@ window.savePuantaj = function() {
         ], { message: `${personel.ad} / ${formatMonthLabel(record.donem)} / ${formatCurrency(record.netMaas)}` });
     } else {
         showToast({ type: 'success', title: 'Puantaj kaydedildi', message: `${personel.ad} için ödeme bekleyen maaş kaydı oluşturuldu.` });
+    }
+    } finally {
+        unlock();
     }
 };
 
@@ -6002,7 +6658,7 @@ function renderPersonnel() {
                     ${renderSelectionCell('personnel', `person-${personel.id}`)}
                     <td><strong>${escapeHTML(personel.ad || '-')}</strong><br><span class="dashboard-muted-text">${escapeHTML(personel.kodu || '')} ${personel.durum === 'Ayrıldı' ? ' / Ayrıldı' : ''}</span></td>
                     <td>${escapeHTML(personel.tel || '-')}</td>
-                    <td>${escapeHTML(personel.gorev || '-')}</td>
+                    <td>${escapeHTML(personel.gorev || '-')}<br><span class="dashboard-muted-text">${escapeHTML(personel.bolum || 'Bölüm belirtilmemiş')}</span></td>
                     <td>${escapeHTML(personel.maasTipi === 'gunluk' ? 'Günlük' : (personel.maasTipi === 'saatlik' ? 'Saatlik' : 'Aylık'))}<br><strong>${formatCurrency(personel.maas || 0)}</strong></td>
                     <td>${latest ? `${escapeHTML(formatMonthLabel(latest.donem))}<br><span class="dashboard-muted-text">${formatCurrency(latest.netMaas || 0)} / ${latest.odendi ? 'Ödendi' : 'Bekliyor'}</span>` : '<span class="dashboard-muted-text">Henüz kayıt yok</span>'}</td>
                     <td style="text-align:right;"><div class="table-actions">
@@ -6138,9 +6794,12 @@ function renderExpenses() {
                     ${renderSelectionCell('expenses', g.id)}
                     <td>${escapeHTML(g.tarih || '-')}</td>
                     <td>${katBadge}</td>
-                    <td>${escapeHTML(g.aciklama || '-')}</td>
+                    <td>${escapeHTML(g.aciklama || '-')}${g.belgeNo ? `<br><span class="dashboard-muted-text">${escapeHTML(g.belgeNo)}</span>` : ''}${renderAttachmentBadge(g)}</td>
                     <td class="text-alert">${formatCurrency(g.tutar)}</td>
-                    <td><div class="table-actions destructive-actions"><button class="btn btn-danger table-action-button" aria-label="Gider kaydını sil" title="Sil" onclick="deleteGider(${g.id})"><i class="fa-solid fa-trash" aria-hidden="true"></i> Sil</button></div></td>
+                    <td><div class="table-actions destructive-actions">
+                        ${g.kaynak === 'personel-maas' ? '' : `<button class="btn btn-outline table-action-button" aria-label="Gider kaydını düzenle" title="Düzenle" onclick="openGiderModal(${g.id})"><i class="fa-solid fa-pen" aria-hidden="true"></i> Düzenle</button>`}
+                        <button class="btn btn-danger table-action-button" aria-label="Gider kaydını sil" title="Sil" onclick="deleteGider(${g.id})"><i class="fa-solid fa-trash" aria-hidden="true"></i> Sil</button>
+                    </div></td>
                 </tr>`;
             });
         }
@@ -6195,49 +6854,132 @@ function getCategoryBadge(kategori) {
     return `<span class="badge warning"><i class="fa-solid ${icon}"></i> ${escapeHTML(kategori)}</span>`;
 }
 
+function calculateExpenseTax(amount, type, rate) {
+    const value = Math.max(0, roundMoney(amount || 0));
+    const taxRate = type === 'yok' ? 0 : Math.max(0, Math.min(100, Number(rate) || 0));
+    if (type === 'haric') {
+        const tax = roundMoney(value * taxRate / 100);
+        return { matrah: value, kdvTutari: tax, toplam: roundMoney(value + tax), kdvOrani: taxRate };
+    }
+    if (type === 'dahil' && taxRate > 0) {
+        const matrah = roundMoney(value / (1 + taxRate / 100));
+        return { matrah, kdvTutari: roundMoney(value - matrah), toplam: value, kdvOrani: taxRate };
+    }
+    return { matrah: value, kdvTutari: 0, toplam: value, kdvOrani: 0 };
+}
+
+window.updateExpenseTaxPreview = function() {
+    const amount = Number(document.getElementById('input-gider-tutar')?.value || 0);
+    const type = document.getElementById('input-gider-kdv-tipi')?.value || 'dahil';
+    const rate = Number(document.getElementById('input-gider-kdv-orani')?.value || 0);
+    const result = calculateExpenseTax(amount, type, rate);
+    const values = [['gider-preview-matrah', result.matrah], ['gider-preview-kdv', result.kdvTutari], ['gider-preview-total', result.toplam]];
+    values.forEach(([id, value]) => { const el = document.getElementById(id); if (el) el.textContent = formatCurrency(value); });
+    return result;
+};
+
 window.saveGider = function() {
+    const unlock = beginModalSubmit('modal-gider');
+    if (!unlock) return;
     try {
-        const kategori = document.getElementById('input-gider-kategori').value;
-        const aciklama = document.getElementById('input-gider-aciklama').value;
-        const tutar = parseFloat(document.getElementById('input-gider-tutar').value);
+        const id = document.getElementById('input-gider-id')?.value || '';
+        const existing = id ? getDBArray('giderler').find(item => String(item.id) === String(id)) : null;
+        if (existing?.kaynak === 'personel-maas') return alert('Maaş gideri Personel bölümünden düzenlenmelidir.');
+        const kategori = plainText(document.getElementById('input-gider-kategori').value);
+        const aciklama = plainText(document.getElementById('input-gider-aciklama').value);
+        const belgeTutari = Number(document.getElementById('input-gider-tutar').value);
         const kasaId = document.getElementById('input-gider-kasa')?.value || '';
+        const tarihInput = document.getElementById('input-gider-tarih')?.value || '';
+        const cariId = document.getElementById('input-gider-cari')?.value || '';
+        const belgeNo = plainText(document.getElementById('input-gider-belge-no')?.value || '');
+        const kdvTipi = document.getElementById('input-gider-kdv-tipi')?.value || 'dahil';
+        const tax = updateExpenseTaxPreview();
 
-        if (!Number.isFinite(tutar) || tutar <= 0) return alert('Geçerli bir tutar girin!');
-        if (!getDBArray('kasaHesaplari').some(kasa => kasa.id == kasaId)) return alert('Giderin ödendiği kasa/banka hesabını seçin.');
+        if (!validateModalFields('modal-gider', [
+            { id: 'input-gider-tarih', test: value => !!value, message: 'İşlem tarihini seçin.' },
+            { id: 'input-gider-kategori', test: value => !!plainText(value), message: 'Kategori zorunludur; uygun değilse “Diğer” yazın.' },
+            { id: 'input-gider-tutar', test: value => Number(value) > 0, message: 'Sıfırdan büyük geçerli bir tutar girin.' },
+            { id: 'input-gider-kasa', test: value => getDBArray('kasaHesaplari').some(kasa => kasa.id == value), message: 'Ödeme yapılan kasa veya bankayı seçin.' }
+        ])) return;
+        if (!Number.isFinite(belgeTutari) || tax.toplam <= 0) return;
+        const selectedFile = document.getElementById('input-gider-ek')?.files?.[0];
+        if (selectedFile && selectedFile.size > MAX_ATTACHMENT_SIZE) return setFieldError('input-gider-ek', 'Dosya en fazla 10 MB olabilir.');
+        const newAttachment = getAttachmentFromInputs('input-gider-ek', 'input-gider-ek-not');
+        const ek = existing?.ek && !selectedFile
+            ? { ...existing.ek, note: plainText(document.getElementById('input-gider-ek-not')?.value || existing.ek.note || '') }
+            : (newAttachment || existing?.ek || null);
+        const oldAmount = roundMoney(existing?.tutar || 0);
 
-        const gider = {
-            id: createRecordId(),
-            tarih: new Date().toLocaleDateString('tr-TR'),
+        const gider = existing || { id: createRecordId() };
+        if (existing?.kasaHareketId) reverseCashMovement(existing.kasaHareketId, `Gider güncellendi: ${existing.aciklama || existing.kategori || ''}`);
+        Object.assign(gider, {
+            tarih: toTRDateFromInput(tarihInput),
             kategori,
             aciklama,
-            tutar,
-            kasaId
-        };
+            belgeNo,
+            belgeTutari: roundMoney(belgeTutari),
+            kdvTipi,
+            kdvOrani: tax.kdvOrani,
+            matrah: tax.matrah,
+            kdvTutari: tax.kdvTutari,
+            tutar: tax.toplam,
+            kasaId,
+            cariId: cariId || null,
+            cariAdi: cariId ? (findCariByReference(cariId)?.adi || '') : '',
+            ek
+        });
         const cashMovement = addCashMovement(kasaId, {
-            tip: 'cikis',
-            tutar,
-            aciklama: `${kategori || 'Gider'} - ${aciklama || 'Gider ödemesi'}`,
-            kaynak: 'gider',
-            refId: gider.id
+            tip: 'cikis', tutar: gider.tutar,
+            aciklama: `${kategori} - ${aciklama || belgeNo || 'Gider ödemesi'}`,
+            kaynak: 'gider', refId: gider.id,
+            tarih: `${gider.tarih} 00:00`
         });
         gider.kasaHareketId = cashMovement?.id || null;
-        db.giderler.push(gider);
-        addAuditLog('Oluşturuldu', 'Gider', gider.id, `${kategori} / ${formatCurrency(tutar)}`);
+        if (!existing) db.giderler.push(gider);
+        scheduleAttachmentArchive(ek, 'Giderler', gider.cariAdi || kategori);
+        addAuditLog(existing ? 'Güncellendi' : 'Oluşturuldu', 'Gider', gider.id, `${kategori} / ${formatCurrency(gider.tutar)}`);
         saveDB();
         closeModal('modal-gider');
-        document.getElementById('input-gider-aciklama').value = '';
-        document.getElementById('input-gider-tutar').value = '';
-        showImpactSummary('Gider kaydedildi', [
-            { label: 'Kasa', value: -tutar },
-            { label: 'Gider', value: tutar }
-        ], { message: `${kategori || 'Gider'}${aciklama ? ` / ${aciklama}` : ''}` });
+        renderExpenses();
+        resetAttachmentInputs('input-gider-ek', 'input-gider-ek-not');
+        showImpactSummary(existing ? 'Gider güncellendi' : 'Gider kaydedildi', [
+            { label: 'Kasa', value: oldAmount - gider.tutar },
+            { label: 'Gider', value: gider.tutar - oldAmount }
+        ], { message: `${kategori}${aciklama ? ` / ${aciklama}` : ''}` });
     } catch(e) {
         alert('Gider kaydedilirken hata oluştu: ' + e.message);
+    } finally {
+        unlock();
     }
 }
 
-window.openGiderModal = function() {
-    populateKasaOptions();
+window.openGiderModal = function(id = '') {
+    const gider = id ? getDBArray('giderler').find(item => String(item.id) === String(id)) : null;
+    if (gider?.kaynak === 'personel-maas') return alert('Maaş gideri Personel bölümünden düzenlenmelidir.');
+    populateKasaOptions(gider?.kasaId || '');
+    const cariSelect = document.getElementById('input-gider-cari');
+    if (cariSelect) {
+        cariSelect.innerHTML = '<option value="">Cari bağlantısı yok</option>' + getDBArray('cariler').filter(c => !c.isPasif).map(c => `<option value="${c.id}">${escapeHTML(c.adi)} (${escapeHTML(c.kodu || '-')})</option>`).join('');
+    }
+    const set = (idValue, value) => { const el = document.getElementById(idValue); if (el) el.value = value ?? ''; };
+    set('input-gider-id', gider?.id || '');
+    set('input-gider-tarih', gider?.tarih ? toDateInputValue(parseTRDate(gider.tarih)) : toDateInputValue(new Date()));
+    set('input-gider-belge-no', gider?.belgeNo || '');
+    set('input-gider-kategori', gider?.kategori || '');
+    set('input-gider-tutar', gider?.belgeTutari ?? gider?.tutar ?? '');
+    set('input-gider-aciklama', gider?.aciklama || '');
+    set('input-gider-kasa', gider?.kasaId || '');
+    set('input-gider-cari', gider?.cariId || '');
+    set('input-gider-kdv-tipi', gider?.kdvTipi || 'dahil');
+    set('input-gider-kdv-orani', gider?.kdvOrani ?? 20);
+    resetAttachmentInputs('input-gider-ek', 'input-gider-ek-not');
+    set('input-gider-ek-not', gider?.ek?.note || '');
+    const title = document.querySelector('#modal-gider h3');
+    if (title) title.textContent = gider ? 'Gider Düzenle' : 'Gider Ekle';
+    const label = document.getElementById('gider-submit-label');
+    if (label) label.textContent = gider ? 'Gideri Güncelle' : 'Gideri Kaydet';
+    updateExpenseTaxPreview();
+    refreshDateInputDisplay();
     openModal('modal-gider');
 };
 
@@ -6262,6 +7004,7 @@ window.deleteGider = function(id) {
         addAuditLog('Silindi', 'Gider', gider.id, `${gider.kategori || ''} / ${formatCurrency(gider.tutar)}`);
         db.giderler = db.giderler.filter(g => g.id !== id);
         saveDB();
+        renderExpenses();
         showImpactSummary('Gider silindi', [
             { label: 'Gider', value: -gider.tutar },
             { label: 'Kasa', value: gider.tutar }
@@ -7639,21 +8382,24 @@ function updateDashboardChart() {
 }
 
 function populateKasaOptions(selectedId = '') {
-    const accountOptions = getDBArray('kasaHesaplari').map(kasa => `<option value="${kasa.id}">${escapeHTML(kasa.ad)} (${escapeHTML(kasa.kodu || '-')}) - ${formatCurrency(kasa.bakiye || 0)}</option>`).join('');
     const optionMap = {
-        'input-islem-kasa': '<option value="">Kasa/banka seçin...</option>' + accountOptions,
-        'input-kasa-hareket-hesap': '<option value="">Hesap seçin...</option>' + accountOptions,
-        'input-gider-kasa': '<option value="">Kasa/banka seçin...</option>' + accountOptions,
-        'input-plan-kasa': '<option value="">Ödeme sırasında seçilecek</option>' + accountOptions,
-        'input-puantaj-kasa': '<option value="">Kasa/banka seçin...</option>' + accountOptions,
-        'input-ceksenet-kasa': '<option value="">Durum kapatılırken seçilecek</option>' + accountOptions,
-        'input-settlement-kasa': '<option value="">Kasa/banka seçin...</option>' + accountOptions
+        'input-islem-kasa': 'Kasa/banka seçin...',
+        'input-kasa-hareket-hesap': 'Hesap seçin...',
+        'input-gider-kasa': 'Kasa/banka seçin...',
+        'input-plan-kasa': 'Ödeme sırasında seçilecek',
+        'input-puantaj-kasa': 'Kasa/banka seçin...',
+        'input-ceksenet-kasa': 'Durum kapatılırken seçilecek',
+        'input-settlement-kasa': 'Kasa/banka seçin...'
     };
-    Object.entries(optionMap).forEach(([id, options]) => {
+    Object.entries(optionMap).forEach(([id, placeholder]) => {
         const el = document.getElementById(id);
         if (el) {
             const current = selectedId || el.value;
-            el.innerHTML = options;
+            const accountOptions = getDBArray('kasaHesaplari')
+                .filter(kasa => isCashAccountActive(kasa) || String(kasa.id) === String(current))
+                .map(kasa => `<option value="${kasa.id}">${escapeHTML(kasa.ad)} (${escapeHTML(kasa.kodu || '-')}) - ${formatCurrency(kasa.bakiye || 0)}${isCashAccountActive(kasa) ? '' : ' · Pasif'}</option>`)
+                .join('');
+            el.innerHTML = `<option value="">${placeholder}</option>` + accountOptions;
             if (current) el.value = current;
         }
     });
@@ -7679,14 +8425,24 @@ function renderCashBank() {
     });
 
     if (accountBody) {
-        accountBody.innerHTML = accounts.map(account => `
-            <tr>
+        const orderedAccounts = [...accounts].sort((a, b) => Number(a.isPasif === true) - Number(b.isPasif === true));
+        accountBody.innerHTML = orderedAccounts.map(account => {
+            const usage = getCashAccountUsage(account.id);
+            const canDelete = (Number(account.bakiye) || 0) === 0 && usage.movements.length === 0 && usage.references.length === 0;
+            return `
+            <tr class="cash-account-row ${isCashAccountActive(account) ? '' : 'is-passive'}">
                 <td><span class="badge">${escapeHTML(account.kodu || '-')}</span></td>
                 <td><strong>${escapeHTML(account.ad || '-')}</strong></td>
                 <td><span class="badge ${account.tip === 'banka' ? 'primary' : 'success'}">${account.tip === 'banka' ? 'Banka' : 'Nakit'}</span></td>
                 <td style="text-align:right; font-weight:700; color:${(Number(account.bakiye) || 0) < 0 ? 'var(--alert)' : 'var(--success)'};">${formatCurrency(account.bakiye || 0)}</td>
+                <td><span class="badge ${isCashAccountActive(account) ? 'success' : 'neutral'}">${isCashAccountActive(account) ? 'Aktif' : 'Pasif'}</span></td>
+                <td style="text-align:right;"><div class="table-actions account-row-actions">
+                    <button class="btn btn-outline table-action-button" onclick="openKasaHesapModal('${account.id}')" aria-label="${escapeHTML(account.ad || 'Hesap')} hesabını düzenle" title="Düzenle"><i class="fa-solid fa-pen-to-square" aria-hidden="true"></i> Düzenle</button>
+                    <button class="btn btn-outline table-action-button" onclick="toggleKasaHesapStatus('${account.id}')" aria-label="${escapeHTML(account.ad || 'Hesap')} hesabını ${isCashAccountActive(account) ? 'pasife al' : 'aktifleştir'}" title="${isCashAccountActive(account) ? 'Pasife Al' : 'Aktifleştir'}"><i class="fa-solid ${isCashAccountActive(account) ? 'fa-box-archive' : 'fa-rotate-left'}" aria-hidden="true"></i> ${isCashAccountActive(account) ? 'Pasife Al' : 'Aktifleştir'}</button>
+                    ${canDelete ? `<button class="btn btn-danger table-action-button" onclick="deleteKasaHesap('${account.id}')" aria-label="${escapeHTML(account.ad || 'Hesap')} hesabını sil" title="Sil"><i class="fa-solid fa-trash-can" aria-hidden="true"></i> Sil</button>` : ''}
+                </div></td>
             </tr>
-        `).join('') || renderTableEmptyState(4, 'Kasa veya banka hesabı yok.', 'İlk hesabı ekleyerek finans hareketlerini takip etmeye başlayın.', 'fa-building-columns');
+        `}).join('') || renderTableEmptyState(6, 'Kasa veya banka hesabı yok.', 'İlk hesabı ekleyerek finans hareketlerini takip etmeye başlayın.', 'fa-building-columns');
     }
 
     if (movementBody) {
@@ -7708,15 +8464,24 @@ function renderCashBank() {
         const nextButton = document.getElementById('btn-cash-movements-next');
         if (previousButton) previousButton.disabled = window.pageCashMovements <= 1;
         if (nextButton) nextButton.disabled = window.pageCashMovements >= totalPages;
-        movementBody.innerHTML = paginatedMovements.map(record => `
+        movementBody.innerHTML = paginatedMovements.map(record => {
+            const isReversal = String(record.kaynak || '').endsWith('-ters-kayit');
+            const canUndo = record.kaynak === 'manuel' && !record.reversedBy && !isReversal;
+            const statusLabel = record.reversedBy ? 'Geri Alındı' : (isReversal ? 'Ters Kayıt' : (record.kaynak === 'manuel' ? 'Manuel' : 'Bağlı Kayıt'));
+            const statusClass = record.reversedBy ? 'neutral' : (isReversal ? 'warning' : (record.kaynak === 'manuel' ? 'info' : 'success'));
+            return `
             <tr>
                 <td>${escapeHTML(record.tarih || '-')}</td>
                 <td>${escapeHTML(record.kasaAdi || '-')}</td>
                 <td><span class="badge ${record.tip === 'giris' ? 'success' : 'alert'}">${record.tip === 'giris' ? 'Giriş' : 'Çıkış'}</span></td>
                 <td>${escapeHTML(record.aciklama || record.kaynak || '-')}</td>
                 <td style="text-align:right; font-weight:700; color:${record.tip === 'giris' ? 'var(--success)' : 'var(--alert)'};">${record.tip === 'giris' ? '+' : '-'}${formatCurrency(record.tutar || 0)}</td>
+                <td><span class="badge ${statusClass}">${statusLabel}</span></td>
+                <td style="text-align:right;"><div class="table-actions">
+                    ${canUndo ? `<button class="btn btn-outline table-action-button cash-undo-button" onclick="undoManualCashMovement('${record.id}')" aria-label="Manuel kasa hareketini geri al" title="Geri Al"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Geri Al</button>` : '<span class="cash-movement-locked" title="Bağlı kayıt kendi modülünden düzeltilir"><i class="fa-solid fa-lock" aria-hidden="true"></i></span>'}
+                </div></td>
             </tr>
-        `).join('') || renderTableEmptyState(5, 'Henüz kasa hareketi yok.', 'Tahsilat ve ödeme hareketleri burada görünecek.', 'fa-money-bill-transfer');
+        `}).join('') || renderTableEmptyState(7, 'Henüz kasa hareketi yok.', 'Tahsilat ve ödeme hareketleri burada görünecek.', 'fa-money-bill-transfer');
     }
     populateKasaOptions();
 }
@@ -7763,6 +8528,8 @@ window.closeSettlementModal = function() {
 window.confirmSettlement = function() {
     const kasaId = document.getElementById('input-settlement-kasa')?.value || '';
     if (!kasaId) return alert('Kasa/banka hesabı seçin.');
+    const account = getDBArray('kasaHesaplari').find(item => String(item.id) === String(kasaId));
+    if (!isCashAccountActive(account)) return alert('Pasif hesapla yeni tahsilat veya ödeme yapılamaz. Aktif bir hesap seçin.');
     const action = pendingSettlementAction;
     if (!action) return closeSettlementModal();
     pendingSettlementAction = null;
@@ -7803,7 +8570,7 @@ function renderPaymentPlans() {
                 <td style="text-align:right; font-weight:700;">${formatCurrency(plan.tutar || 0)}</td>
                 <td><span class="badge ${plan.durum === 'odendi' ? 'success' : (isOverdue ? 'alert' : 'warning')}">${plan.durum === 'odendi' ? 'Ödendi' : (isOverdue ? 'Gecikti' : 'Bekliyor')}</span></td>
                 <td style="text-align:right;"><div class="table-actions">
-                    ${plan.durum === 'beklemede' ? `<button class="btn btn-outline table-action-button" onclick="openPaymentPlanSettlement('${plan.id}')"><i class="fa-solid fa-check" aria-hidden="true"></i> Ödendi İşle</button>` : ''}
+                    ${plan.durum === 'beklemede' ? `<button class="btn btn-outline table-action-button" onclick="openPaymentPlanModal('', '${plan.id}')"><i class="fa-solid fa-pen-to-square" aria-hidden="true"></i> Düzenle</button><button class="btn btn-outline table-action-button" onclick="openPaymentPlanSettlement('${plan.id}')"><i class="fa-solid fa-check" aria-hidden="true"></i> Ödendi İşle</button>` : `<button class="btn btn-outline table-action-button" onclick="undoPaymentPlanSettlement('${plan.id}')"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Ödemeyi Geri Al</button>`}
                     <button class="btn btn-danger table-action-button" onclick="deletePaymentPlan('${plan.id}')"><i class="fa-solid fa-trash-can" aria-hidden="true"></i> Sil</button>
                 </div></td>
             </tr>
@@ -7815,11 +8582,12 @@ function ensurePaymentPlanModal() {
     if (document.getElementById('modal-payment-plan')) return;
     const modal = document.createElement('div');
     modal.id = 'modal-payment-plan';
-    modal.className = 'modal-overlay';
-    modal.innerHTML = `
-        <div class="modal-content glass-panel" style="max-width:560px;">
+        modal.className = 'modal-overlay';
+        modal.innerHTML = `
+            <div class="modal-content glass-panel" style="max-width:560px;">
+            <input type="hidden" id="input-plan-id">
             <div class="flex-between mb-4">
-                <h3>Vade Planı Ekle</h3>
+                <h3 id="modal-plan-title">Vade Planı Ekle</h3>
                 <button class="btn-close" onclick="closeModal('modal-payment-plan')"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="form-group"><label>Cari</label><select id="input-plan-cari" class="form-control"></select></div>
@@ -7830,25 +8598,42 @@ function ensurePaymentPlanModal() {
             <div class="form-group"><label>Açıklama</label><input id="input-plan-aciklama" class="form-control" placeholder="Örn: Kalan ödeme sözü"></div>
             <div class="form-group"><label>Tutar</label><input id="input-plan-tutar" type="number" class="form-control" placeholder="0"></div>
             <div class="form-group"><label>Tercih Edilen Kasa / Banka</label><select id="input-plan-kasa" class="form-control"></select></div>
-            <button class="btn btn-primary w-100 mt-4" onclick="savePaymentPlan()">Kaydet</button>
+            <button id="btn-plan-save" class="btn btn-primary w-100 mt-4" onclick="savePaymentPlan()">Kaydet</button>
         </div>`;
     document.body.appendChild(modal);
 }
 
-window.openPaymentPlanModal = function(cariId = '') {
+window.openPaymentPlanModal = function(cariId = '', planId = '') {
     ensurePaymentPlanModal();
+    const plan = planId ? getDBArray('odemePlanlari').find(item => String(item.id) === String(planId)) : null;
+    if (plan && plan.durum !== 'beklemede') {
+        return showToast({ type: 'warning', title: 'Ödenmiş plan doğrudan düzenlenemez', message: 'Önce “Ödemeyi Geri Al” ile planı beklemeye alın.' });
+    }
     const select = document.getElementById('input-plan-cari');
-    select.innerHTML = '<option value="">Cari seçin...</option>' + getDBArray('cariler').filter(c => !c.isPasif).map(c => `<option value="${c.id}">${escapeHTML(c.adi)} (${escapeHTML(c.kodu || '-')})</option>`).join('');
-    if (cariId) select.value = cariId;
-    document.getElementById('input-plan-tip').value = 'tahsilat';
-    document.getElementById('input-plan-vade').value = toDateInputValue(new Date());
-    document.getElementById('input-plan-aciklama').value = '';
-    document.getElementById('input-plan-tutar').value = '';
-    populateKasaOptions();
+    const selectedCariId = plan?.cariId || cariId;
+    select.innerHTML = '<option value="">Cari seçin...</option>' + getDBArray('cariler')
+        .filter(c => !c.isPasif || String(c.id) === String(selectedCariId))
+        .map(c => `<option value="${c.id}">${escapeHTML(c.adi)} (${escapeHTML(c.kodu || '-')})</option>`).join('');
+    document.getElementById('input-plan-id').value = plan?.id || '';
+    if (selectedCariId) select.value = selectedCariId;
+    document.getElementById('input-plan-tip').value = plan?.tip || 'tahsilat';
+    document.getElementById('input-plan-vade').value = plan ? toDateInputValue(parseTRDate(plan.vadeTarihi)) : toDateInputValue(new Date());
+    document.getElementById('input-plan-aciklama').value = plan?.aciklama || '';
+    document.getElementById('input-plan-tutar').value = plan?.tutar || '';
+    document.getElementById('modal-plan-title').textContent = plan ? 'Vade Planını Düzenle' : 'Vade Planı Ekle';
+    document.getElementById('btn-plan-save').textContent = plan ? 'Değişiklikleri Kaydet' : 'Planı Kaydet';
+    populateKasaOptions(plan?.kasaId || '');
+    if (plan?.kasaId) document.getElementById('input-plan-kasa').value = plan.kasaId;
+    refreshDateInputDisplay();
     openModal('modal-payment-plan');
 };
 
 window.savePaymentPlan = function() {
+    const unlock = beginModalSubmit('modal-payment-plan');
+    if (!unlock) return;
+    try {
+    const id = document.getElementById('input-plan-id')?.value || '';
+    const existing = id ? getDBArray('odemePlanlari').find(item => String(item.id) === String(id)) : null;
     const cariId = document.getElementById('input-plan-cari')?.value || '';
     const cari = findCariByReference(cariId);
     const tip = document.getElementById('input-plan-tip')?.value || 'tahsilat';
@@ -7856,26 +8641,37 @@ window.savePaymentPlan = function() {
     const aciklama = plainText(document.getElementById('input-plan-aciklama')?.value || '');
     const tutar = roundMoney(parseFloat(document.getElementById('input-plan-tutar')?.value || '0') || 0);
     const kasaId = document.getElementById('input-plan-kasa')?.value || '';
-    if (!cari) return alert('Vade planı için cari seçin.');
-    if (!document.getElementById('input-plan-vade')?.value) return alert('Vade tarihi seçin.');
-    if (tutar <= 0) return alert('Geçerli tutar girin.');
-    db.odemePlanlari.push({
+    if (!validateModalFields('modal-payment-plan', [
+        { id: 'input-plan-cari', test: value => !!findCariByReference(value), message: 'Vade planı için cari seçin.' },
+        { id: 'input-plan-vade', test: value => !!value, message: 'Vade tarihini seçin.' },
+        { id: 'input-plan-tutar', test: value => Number(value) > 0, message: 'Sıfırdan büyük geçerli bir tutar girin.' }
+    ])) return;
+    if (!cari) return;
+    if (existing && existing.durum !== 'beklemede') return alert('Ödenmiş plan doğrudan düzenlenemez. Önce ödemeyi geri alın.');
+    const plan = existing || {
         id: createRecordId(),
         planNo: generateSerialNo('odemePlani'),
+        durum: 'beklemede',
+        tarih: new Date().toLocaleDateString('tr-TR')
+    };
+    Object.assign(plan, {
         cariId: cari.id,
         firma: cari.adi,
         tip,
         vadeTarihi: vade,
         aciklama,
         tutar,
-        kasaId: kasaId || null,
-        durum: 'beklemede',
-        tarih: new Date().toLocaleDateString('tr-TR')
+        kasaId: kasaId || null
     });
-    const savedPlan = db.odemePlanlari[db.odemePlanlari.length - 1];
-    addAuditLog('Oluşturuldu', 'Vade Planı', savedPlan.id, `${savedPlan.planNo} / ${savedPlan.firma} / ${formatCurrency(savedPlan.tutar)}`);
+    if (!existing) db.odemePlanlari.push(plan);
+    addAuditLog(existing ? 'Güncellendi' : 'Oluşturuldu', 'Vade Planı', plan.id, `${plan.planNo} / ${plan.firma} / ${formatCurrency(plan.tutar)}`);
     saveDB();
     closeModal('modal-payment-plan');
+    renderPaymentPlans();
+    showToast({ type: 'success', title: existing ? 'Vade planı güncellendi' : 'Vade planı oluşturuldu', message: `${plan.planNo} / ${plan.firma}` });
+    } finally {
+        unlock();
+    }
 };
 
 window.openPaymentPlanSettlement = function(id) {
@@ -7896,6 +8692,7 @@ window.markPaymentPlanPaid = function(id, kasaId = '') {
     if (!cari) return alert('Cari bulunamadı, vade kapatılamadı.');
     const kasa = getDBArray('kasaHesaplari').find(item => item.id == kasaId);
     if (!kasa) return alert('Kasa/banka hesabı seçilmeden vade kapatılamaz.');
+    if (!isCashAccountActive(kasa)) return alert('Pasif hesapla vade kapatılamaz. Aktif bir hesap seçin.');
     const delta = plan.tip === 'tahsilat' ? -plan.tutar : plan.tutar;
     const hareket = addCariMovement(cari, {
         tip: plan.tip === 'tahsilat' ? `Vade Tahsilatı (${plan.planNo})` : `Vade Ödemesi (${plan.planNo})`,
@@ -7919,10 +8716,47 @@ window.markPaymentPlanPaid = function(id, kasaId = '') {
     plan.kasaHareketId = cashMovement?.id || null;
     addAuditLog('Kapatıldı', 'Vade Planı', plan.id, `${plan.planNo} / ${plan.firma} / ${formatCurrency(plan.tutar)}`);
     saveDB();
+    renderPaymentPlans();
     showImpactSummary(plan.tip === 'tahsilat' ? 'Vade tahsil edildi' : 'Vade ödemesi yapıldı', [
         { label: 'Cari', value: delta },
         { label: 'Kasa', value: plan.tip === 'tahsilat' ? plan.tutar : -plan.tutar }
     ], { message: `${plan.planNo} / ${plan.firma}` });
+};
+
+window.undoPaymentPlanSettlement = function(id) {
+    const plan = getDBArray('odemePlanlari').find(item => String(item.id) === String(id));
+    if (!plan) return alert('Vade planı bulunamadı.');
+    if (plan.durum !== 'odendi') return alert('Yalnızca kapatılmış bir vade planı geri alınabilir.');
+    const cari = findCariByReference(plan.cariId, plan.firma);
+    if (!cari) return alert('Cari bulunamadığı için ödeme geri alınamadı.');
+    confirmAction(`${plan.planNo} numaralı ${formatCurrency(plan.tutar)} tutarlı ödeme/tahsilat geri alınsın mı?\n\nCari ve kasa etkileri ters kayıtla düzeltilecek; plan yeniden beklemeye alınacak.`, () => {
+        const originalDelta = plan.tip === 'tahsilat' ? -plan.tutar : plan.tutar;
+        const originalCariMovement = getDBArray('islemler').find(item => String(item.id) === String(plan.cariIslemId));
+        const cashReversal = plan.kasaHareketId ? reverseCashMovement(plan.kasaHareketId, `Vade ödemesi geri alındı: ${plan.planNo}`) : null;
+        if (plan.kasaHareketId && !cashReversal) return alert('Kasa/banka ters kaydı oluşturulamadı.');
+        const cariReversal = addCariMovement(cari, {
+            tip: `Vade Ödemesi Geri Alındı (${plan.planNo})`,
+            aciklama: 'Vade planı yeniden beklemeye alındı.',
+            tutar: plan.tutar,
+            bakiyeDegisimi: -originalDelta,
+            isSuccess: false,
+            isGelir: false,
+            reversalOf: originalCariMovement?.id || null
+        });
+        if (originalCariMovement && cariReversal) originalCariMovement.reversedBy = cariReversal.id;
+        plan.sonGeriAlmaTarihi = new Date().toLocaleString('tr-TR');
+        plan.durum = 'beklemede';
+        plan.kapanisTarihi = null;
+        plan.cariIslemId = null;
+        plan.kasaHareketId = null;
+        addAuditLog('Geri Alındı', 'Vade Planı Ödemesi', plan.id, `${plan.planNo} / ${plan.firma} / ${formatCurrency(plan.tutar)}`);
+        saveDB();
+        renderPaymentPlans();
+        showImpactSummary('Vade ödemesi geri alındı', [
+            { label: 'Cari', value: -originalDelta },
+            { label: 'Kasa', value: plan.tip === 'tahsilat' ? -plan.tutar : plan.tutar }
+        ], { message: 'Plan yeniden beklemede; artık düzenlenebilir.' });
+    }, { title: 'Vade Ödemesini Geri Al', confirmLabel: 'Ters Kayıt Oluştur' });
 };
 
 window.deletePaymentPlan = function(id) {
@@ -7946,6 +8780,7 @@ window.deletePaymentPlan = function(id) {
         addAuditLog('Silindi', 'Vade Planı', plan.id, `${plan.planNo} / ${plan.firma} / ${plan.durum}`);
         db.odemePlanlari = getDBArray('odemePlanlari').filter(p => String(p.id) !== String(id));
         saveDB();
+        renderPaymentPlans();
         const impacts = plan.durum === 'odendi'
             ? [
                 { label: 'Cari', value: -originalDelta },
@@ -7963,14 +8798,15 @@ function ensureKasaModals() {
         modal.className = 'modal-overlay';
         modal.innerHTML = `
             <div class="modal-content glass-panel" style="max-width:520px;">
+                <input type="hidden" id="input-kasa-id">
                 <div class="flex-between mb-4">
-                    <h3>Kasa / Banka Hesabı Ekle</h3>
+                    <h3 id="modal-kasa-hesap-title">Kasa / Banka Hesabı Ekle</h3>
                     <button class="btn-close" onclick="closeModal('modal-kasa-hesap')"><i class="fa-solid fa-xmark"></i></button>
                 </div>
                 <div class="form-group"><label>Hesap Adı</label><input id="input-kasa-ad" class="form-control" placeholder="Örn: İş Bankası"></div>
                 <div class="form-group"><label>Tip</label><select id="input-kasa-tip" class="form-control"><option value="nakit">Nakit Kasa</option><option value="banka">Banka</option></select></div>
-                <div class="form-group"><label>Açılış Bakiyesi</label><input id="input-kasa-bakiye" type="number" class="form-control" placeholder="0"></div>
-                <button class="btn btn-primary w-100 mt-4" onclick="saveKasaHesap()">Kaydet</button>
+                <div id="kasa-opening-balance-group" class="form-group"><label>Açılış Bakiyesi</label><input id="input-kasa-bakiye" type="number" class="form-control" placeholder="0"><small class="field-help">Açılış bakiyesi ayrı bir hareket olarak kaydedilir; kayıt geçmişi korunur.</small></div>
+                <button id="btn-kasa-hesap-save" class="btn btn-primary w-100 mt-4" onclick="saveKasaHesap()">Kaydet</button>
             </div>`;
         document.body.appendChild(modal);
     }
@@ -7986,61 +8822,170 @@ function ensureKasaModals() {
                 </div>
                 <div class="form-group"><label>Hesap</label><select id="input-kasa-hareket-hesap" class="form-control"></select></div>
                 <div class="form-group"><label>Tip</label><select id="input-kasa-hareket-tip" class="form-control"><option value="giris">Giriş</option><option value="cikis">Çıkış</option></select></div>
+                <div class="form-group"><label>İşlem Tarihi</label><input id="input-kasa-hareket-tarih" type="date" class="form-control account-date-input"></div>
                 <div class="form-group"><label>Açıklama</label><input id="input-kasa-hareket-aciklama" class="form-control" placeholder="Örn: Elden tahsilat"></div>
                 <div class="form-group"><label>Tutar</label><input id="input-kasa-hareket-tutar" type="number" class="form-control" placeholder="0"></div>
+                <div class="modal-impact-note"><i class="fa-solid fa-circle-info" aria-hidden="true"></i><span>Yanlış girilen manuel hareketler silinmez; hareket listesinden ters kayıtla geri alınır.</span></div>
                 <button class="btn btn-primary w-100 mt-4" onclick="saveKasaHareket()">Kaydet</button>
             </div>`;
         document.body.appendChild(modal);
     }
 }
 
-window.openKasaHesapModal = function() {
+window.openKasaHesapModal = function(id = '') {
     ensureKasaModals();
-    document.getElementById('input-kasa-ad').value = '';
-    document.getElementById('input-kasa-tip').value = 'nakit';
+    const account = id ? getDBArray('kasaHesaplari').find(item => String(item.id) === String(id)) : null;
+    document.getElementById('input-kasa-id').value = account?.id || '';
+    document.getElementById('input-kasa-ad').value = account?.ad || '';
+    document.getElementById('input-kasa-tip').value = account?.tip || 'nakit';
     document.getElementById('input-kasa-bakiye').value = '';
+    document.getElementById('modal-kasa-hesap-title').textContent = account ? 'Kasa / Banka Hesabını Düzenle' : 'Kasa / Banka Hesabı Ekle';
+    document.getElementById('btn-kasa-hesap-save').textContent = account ? 'Değişiklikleri Kaydet' : 'Hesabı Kaydet';
+    document.getElementById('kasa-opening-balance-group').hidden = !!account;
     openModal('modal-kasa-hesap');
 };
 
 window.saveKasaHesap = function() {
+    const unlock = beginModalSubmit('modal-kasa-hesap');
+    if (!unlock) return;
+    try {
+    const id = document.getElementById('input-kasa-id')?.value || '';
+    const existing = id ? getDBArray('kasaHesaplari').find(item => String(item.id) === String(id)) : null;
     const ad = plainText(document.getElementById('input-kasa-ad')?.value || '');
     const tip = document.getElementById('input-kasa-tip')?.value || 'nakit';
     const rawBakiye = parseFloat(document.getElementById('input-kasa-bakiye')?.value || '0');
     const bakiye = roundMoney(rawBakiye || 0);
-    if (!ad) return alert('Hesap adı zorunludur.');
-    if (!Number.isFinite(rawBakiye)) return alert('Geçerli bir açılış bakiyesi girin.');
-    const account = { id: createRecordId(), kodu: generateSerialNo('kasa'), ad, tip, bakiye, tarih: new Date().toLocaleDateString('tr-TR') };
+    if (!validateModalFields('modal-kasa-hesap', [
+        { id: 'input-kasa-ad', test: value => !!plainText(value), message: 'Hesap adı zorunludur.' },
+        { id: 'input-kasa-bakiye', test: () => !!existing || Number.isFinite(rawBakiye), message: 'Geçerli bir açılış bakiyesi girin.' }
+    ])) return;
+
+    if (existing) {
+        const oldName = existing.ad;
+        existing.ad = ad;
+        existing.tip = tip;
+        existing.guncellemeTarihi = new Date().toLocaleString('tr-TR');
+        getDBArray('kasaHareketleri')
+            .filter(item => String(item.kasaId) === String(existing.id))
+            .forEach(item => { item.kasaAdi = ad; });
+        addAuditLog('Güncellendi', 'Kasa / Banka Hesabı', existing.id, `${oldName} -> ${ad}`);
+        saveDB();
+        closeModal('modal-kasa-hesap');
+        renderCashBank();
+        showToast({ type: 'success', title: 'Hesap güncellendi', message: `${ad} bilgileri kaydedildi.` });
+        return;
+    }
+
+    const account = { id: createRecordId(), kodu: generateSerialNo('kasa'), ad, tip, bakiye, isPasif: false, tarih: new Date().toLocaleDateString('tr-TR') };
     db.kasaHesaplari.push(account);
     if (bakiye !== 0) {
         db.kasaHareketleri.push({ id: createRecordId(), kasaId: account.id, kasaAdi: account.ad, tip: bakiye >= 0 ? 'giris' : 'cikis', tutar: Math.abs(bakiye), aciklama: 'Açılış bakiyesi', kaynak: 'kasa-acilis', tarih: new Date().toLocaleString('tr-TR') });
     }
+    addAuditLog('Oluşturuldu', 'Kasa / Banka Hesabı', account.id, `${account.kodu} / ${account.ad} / ${formatCurrency(account.bakiye)}`);
     saveDB();
     closeModal('modal-kasa-hesap');
+    renderCashBank();
+    showImpactSummary('Kasa / banka hesabı oluşturuldu', bakiye === 0 ? [] : [{ label: 'Kasa', value: bakiye }], { message: `${account.kodu} / ${account.ad}` });
+    } finally {
+        unlock();
+    }
+};
+
+window.toggleKasaHesapStatus = function(id) {
+    const account = getDBArray('kasaHesaplari').find(item => String(item.id) === String(id));
+    if (!account) return alert('Kasa/banka hesabı bulunamadı.');
+    if (!isCashAccountActive(account)) {
+        account.isPasif = false;
+        account.aktiflestirmeTarihi = new Date().toLocaleString('tr-TR');
+        addAuditLog('Aktifleştirildi', 'Kasa / Banka Hesabı', account.id, `${account.kodu} / ${account.ad}`);
+        saveDB();
+        renderCashBank();
+        return showToast({ type: 'success', title: 'Hesap aktifleştirildi', message: `${account.ad} yeniden seçim listelerinde kullanılabilir.` });
+    }
+    if (roundMoney(account.bakiye || 0) !== 0) {
+        return showToast({ type: 'warning', title: 'Hesap pasife alınamadı', message: `Önce ${formatCurrency(account.bakiye || 0)} bakiyeyi kapatın veya hatalı hareketi geri alın.` });
+    }
+    const activeCount = getDBArray('kasaHesaplari').filter(isCashAccountActive).length;
+    if (activeCount <= 1) return alert('En az bir aktif kasa/banka hesabı kalmalıdır.');
+    confirmAction(`${account.ad} pasife alınsın mı?\n\nGeçmiş hareketler korunacak; hesap yeni işlemlerde seçilemeyecek.`, () => {
+        account.isPasif = true;
+        account.pasifTarihi = new Date().toLocaleString('tr-TR');
+        addAuditLog('Pasife Alındı', 'Kasa / Banka Hesabı', account.id, `${account.kodu} / ${account.ad}`);
+        saveDB();
+        renderCashBank();
+        showToast({ type: 'success', title: 'Hesap pasife alındı', message: 'Geçmiş hareketler ve denetim izi korundu.' });
+    }, { title: 'Hesabı Pasife Al', confirmLabel: 'Pasife Al' });
+};
+
+window.deleteKasaHesap = function(id) {
+    const account = getDBArray('kasaHesaplari').find(item => String(item.id) === String(id));
+    if (!account) return alert('Kasa/banka hesabı bulunamadı.');
+    const usage = getCashAccountUsage(account.id);
+    if (roundMoney(account.bakiye || 0) !== 0 || usage.movements.length || usage.references.length) {
+        return showToast({ type: 'warning', title: 'Hesap silinemez', message: 'Bakiyesi veya işlem geçmişi olan hesaplar silinmez; bakiye kapatıldıktan sonra pasife alınır.' });
+    }
+    if (isCashAccountActive(account) && getDBArray('kasaHesaplari').filter(isCashAccountActive).length <= 1) {
+        return alert('En az bir aktif kasa/banka hesabı kalmalıdır.');
+    }
+    confirmAction(`${account.ad} kalıcı olarak silinsin mi?\n\nBu hesap hiç kullanılmadığı için kayıt geçmişi etkilenmeyecek.`, () => {
+        db.kasaHesaplari = getDBArray('kasaHesaplari').filter(item => String(item.id) !== String(account.id));
+        addAuditLog('Silindi', 'Kasa / Banka Hesabı', account.id, `${account.kodu} / ${account.ad}`);
+        saveDB();
+        renderCashBank();
+        showToast({ type: 'success', title: 'Kullanılmayan hesap silindi', message: `${account.ad} kaldırıldı.` });
+    }, { title: 'Kullanılmayan Hesabı Sil', confirmLabel: 'Hesabı Sil' });
 };
 
 window.openKasaHareketModal = function() {
     ensureKasaModals();
     populateKasaOptions();
+    const firstActiveAccount = getDBArray('kasaHesaplari').find(isCashAccountActive);
+    document.getElementById('input-kasa-hareket-hesap').value = firstActiveAccount?.id || '';
     document.getElementById('input-kasa-hareket-tip').value = 'giris';
+    document.getElementById('input-kasa-hareket-tarih').value = toDateInputValue(new Date());
     document.getElementById('input-kasa-hareket-aciklama').value = '';
     document.getElementById('input-kasa-hareket-tutar').value = '';
+    refreshDateInputDisplay();
     openModal('modal-kasa-hareket');
 };
 
 window.saveKasaHareket = function() {
     const kasaId = document.getElementById('input-kasa-hareket-hesap')?.value || '';
     const tip = document.getElementById('input-kasa-hareket-tip')?.value || 'giris';
+    const tarihValue = document.getElementById('input-kasa-hareket-tarih')?.value || '';
     const aciklama = plainText(document.getElementById('input-kasa-hareket-aciklama')?.value || '');
     const tutar = parseFloat(document.getElementById('input-kasa-hareket-tutar')?.value || '0');
     if (!kasaId) return alert('Kasa/banka hesabı seçin.');
+    if (!tarihValue) return alert('İşlem tarihini seçin.');
     if (!Number.isFinite(tutar) || tutar <= 0) return alert('Geçerli tutar girin.');
-    const movement = addCashMovement(kasaId, { tip, tutar, aciklama, kaynak: 'manuel' });
+    const account = getDBArray('kasaHesaplari').find(item => String(item.id) === String(kasaId));
+    if (!isCashAccountActive(account)) return alert('Pasif bir hesaba yeni hareket eklenemez.');
+    const movement = addCashMovement(kasaId, { tip, tutar, aciklama, kaynak: 'manuel', tarih: toTRDateFromInput(tarihValue) });
     if (!movement) return alert('Kasa/banka hareketi oluşturulamadı.');
+    addAuditLog('Oluşturuldu', 'Manuel Kasa Hareketi', movement.id, `${movement.kasaAdi} / ${tip === 'giris' ? 'Giriş' : 'Çıkış'} / ${formatCurrency(tutar)}`);
     saveDB();
     closeModal('modal-kasa-hareket');
+    renderCashBank();
     showImpactSummary('Kasa hareketi kaydedildi', [
         { label: 'Kasa', value: tip === 'giris' ? tutar : -tutar }
     ], { message: aciklama || (tip === 'giris' ? 'Manuel para girişi' : 'Manuel para çıkışı') });
+};
+
+window.undoManualCashMovement = function(id) {
+    const movement = getDBArray('kasaHareketleri').find(item => String(item.id) === String(id));
+    if (!movement) return alert('Kasa/banka hareketi bulunamadı.');
+    if (movement.kaynak !== 'manuel') return alert('Bağlı hareketler oluşturulduğu modülden düzeltilmelidir.');
+    if (movement.reversedBy) return alert('Bu hareket daha önce geri alınmış.');
+    confirmAction(`${movement.kasaAdi || 'Hesap'} üzerindeki ${formatCurrency(movement.tutar || 0)} tutarlı ${movement.tip === 'giris' ? 'giriş' : 'çıkış'} geri alınsın mı?\n\nHareket silinmeyecek; denetim izi için ters kayıt oluşturulacak.`, () => {
+        const reversal = reverseCashMovement(movement.id, 'Manuel kasa hareketi geri alındı');
+        if (!reversal) return alert('Ters kasa hareketi oluşturulamadı.');
+        addAuditLog('Geri Alındı', 'Manuel Kasa Hareketi', movement.id, `${movement.kasaAdi} / ${formatCurrency(movement.tutar || 0)}`);
+        saveDB();
+        renderCashBank();
+        showImpactSummary('Manuel kasa hareketi geri alındı', [
+            { label: 'Kasa', value: movement.tip === 'giris' ? -movement.tutar : movement.tutar }
+        ], { message: 'Orijinal hareket ve ters kayıt birlikte korunuyor.' });
+    }, { title: 'Manuel Hareketi Geri Al', confirmLabel: 'Ters Kayıt Oluştur' });
 };
 
 function renderAll() {
@@ -8209,6 +9154,7 @@ window.switchView = function(target) {
                     case 'profitability': renderProfitability(); break;
                     case 'cashbank': renderCashBank(); break;
                     case 'personnel': renderPersonnel(); break;
+                    case 'audit': renderAuditTrail(); break;
                     case 'cheques': renderCekSenetler(); break;
                     case 'invoices': renderInvoices(); break;
                 }
@@ -8444,7 +9390,7 @@ function populateCekSenetCariOptions(selectedId = '') {
     if (!select) return;
     const current = selectedId || select.value;
     select.innerHTML = '<option value="">Cari seçin...</option>' + getDBArray('cariler')
-        .filter(c => !c.isPasif)
+        .filter(c => !c.isPasif || String(c.id) === String(current))
         .map(c => `<option value="${c.id}">${escapeHTML(c.adi)} (${escapeHTML(c.kodu || '-')})</option>`)
         .join('');
     if (current && getDBArray('cariler').some(c => c.id == current)) select.value = current;
@@ -8461,7 +9407,7 @@ function syncCekSenetCariEffect(record, kasaId = '') {
 
     if (shouldReflect && !alreadyReflected) {
         const kasa = getDBArray('kasaHesaplari').find(item => item.id == (kasaId || record.kasaId));
-        if (!kasa) return false;
+        if (!kasa || !isCashAccountActive(kasa)) return false;
         const hareket = addCariMovement(cari, {
             tip: `${getCekSenetTypeLabel(record.tip)} ${getCekSenetStatusLabel(record.durum)}`,
             aciklama: `${record.belgeNo || 'Belge'}${record.vadeTarihi ? ` / Vade: ${record.vadeTarihi}` : ''}${record.aciklama ? ` - ${record.aciklama}` : ''}`,
@@ -8505,14 +9451,41 @@ function syncCekSenetCariEffect(record, kasaId = '') {
     return true;
 }
 
-window.openCekSenetModal = function() {
-    populateCekSenetCariOptions();
+window.openCekSenetModal = function(id = '') {
+    const record = id ? getDBArray('cekSenetler').find(item => String(item.id) === String(id)) : null;
+    if (record?.cariYansitildi) {
+        return showToast({ type: 'warning', title: 'Kapatılmış belge doğrudan düzenlenemez', message: 'Önce durumunu Beklemede veya İptal yaparak finans etkisini geri alın.' });
+    }
+    ['input-ceksenet-no', 'input-ceksenet-banka', 'input-ceksenet-kesideci', 'input-ceksenet-lehtar', 'input-ceksenet-seri', 'input-ceksenet-iban', 'input-ceksenet-teslim', 'input-ceksenet-tutar', 'input-ceksenet-aciklama', 'input-ceksenet-ek-not'].forEach(fieldId => {
+        const field = document.getElementById(fieldId);
+        if (field) field.value = '';
+    });
+    resetAttachmentInputs('input-ceksenet-ek', 'input-ceksenet-ek-not');
+    document.getElementById('input-ceksenet-id').value = record?.id || '';
+    document.getElementById('input-ceksenet-tip').value = record?.tip || 'alinan_cek';
+    populateCekSenetCariOptions(record?.cariId || '');
     updateCekSenetStatusOptions();
+    document.getElementById('input-ceksenet-durum').value = record?.durum || 'beklemede';
+    document.getElementById('input-ceksenet-cari').value = record?.cariId || '';
+    document.getElementById('input-ceksenet-no').value = record?.belgeNo || '';
+    document.getElementById('input-ceksenet-banka').value = record?.banka || '';
+    document.getElementById('input-ceksenet-kesideci').value = record?.kesideci || '';
+    document.getElementById('input-ceksenet-lehtar').value = record?.lehtar || '';
+    document.getElementById('input-ceksenet-seri').value = record?.seriNo || '';
+    document.getElementById('input-ceksenet-iban').value = record?.hesapIban || '';
+    document.getElementById('input-ceksenet-ciro').value = record?.ciroDurumu || 'ciro_yok';
+    document.getElementById('input-ceksenet-teslim').value = record?.teslimAlan || '';
+    document.getElementById('input-ceksenet-tutar').value = record?.tutar || '';
+    document.getElementById('input-ceksenet-aciklama').value = record?.aciklama || '';
+    document.getElementById('input-ceksenet-ek-not').value = record?.ek?.note || '';
+    document.getElementById('modal-ceksenet-title').textContent = record ? 'Çek / Senet Kaydını Düzenle' : 'Çek / Senet Ekle';
+    document.getElementById('btn-ceksenet-save').textContent = record ? 'Değişiklikleri Kaydet' : 'Kaydet';
     const noEl = document.getElementById('input-ceksenet-no');
     if (noEl && !noEl.value) noEl.placeholder = previewSerialNo('cekSenet');
     const vadeEl = document.getElementById('input-ceksenet-vade');
-    if (vadeEl && !vadeEl.value) vadeEl.value = toDateInputValue(new Date());
-    populateKasaOptions();
+    if (vadeEl) vadeEl.value = record ? toDateInputValue(parseTRDate(record.vadeTarihi)) : toDateInputValue(new Date());
+    populateKasaOptions(record?.kasaId || '');
+    if (record?.kasaId) document.getElementById('input-ceksenet-kasa').value = record.kasaId;
     refreshDateInputDisplay();
     openModal('modal-ceksenet');
 };
@@ -8544,6 +9517,12 @@ window.updateCekSenetStatusOptions = function() {
 };
 
 window.saveCekSenet = function() {
+    const unlock = beginModalSubmit('modal-ceksenet');
+    if (!unlock) return;
+    try {
+    const id = document.getElementById('input-ceksenet-id')?.value || '';
+    const existing = id ? getDBArray('cekSenetler').find(item => String(item.id) === String(id)) : null;
+    if (existing?.cariYansitildi) return alert('Kapatılmış çek/senet doğrudan düzenlenemez. Önce durumunu beklemeye alın.');
     const tip = document.getElementById('input-ceksenet-tip')?.value || 'alinan_cek';
     const cariId = document.getElementById('input-ceksenet-cari')?.value || '';
     const cari = findCariByReference(cariId);
@@ -8554,43 +9533,77 @@ window.saveCekSenet = function() {
     const durum = document.getElementById('input-ceksenet-durum')?.value || 'beklemede';
     const kasaId = document.getElementById('input-ceksenet-kasa')?.value || '';
     const aciklama = plainText(document.getElementById('input-ceksenet-aciklama')?.value || '');
-    const ek = getAttachmentFromInputs('input-ceksenet-ek', 'input-ceksenet-ek-not');
+    const kesideci = plainText(document.getElementById('input-ceksenet-kesideci')?.value || '');
+    const lehtar = plainText(document.getElementById('input-ceksenet-lehtar')?.value || '');
+    const seriNo = plainText(document.getElementById('input-ceksenet-seri')?.value || '');
+    const hesapIban = plainText(document.getElementById('input-ceksenet-iban')?.value || '').replace(/\s+/g, '').toLocaleUpperCase('tr-TR');
+    const ciroDurumu = document.getElementById('input-ceksenet-ciro')?.value || 'ciro_yok';
+    const teslimAlan = plainText(document.getElementById('input-ceksenet-teslim')?.value || '');
+    const attachmentInput = document.getElementById('input-ceksenet-ek');
+    const attachmentNote = plainText(document.getElementById('input-ceksenet-ek-not')?.value || '');
+    const hasNewAttachment = !!attachmentInput?.files?.[0];
+    const newAttachment = getAttachmentFromInputs('input-ceksenet-ek', 'input-ceksenet-ek-not');
+    const ek = existing?.ek && !hasNewAttachment ? { ...existing.ek, note: attachmentNote } : newAttachment;
 
-    if (!cari) return alert('Çek/senet için cari seçin.');
-    if (!tutar || tutar <= 0) return alert('Geçerli bir tutar girin.');
-    if (!vadeValue) return alert('Vade tarihi seçin.');
-    if (hasDuplicateCekSenetNo(belgeNo)) return alert('Bu çek/senet numarası daha önce kullanılmış. Farklı bir belge numarası girin.');
+    if (!validateModalFields('modal-ceksenet', [
+        { id: 'input-ceksenet-cari', test: value => !!findCariByReference(value), message: 'Çek/senet için cari seçin.' },
+        { id: 'input-ceksenet-vade', test: value => !!value, message: 'Vade tarihini seçin.' },
+        { id: 'input-ceksenet-tutar', test: value => Number(value) > 0, message: 'Sıfırdan büyük geçerli bir tutar girin.' }
+    ])) return;
+    if (!cari) return;
+    if (hasDuplicateCekSenetNo(belgeNo, existing?.id || null)) {
+        setFieldError('input-ceksenet-no', 'Bu çek/senet numarası daha önce kullanılmış. Farklı bir numara girin.');
+        document.getElementById('input-ceksenet-no')?.focus();
+        return;
+    }
     const willSettle = (CEK_SENET_TYPES[tip]?.direction === 'incoming' && durum === 'tahsil_edildi') || (CEK_SENET_TYPES[tip]?.direction === 'outgoing' && durum === 'odendi');
     if (willSettle && !getDBArray('kasaHesaplari').some(item => item.id == kasaId)) {
-        return alert('Tahsil edilen veya ödenen çek/senet için kasa/banka hesabı seçin.');
+        setFieldError('input-ceksenet-kasa', 'Tahsil edilen veya ödenen çek/senet için kasa/banka hesabı seçin.');
+        document.getElementById('input-ceksenet-kasa')?.focus();
+        return;
     }
 
-    const record = {
+    const oldStatus = existing?.durum || '';
+    const record = existing || {
         id: createRecordId(),
+        tarih: new Date().toLocaleDateString('tr-TR'),
+        durumGecmisi: [],
+        cariYansitildi: false,
+        cariBakiyeDegisimi: 0
+    };
+    Object.assign(record, {
         tip,
         cariId: cari.id,
         firma: cari.adi,
         belgeNo,
         banka,
+        kesideci,
+        lehtar,
+        seriNo,
+        hesapIban,
+        ciroDurumu,
+        teslimAlan,
         vadeTarihi: toTRDateFromInput(vadeValue),
         tutar,
         durum,
         kasaId: kasaId || null,
         aciklama,
-        ek,
-        tarih: new Date().toLocaleDateString('tr-TR'),
-        cariYansitildi: false,
-        cariBakiyeDegisimi: 0
-    };
+        ek
+    });
+    if (!Array.isArray(record.durumGecmisi)) record.durumGecmisi = [];
+    if (!existing || oldStatus !== durum) {
+        record.durumGecmisi.push({ durum, tarih: new Date().toLocaleString('tr-TR'), aciklama: existing ? 'Belge düzenlenirken durum güncellendi' : 'Belge oluşturuldu' });
+    }
 
-    db.cekSenetler.push(record);
-    scheduleAttachmentArchive(ek, 'Cek Senet', cari.adi);
+    if (!existing) db.cekSenetler.push(record);
+    if (!existing || hasNewAttachment) scheduleAttachmentArchive(ek, 'Cek Senet', cari.adi);
     syncCekSenetCariEffect(record, kasaId);
-    addAuditLog('Oluşturuldu', 'Çek / Senet', record.id, `${record.belgeNo} / ${record.firma} / ${getCekSenetStatusLabel(record.durum)}`);
+    addAuditLog(existing ? 'Güncellendi' : 'Oluşturuldu', 'Çek / Senet', record.id, `${record.belgeNo} / ${record.firma} / ${getCekSenetStatusLabel(record.durum)}`);
     saveDB();
     closeModal('modal-ceksenet');
+    renderCekSenetler();
 
-    ['input-ceksenet-no', 'input-ceksenet-banka', 'input-ceksenet-tutar', 'input-ceksenet-aciklama', 'input-ceksenet-ek-not'].forEach(id => {
+    ['input-ceksenet-no', 'input-ceksenet-banka', 'input-ceksenet-kesideci', 'input-ceksenet-lehtar', 'input-ceksenet-seri', 'input-ceksenet-iban', 'input-ceksenet-teslim', 'input-ceksenet-tutar', 'input-ceksenet-aciklama', 'input-ceksenet-ek-not'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.value = '';
     });
@@ -8598,13 +9611,17 @@ window.saveCekSenet = function() {
     if (ekEl) ekEl.value = '';
     const cariEl = document.getElementById('input-ceksenet-cari');
     if (cariEl) cariEl.value = '';
+    document.getElementById('input-ceksenet-id').value = '';
     if (record.cariYansitildi) {
-        showImpactSummary(`${getCekSenetTypeLabel(tip)} kaydedildi`, [
+        showImpactSummary(`${getCekSenetTypeLabel(tip)} ${existing ? 'güncellendi' : 'kaydedildi'}`, [
             { label: 'Cari', value: record.cariBakiyeDegisimi },
             { label: 'Kasa', value: getCekSenetDirection(record) === 'incoming' ? tutar : -tutar }
         ], { message: `${getCekSenetStatusLabel(durum)} / ${cari.adi}` });
     } else {
-        showToast({ type: 'success', title: `${getCekSenetTypeLabel(tip)} kaydedildi`, message: `${getCekSenetStatusLabel(durum)} / ${cari.adi}` });
+        showToast({ type: 'success', title: `${getCekSenetTypeLabel(tip)} ${existing ? 'güncellendi' : 'kaydedildi'}`, message: `${getCekSenetStatusLabel(durum)} / ${cari.adi}` });
+    }
+    } finally {
+        unlock();
     }
 };
 
@@ -8627,6 +9644,8 @@ window.updateCekSenetStatus = function(id, status) {
                     return alert('Çek/senet işlemi kasa veya cari bulunamadığı için tamamlanamadı.');
                 }
                 addAuditLog('Durum Değişti', 'Çek / Senet', record.id, `${getCekSenetStatusLabel(oldStatus)} -> ${getCekSenetStatusLabel(status)}`);
+                if (!Array.isArray(record.durumGecmisi)) record.durumGecmisi = [];
+                record.durumGecmisi.push({ durum: status, tarih: new Date().toLocaleString('tr-TR'), aciklama: `${getCekSenetStatusLabel(oldStatus)} durumundan değiştirildi` });
                 saveDB();
                 showImpactSummary(getCekSenetDirection(record) === 'incoming' ? 'Çek / senet tahsil edildi' : 'Çek / senet ödendi', [
                     { label: 'Cari', value: record.cariBakiyeDegisimi },
@@ -8641,6 +9660,8 @@ window.updateCekSenetStatus = function(id, status) {
     const oldDelta = Number(record.cariBakiyeDegisimi) || getCekSenetCariDelta(record);
     syncCekSenetCariEffect(record);
     addAuditLog('Durum Değişti', 'Çek / Senet', record.id, `${getCekSenetStatusLabel(oldStatus)} -> ${getCekSenetStatusLabel(status)}`);
+    if (!Array.isArray(record.durumGecmisi)) record.durumGecmisi = [];
+    record.durumGecmisi.push({ durum: status, tarih: new Date().toLocaleString('tr-TR'), aciklama: `${getCekSenetStatusLabel(oldStatus)} durumundan değiştirildi` });
     saveDB();
     if (wasReflected && !record.cariYansitildi) {
         showImpactSummary('Çek / senet etkisi geri alındı', [
@@ -8650,6 +9671,28 @@ window.updateCekSenetStatus = function(id, status) {
     } else {
         showToast({ type: 'success', title: 'Çek / senet güncellendi', message: `${record.belgeNo || '-'} / ${getCekSenetStatusLabel(status)}` });
     }
+};
+
+window.showCekSenetHistory = function(id) {
+    const record = getDBArray('cekSenetler').find(item => item.id == id);
+    if (!record) return alert('Çek/senet kaydı bulunamadı.');
+    let modal = document.getElementById('modal-ceksenet-history');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'modal-ceksenet-history';
+        modal.className = 'modal-overlay';
+        document.body.appendChild(modal);
+    }
+    const history = Array.isArray(record.durumGecmisi) && record.durumGecmisi.length
+        ? record.durumGecmisi.slice().reverse()
+        : [{ durum: record.durum || 'beklemede', tarih: record.tarih || '-', aciklama: 'Mevcut durum' }];
+    modal.innerHTML = `<div class="modal-content glass-panel">
+        <div class="flex-between mb-4"><h3>Belge ve Durum Tarihçesi</h3><button type="button" class="btn-close" onclick="closeModal('modal-ceksenet-history')"><i class="fa-solid fa-xmark"></i></button></div>
+        <div class="modal-impact-note" style="margin-bottom:14px;"><i class="fa-solid fa-money-check-dollar"></i><span><strong>${escapeHTML(record.belgeNo || '-')}</strong> · ${escapeHTML(record.firma || '-')} · ${formatCurrency(record.tutar || 0)}</span></div>
+        <div class="history-timeline">${history.map(item => `<div class="history-timeline-item"><span class="history-timeline-icon"><i class="fa-solid fa-clock-rotate-left"></i></span><span><strong>${escapeHTML(getCekSenetStatusLabel(item.durum))}</strong><small>${escapeHTML(item.tarih || '-')} · ${escapeHTML(item.aciklama || 'Durum güncellendi')}</small></span></div>`).join('')}</div>
+        <div class="modal-impact-note" style="margin-top:14px;"><i class="fa-solid fa-link"></i><span>${record.kesideci ? `Keşideci: ${escapeHTML(record.kesideci)} · ` : ''}${record.lehtar ? `Lehtar: ${escapeHTML(record.lehtar)} · ` : ''}${record.seriNo ? `Seri: ${escapeHTML(record.seriNo)} · ` : ''}${record.teslimAlan ? `Teslim: ${escapeHTML(record.teslimAlan)}` : 'Teslim bilgisi yok'}</span></div>
+    </div>`;
+    openModal('modal-ceksenet-history');
 };
 
 window.deleteCekSenet = function(id) {
@@ -8666,6 +9709,7 @@ window.deleteCekSenet = function(id) {
         addAuditLog('Silindi', 'Çek / Senet', record.id, `${record.belgeNo} / ${record.firma}`);
         db.cekSenetler = getDBArray('cekSenetler').filter(item => item.id != id);
         saveDB();
+        renderCekSenetler();
         const impacts = wasReflected ? [{ label: 'Cari', value: -oldDelta }, { label: 'Kasa', value: cashDelta }] : [];
         showImpactSummary('Çek / senet silindi', impacts, { message: wasReflected ? 'Cari ve kasa etkileri ters kayıtla düzeltildi.' : 'Bekleyen kayıt kaldırıldı.' });
     }, { title: 'Çek / Senet Kaydını Sil', confirmLabel: 'Kaydı Sil' });
@@ -8743,6 +9787,8 @@ function renderCekSenetler() {
                     </select>
                 </td>
                 <td style="text-align:right;"><div class="table-actions destructive-actions">
+                    <button class="btn btn-outline table-action-button" aria-label="Çek veya senet tarihçesini göster" title="Tarihçe" onclick="showCekSenetHistory('${record.id}')"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> Tarihçe</button>
+                    ${record.cariYansitildi ? '' : `<button class="btn btn-outline table-action-button" aria-label="Çek veya senet kaydını düzenle" title="Düzenle" onclick="openCekSenetModal('${record.id}')"><i class="fa-solid fa-pen-to-square" aria-hidden="true"></i> Düzenle</button>`}
                     <button class="btn btn-danger table-action-button" aria-label="Çek veya senet kaydını sil" title="Sil" onclick="deleteCekSenet('${record.id}')"><i class="fa-solid fa-trash-can" aria-hidden="true"></i> Sil</button>
                 </div></td>
             </tr>
@@ -8831,7 +9877,7 @@ function renderInvoices() {
             <td><span class="badge" style="background:rgba(69,123,157,0.2); color:var(--secondary); border:1px solid var(--secondary);">${escapeHTML(f.faturaNo)}</span></td>
             <td style="color:var(--text-muted);">${escapeHTML(f.tarih)}</td>
             <td><strong>${escapeHTML(f.firma)}</strong></td>
-            <td style="color:var(--text-muted); font-size:13px;">${escapeHTML(f.aciklama || '-')}${renderAttachmentBadge(f)}</td>
+            <td style="color:var(--text-muted); font-size:13px;">${escapeHTML(f.aciklama || '-')}<br><span class="dashboard-muted-text">Vade: ${escapeHTML(f.vadeTarihi || '-')} · ${f.odemeDurumu === 'odendi' ? 'Ödendi' : (f.odemeDurumu === 'kismi' ? 'Kısmi Ödendi' : 'Ödenmedi')}</span>${renderAttachmentBadge(f)}</td>
             <td style="text-align:right; font-weight:600; color:${f.tur === 'kesilen' ? 'var(--success)' : 'var(--alert)'};">${f.tur === 'kesilen' ? '+' : '-'}${formatCurrency(f.tutar)}</td>
             <td style="text-align:right;"><div class="table-actions">
                 <button class="btn btn-outline table-action-button" aria-label="Faturayı yazdır" title="Yazdır" onclick="event.stopPropagation(); printInvoiceDocument(${f.id})"><i class="fa-solid fa-print" aria-hidden="true"></i> Yazdır</button>
@@ -8873,13 +9919,15 @@ window.showFaturaDetail = function(id) {
                     <tr><td style="color:var(--text-muted); width:140px;">Fatura Türü</td><td><span class="badge ${f.tur === 'kesilen' ? 'success' : ''}" style="${f.tur === 'alinan' ? 'background:rgba(230,57,70,0.2); color:var(--alert); border:1px solid var(--alert);' : ''}">${turLabel}</span></td></tr>
                     <tr><td style="color:var(--text-muted);">Fatura No</td><td><strong>${escapeHTML(f.faturaNo)}</strong></td></tr>
                     <tr><td style="color:var(--text-muted);">Tarih</td><td>${escapeHTML(f.tarih)}</td></tr>
+                    <tr><td style="color:var(--text-muted);">Vade / Ödeme</td><td>${escapeHTML(f.vadeTarihi || '-')} · ${f.odemeDurumu === 'odendi' ? 'Ödendi' : (f.odemeDurumu === 'kismi' ? 'Kısmi Ödendi' : 'Ödenmedi')}</td></tr>
+                    ${f.seriSira ? `<tr><td style="color:var(--text-muted);">Seri / Sıra</td><td>${escapeHTML(f.seriSira)}</td></tr>` : ''}
+                    ${f.vergiNo ? `<tr><td style="color:var(--text-muted);">Vergi No</td><td>${escapeHTML(f.vergiNo)}</td></tr>` : ''}
                     <tr><td style="color:var(--text-muted);">Firma / Müşteri</td><td><strong>${escapeHTML(f.firma)}</strong></td></tr>
                     <tr><td style="color:var(--text-muted);">Açıklama</td><td>${escapeHTML(f.aciklama || '-')}</td></tr>
                     ${f.ek ? `<tr><td style="color:var(--text-muted);">Belge Eki</td><td><strong>${escapeHTML(f.ek.name || 'Ek belge')}</strong>${f.ek.note ? `<br><span class="dashboard-muted-text">${escapeHTML(f.ek.note)}</span>` : ''}</td></tr>` : ''}
-                    <tr style="border-top:2px solid var(--border);">
-                        <td style="font-weight:700; font-size:15px; padding-top:10px;">TUTAR</td>
-                        <td style="font-weight:700; font-size:20px; color:${turColor}; padding-top:10px;">${f.tur === 'kesilen' ? '+' : '-'}${formatCurrency(f.tutar)}</td>
-                    </tr>
+                    <tr><td style="color:var(--text-muted);">Matrah</td><td>${formatCurrency(f.matrah ?? ((f.tutar || 0) / 1.2))}</td></tr>
+                    <tr><td style="color:var(--text-muted);">KDV (${escapeHTML(f.kdvOrani ?? 20)}%)</td><td>${formatCurrency(f.kdvTutari ?? ((f.tutar || 0) - ((f.tutar || 0) / 1.2)))}</td></tr>
+                    <tr style="border-top:2px solid var(--border);"><td style="font-weight:700; font-size:15px; padding-top:10px;">GENEL TOPLAM</td><td style="font-weight:700; font-size:20px; color:${turColor}; padding-top:10px;">${f.tur === 'kesilen' ? '+' : '-'}${formatCurrency(f.tutar)}</td></tr>
                 </tbody>
             </table>
             <div style="margin-top:16px; display:flex; gap:8px;">
@@ -8914,6 +9962,14 @@ window.populateInvoiceOrderOptions = function() {
     const firmaId = document.getElementById('input-fatura-firma')?.value || '';
     const orderSelect = document.getElementById('input-fatura-order');
     const helper = document.getElementById('fatura-order-helper');
+    const cari = firmaId && firmaId !== 'internal' ? findCariByReference(firmaId) : null;
+    const invoiceDateEl = document.getElementById('input-fatura-tarih');
+    const dueDateEl = document.getElementById('input-fatura-vade');
+    if (cari && invoiceDateEl?.value && dueDateEl) {
+        const due = new Date(`${invoiceDateEl.value}T12:00:00`);
+        due.setDate(due.getDate() + Math.max(0, Number(cari.vadeGun) || 0));
+        dueDateEl.value = toDateInputValue(due);
+    }
     if (!orderSelect) return;
 
     const previousValue = orderSelect.value;
@@ -8944,15 +10000,24 @@ window.populateInvoiceOrderOptions = function() {
 window.applyInvoiceOrderSelection = function() {
     const linkedOrder = getSelectedInvoiceModalOrder();
     const amountEl = document.getElementById('input-fatura-tutar');
+    const baseEl = document.getElementById('input-fatura-matrah');
+    const rateEl = document.getElementById('input-fatura-kdv-orani');
     const descriptionEl = document.getElementById('input-fatura-aciklama');
     const helper = document.getElementById('fatura-order-helper');
     if (!amountEl) return;
 
     amountEl.readOnly = Boolean(linkedOrder);
     amountEl.classList.toggle('form-control-readonly', Boolean(linkedOrder));
+    if (baseEl) {
+        baseEl.readOnly = Boolean(linkedOrder);
+        baseEl.classList.toggle('form-control-readonly', Boolean(linkedOrder));
+    }
 
     if (linkedOrder) {
+        const linkedTaxRate = linkedOrder.taxRate == null ? 20 : Math.max(0, Number(linkedOrder.taxRate) || 0);
         amountEl.value = roundMoney(linkedOrder.total);
+        if (baseEl) baseEl.value = roundMoney(linkedOrder.subTotal ?? (linkedOrder.total / (1 + linkedTaxRate / 100)));
+        if (rateEl) rateEl.value = linkedTaxRate;
         amountEl.dataset.invoiceOrderId = String(linkedOrder.id);
         if (descriptionEl) {
             const automaticDescription = plainText(linkedOrder.description || linkedOrder.aciklama || `${linkedOrder.orderNo} teslim edilen iş`);
@@ -8972,6 +10037,25 @@ window.applyInvoiceOrderSelection = function() {
         }
         if (descriptionEl) delete descriptionEl.dataset.invoiceOrderDescription;
     }
+    updateInvoiceTaxPreview(linkedOrder ? 'matrah' : 'total');
+};
+
+window.updateInvoiceTaxPreview = function(source = 'matrah') {
+    const baseEl = document.getElementById('input-fatura-matrah');
+    const rateEl = document.getElementById('input-fatura-kdv-orani');
+    const taxEl = document.getElementById('input-fatura-kdv-tutari');
+    const totalEl = document.getElementById('input-fatura-tutar');
+    if (!baseEl || !rateEl || !taxEl || !totalEl) return { matrah: 0, kdvOrani: 0, kdvTutari: 0, tutar: 0 };
+    const rate = Math.max(0, Math.min(100, Number(rateEl.value) || 0));
+    let base = Math.max(0, Number(baseEl.value) || 0);
+    let total = Math.max(0, Number(totalEl.value) || 0);
+    if (source === 'total' && total > 0) base = roundMoney(total / (1 + rate / 100));
+    else total = roundMoney(base * (1 + rate / 100));
+    const tax = roundMoney(total - base);
+    baseEl.value = base ? roundMoney(base) : '';
+    taxEl.value = tax ? tax : '0';
+    totalEl.value = total ? total : '';
+    return { matrah: roundMoney(base), kdvOrani: rate, kdvTutari: tax, tutar: roundMoney(total) };
 };
 
 window.updateInvoiceModalMode = function() {
@@ -8986,6 +10070,8 @@ window.updateInvoiceModalMode = function() {
     if (!isOutgoing && amountEl) {
         amountEl.readOnly = false;
         amountEl.classList.remove('form-control-readonly');
+        const baseEl = document.getElementById('input-fatura-matrah');
+        if (baseEl) { baseEl.readOnly = false; baseEl.classList.remove('form-control-readonly'); }
     }
     window.populateInvoiceOrderOptions();
 };
@@ -9006,11 +10092,18 @@ window.openFaturaModal = function() {
     }
     const noEl = document.getElementById('input-fatura-no');
     if (noEl && !noEl.value) noEl.placeholder = previewSerialNo('fatura');
+    const invoiceDate = document.getElementById('input-fatura-tarih');
+    const dueDate = document.getElementById('input-fatura-vade');
+    if (invoiceDate && !invoiceDate.value) invoiceDate.value = toDateInputValue(new Date());
+    if (dueDate && !dueDate.value) dueDate.value = toDateInputValue(new Date());
+    refreshDateInputDisplay();
     window.updateInvoiceModalMode();
     openModal('modal-fatura');
 };
 
 window.saveFatura = function() {
+    const unlock = beginModalSubmit('modal-fatura');
+    if (!unlock) return;
     try {
         const tur = document.getElementById('input-fatura-tur').value;
         const faturaNo = document.getElementById('input-fatura-no').value.trim() || generateSerialNo('fatura');
@@ -9019,18 +10112,34 @@ window.saveFatura = function() {
         const firma = firmaSelect.options[firmaSelect.selectedIndex]?.text || '';
         const aciklama = document.getElementById('input-fatura-aciklama').value.trim();
         const linkedOrder = tur === 'kesilen' ? getSelectedInvoiceModalOrder() : null;
-        const tutar = linkedOrder
-            ? roundMoney(linkedOrder.total)
-            : parseFloat(document.getElementById('input-fatura-tutar').value);
+        const tax = updateInvoiceTaxPreview(linkedOrder ? 'matrah' : 'total');
+        const tutar = linkedOrder ? roundMoney(linkedOrder.total) : tax.tutar;
+        const faturaTarihiEl = document.getElementById('input-fatura-tarih');
+        const faturaTarihiInput = faturaTarihiEl?.value || toDateInputValue(new Date());
+        if (faturaTarihiEl && !faturaTarihiEl.value) faturaTarihiEl.value = faturaTarihiInput;
+        const vadeTarihiInput = document.getElementById('input-fatura-vade')?.value || '';
+        const odemeDurumu = document.getElementById('input-fatura-odeme-durumu')?.value || 'odenmedi';
+        const seriSira = plainText(document.getElementById('input-fatura-seri')?.value || '');
+        const vergiNo = plainText(document.getElementById('input-fatura-vergi-no')?.value || '');
         const ek = getAttachmentFromInputs('input-fatura-ek', 'input-fatura-ek-not');
 
-        if (!firmaId) return alert('Firma seçimi zorunludur!');
+        if (!validateModalFields('modal-fatura', [
+            { id: 'input-fatura-firma', test: value => !!value && value !== 'internal', message: 'Gerçek bir cari seçin.' },
+            { id: 'input-fatura-tarih', test: value => !!value, message: 'Fatura tarihini seçin.' },
+            { id: 'input-fatura-matrah', test: value => Number(value) > 0, message: 'Sıfırdan büyük matrah girin.' },
+            { id: 'input-fatura-tutar', test: value => Number(value) > 0, message: 'Sıfırdan büyük genel toplam girin.' }
+        ])) return;
+        if (!firmaId) return;
         if (firmaId === 'internal') return alert('Fatura için gerçek bir cari seçin. Firma içi üretim faturalandırılamaz.');
         if (!Number.isFinite(tutar) || tutar <= 0) return alert('Geçerli bir tutar girin!');
 
         const cari = findCariByReference(firmaId, firma);
         if (!cari) return alert(`Cari bulunamadı: ${firma}\n\nFatura kaydedilmedi.`);
-        if (hasDuplicateInvoiceNo(faturaNo, { tur, cariId: cari.id })) return alert('Bu fatura numarası daha önce kullanılmış. Farklı bir fatura numarası girin.');
+        if (hasDuplicateInvoiceNo(faturaNo, { tur, cariId: cari.id })) {
+            setFieldError('input-fatura-no', 'Bu fatura numarası daha önce kullanılmış. Farklı bir numara girin.');
+            document.getElementById('input-fatura-no')?.focus();
+            return;
+        }
         if (linkedOrder && linkedOrder.customerId != cari.id) return alert('Seçilen iş emri bu cariye ait değil.');
         if (linkedOrder && linkedOrder.durum !== 'Teslim Edildi') return alert('Sadece teslim edilmiş iş emirleri faturalanabilir.');
         if (linkedOrder && linkedOrder.faturaKesildi === true) return alert('Bu iş emrinin faturası daha önce kesilmiş.');
@@ -9050,8 +10159,16 @@ window.saveFatura = function() {
             cariId: cari.id,
             firma: cari.adi,
             aciklama: aciklama || (linkedOrder ? `${linkedOrder.orderNo} faturası` : ''),
+            matrah: linkedOrder ? roundMoney(linkedOrder.subTotal ?? tax.matrah) : tax.matrah,
+            kdvOrani: linkedOrder ? Number(linkedOrder.taxRate ?? tax.kdvOrani) : tax.kdvOrani,
+            kdvTutari: linkedOrder ? roundMoney(linkedOrder.tax ?? (tutar - tax.matrah)) : tax.kdvTutari,
             tutar: tutar,
-            tarih: new Date().toLocaleDateString('tr-TR'),
+            tarih: toTRDateFromInput(faturaTarihiInput),
+            faturaTarihi: toTRDateFromInput(faturaTarihiInput),
+            vadeTarihi: vadeTarihiInput ? toTRDateFromInput(vadeTarihiInput) : '',
+            odemeDurumu,
+            seriSira,
+            vergiNo,
             cariYansitildi: true,
             cariBakiyeDegisimi: bakiyeDegisimi,
             orderId: linkedOrder?.id || null,
@@ -9082,7 +10199,7 @@ window.saveFatura = function() {
         if (linkedOrder) {
             linkedOrder.faturaKesildi = true;
             linkedOrder.faturaNo = faturaNo;
-            linkedOrder.faturaTarihi = new Date().toLocaleString('tr-TR');
+            linkedOrder.faturaTarihi = fatura.faturaTarihi;
             if (bakiyeDegisimi !== 0) linkedOrder.bakiyeCariyeYansitildi = true;
         }
         addAuditLog('Oluşturuldu', 'Fatura', fatura.id, `${fatura.faturaNo} / ${fatura.firma} / ${formatCurrency(fatura.tutar)}`);
@@ -9097,11 +10214,16 @@ window.saveFatura = function() {
         document.getElementById('input-fatura-firma').value = '';
         document.getElementById('input-fatura-order').value = '';
         document.getElementById('input-fatura-aciklama').value = '';
+        document.getElementById('input-fatura-matrah').value = '';
+        document.getElementById('input-fatura-kdv-tutari').value = '';
         document.getElementById('input-fatura-tutar').value = '';
         document.getElementById('input-fatura-tutar').readOnly = false;
         document.getElementById('input-fatura-tutar').classList.remove('form-control-readonly');
         delete document.getElementById('input-fatura-tutar').dataset.invoiceOrderId;
         delete document.getElementById('input-fatura-aciklama').dataset.invoiceOrderDescription;
+        document.getElementById('input-fatura-seri').value = '';
+        document.getElementById('input-fatura-vergi-no').value = '';
+        document.getElementById('input-fatura-odeme-durumu').value = 'odenmedi';
         resetAttachmentInputs('input-fatura-ek', 'input-fatura-ek-not');
 
         showImpactSummary('Fatura kaydedildi', [
@@ -9114,6 +10236,8 @@ window.saveFatura = function() {
         });
     } catch(e) {
         alert('Fatura kaydedilirken hata oluştu: ' + e.message);
+    } finally {
+        unlock();
     }
 };
 
@@ -9182,6 +10306,116 @@ async function renderAppVersion() {
     }
 }
 
+const UPDATE_CHECK_LAST_KEY = 'ak_lazer_update_last_check';
+const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+let latestUpdateInfo = null;
+
+function getVisibleAppVersion() {
+    return plainText(document.getElementById('app-version')?.textContent || 'v1.3.33').replace(/^v/i, '') || '1.3.33';
+}
+
+function setUpdateStatus(state, title, message, options = {}) {
+    const card = document.getElementById('update-status-card');
+    const icon = document.getElementById('update-status-icon');
+    const titleElement = document.getElementById('update-status-title');
+    const copyElement = document.getElementById('update-status-copy');
+    const currentElement = document.getElementById('update-current-version');
+    const latestElement = document.getElementById('update-latest-version');
+    const openButton = document.getElementById('btn-open-update');
+    const icons = {
+        checking: 'fa-spinner fa-spin',
+        available: 'fa-circle-arrow-up',
+        current: 'fa-circle-check',
+        error: 'fa-triangle-exclamation',
+        idle: 'fa-circle-info'
+    };
+    if (card) card.dataset.state = state;
+    if (icon) icon.innerHTML = `<i class="fa-solid ${icons[state] || icons.idle}" aria-hidden="true"></i>`;
+    if (titleElement) titleElement.textContent = title;
+    if (copyElement) copyElement.textContent = message;
+    if (currentElement) currentElement.textContent = `v${options.currentVersion || getVisibleAppVersion()}`;
+    if (latestElement) {
+        latestElement.hidden = !options.latestVersion;
+        latestElement.textContent = options.latestVersion ? `Son sürüm v${options.latestVersion}` : '';
+    }
+    if (openButton) openButton.hidden = !(state === 'available' && options.downloadUrl);
+}
+
+function renderUpdateState() {
+    if (latestUpdateInfo?.hasUpdate) {
+        setUpdateStatus('available', 'Yeni sürüm hazır', latestUpdateInfo.notes || `v${latestUpdateInfo.latestVersion} kurulabilir.`, latestUpdateInfo);
+        return;
+    }
+    setUpdateStatus('idle', 'Sürüm kontrolü hazır', 'Kontrol başlatıldığında yalnızca AK LAZER sürüm adresine bağlanılır.', {
+        currentVersion: getVisibleAppVersion()
+    });
+}
+
+window.checkForUpdates = async function(options = {}) {
+    const manual = !!options.manual;
+    const button = document.getElementById('btn-check-update');
+    if (!window.electronAPI?.checkForUpdates) {
+        if (manual) showToast({ type: 'warning', title: 'Sürüm kontrolü kullanılamıyor', message: 'Bu özellik yalnızca kurulu masaüstü uygulamasında çalışır.' });
+        return { success: false, unsupported: true };
+    }
+
+    if (button) button.disabled = true;
+    setUpdateStatus('checking', 'Sürüm kontrol ediliyor', 'AK LAZER sürüm bilgisi doğrulanıyor...', { currentVersion: getVisibleAppVersion() });
+    try {
+        const response = await window.electronAPI.checkForUpdates();
+        try { localStorage.setItem(UPDATE_CHECK_LAST_KEY, String(Date.now())); } catch (_) {}
+        if (!response?.success) {
+            latestUpdateInfo = null;
+            setUpdateStatus('error', 'Sürüm bilgisine ulaşılamadı', response?.error || 'İnternet bağlantısını kontrol edip tekrar deneyin.', {
+                currentVersion: response?.currentVersion || getVisibleAppVersion()
+            });
+            if (manual) showToast({ type: 'warning', title: 'Güncelleme kontrol edilemedi', message: response?.error || 'Bağlantıyı kontrol edip tekrar deneyin.' });
+            return response;
+        }
+
+        latestUpdateInfo = response.hasUpdate ? response : null;
+        if (response.hasUpdate) {
+            const releaseText = response.releaseDate ? `Yayın: ${response.releaseDate}. ` : '';
+            setUpdateStatus('available', 'Yeni sürüm hazır', `${releaseText}${response.notes || 'Yeni kurulum yayımlandı.'}`, response);
+            const noticeKey = `ak_lazer_update_notice_${response.latestVersion}`;
+            let alreadyShown = false;
+            try { alreadyShown = localStorage.getItem(noticeKey) === '1'; } catch (_) {}
+            if (manual || !alreadyShown) {
+                showToast({ type: 'info', title: `v${response.latestVersion} hazır`, message: 'Ayarlar > Sürüm Kontrolü bölümünden kurulum sayfasını açabilirsiniz.', duration: 8000 });
+                try { localStorage.setItem(noticeKey, '1'); } catch (_) {}
+            }
+        } else {
+            setUpdateStatus('current', 'Uygulama güncel', `Kullanılan v${response.currentVersion} sürümü yayımlanan son sürümdür.`, response);
+            if (manual) showToast({ type: 'success', title: 'Uygulama güncel', message: `v${response.currentVersion} son sürüm.` });
+        }
+        return response;
+    } catch (error) {
+        latestUpdateInfo = null;
+        setUpdateStatus('error', 'Sürüm kontrolü tamamlanamadı', error?.message || 'Beklenmeyen bir hata oluştu.', { currentVersion: getVisibleAppVersion() });
+        if (manual) showToast({ type: 'error', title: 'Güncelleme kontrolü başarısız', message: error?.message || 'Tekrar deneyin.' });
+        return { success: false, error: error?.message || String(error) };
+    } finally {
+        if (button) button.disabled = false;
+    }
+};
+
+window.openUpdateDownload = async function() {
+    const downloadUrl = latestUpdateInfo?.downloadUrl;
+    if (!downloadUrl || !window.electronAPI?.openUpdatePage) {
+        return showToast({ type: 'warning', title: 'Kurulum adresi bulunamadı', message: 'Sürüm kontrolünü yeniden çalıştırın.' });
+    }
+    const response = await window.electronAPI.openUpdatePage(downloadUrl);
+    if (!response?.success) showToast({ type: 'error', title: 'Sayfa açılamadı', message: response?.error || 'Kurulum adresi doğrulanamadı.' });
+};
+
+function scheduleAutomaticUpdateCheck() {
+    if (!window.electronAPI?.checkForUpdates) return;
+    let lastCheck = 0;
+    try { lastCheck = Number(localStorage.getItem(UPDATE_CHECK_LAST_KEY) || 0); } catch (_) {}
+    if (Date.now() - lastCheck < UPDATE_CHECK_INTERVAL_MS) return;
+    setTimeout(() => checkForUpdates({ manual: false }), 2500);
+}
+
 function enhanceCloseButtons() {
     document.querySelectorAll('.btn-close').forEach(button => {
         if (!button.hasAttribute('aria-label')) button.setAttribute('aria-label', 'Pencereyi kapat');
@@ -9203,6 +10437,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         await hydrateDBFromFileIfNeeded();
         const hash = window.location.hash.substring(1) || 'dashboard';
         switchView(hash);
+        scheduleAutomaticUpdateCheck();
     } catch (e) {
         console.error("Initialization Error:", e);
     }

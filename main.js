@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
@@ -6,12 +6,66 @@ const { pathToFileURL } = require('url');
 const MAX_DATABASE_BYTES = 50 * 1024 * 1024;
 const MAX_PDF_HTML_BYTES = 20 * 1024 * 1024;
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
+const MAX_UPDATE_MANIFEST_BYTES = 64 * 1024;
+const UPDATE_MANIFEST_URL = 'https://aklazer.com.tr/erp-version.json';
+const ALLOWED_UPDATE_HOSTS = new Set(['aklazer.com.tr', 'www.aklazer.com.tr']);
 const ALLOWED_ATTACHMENT_EXTENSIONS = new Set([
     '.pdf', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.tif', '.tiff', '.heic'
 ]);
 
 function getAppDocumentURL() {
     return pathToFileURL(path.join(__dirname, 'index.html')).href;
+}
+
+function parseVersionParts(value) {
+    const match = String(value || '').trim().match(/^v?(\d+)\.(\d+)\.(\d+)$/);
+    return match ? match.slice(1).map(Number) : null;
+}
+
+function compareVersions(left, right) {
+    const leftParts = parseVersionParts(left);
+    const rightParts = parseVersionParts(right);
+    if (!leftParts || !rightParts) return 0;
+    for (let index = 0; index < 3; index += 1) {
+        if (leftParts[index] !== rightParts[index]) return leftParts[index] > rightParts[index] ? 1 : -1;
+    }
+    return 0;
+}
+
+function isAllowedUpdateURL(value) {
+    try {
+        const candidate = new URL(String(value || ''));
+        return candidate.protocol === 'https:' && ALLOWED_UPDATE_HOSTS.has(candidate.hostname);
+    } catch (_) {
+        return false;
+    }
+}
+
+function getUpdateDownloadURL(manifest = {}) {
+    const platformKey = process.platform === 'darwin' ? 'mac' : (process.platform === 'win32' ? 'windows' : process.platform);
+    const candidate = manifest.downloads?.[platformKey] || manifest.downloadPage || '';
+    return isAllowedUpdateURL(candidate) ? candidate : '';
+}
+
+async function fetchUpdateManifest() {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 7000);
+    try {
+        const response = await net.fetch(UPDATE_MANIFEST_URL, {
+            signal: controller.signal,
+            headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' }
+        });
+        if (!response.ok) throw new Error(`Sürüm sunucusu ${response.status} yanıtı verdi.`);
+        const text = await response.text();
+        if (Buffer.byteLength(text, 'utf8') > MAX_UPDATE_MANIFEST_BYTES) {
+            throw new Error('Sürüm bilgisi izin verilen boyutu aşıyor.');
+        }
+        const manifest = JSON.parse(text);
+        if (!parseVersionParts(manifest?.version)) throw new Error('Sürüm bilgisi geçersiz.');
+        return manifest;
+    } finally {
+        clearTimeout(timeout);
+    }
 }
 
 function isTrustedAppURL(value) {
@@ -176,6 +230,44 @@ app.whenReady().then(() => {
         try {
             assertTrustedSender(event);
             return { success: true, version: app.getVersion() };
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    });
+
+    ipcMain.handle('guncelleme-kontrol', async event => {
+        const currentVersion = app.getVersion();
+        try {
+            assertTrustedSender(event);
+            const manifest = await fetchUpdateManifest();
+            const latestVersion = String(manifest.version).trim().replace(/^v/i, '');
+            return {
+                success: true,
+                currentVersion,
+                latestVersion,
+                hasUpdate: compareVersions(latestVersion, currentVersion) > 0,
+                releaseDate: String(manifest.releaseDate || ''),
+                notes: String(manifest.notes || '').slice(0, 500),
+                downloadUrl: getUpdateDownloadURL(manifest),
+                checkedAt: new Date().toISOString()
+            };
+        } catch (error) {
+            return {
+                success: false,
+                currentVersion,
+                offline: error?.name === 'AbortError' || /network|fetch|ENOTFOUND|sunucusu/i.test(error?.message || ''),
+                error: error?.name === 'AbortError' ? 'Sürüm kontrolü zaman aşımına uğradı.' : (error?.message || 'Sürüm kontrolü yapılamadı.'),
+                checkedAt: new Date().toISOString()
+            };
+        }
+    });
+
+    ipcMain.handle('guncelleme-sayfasi-ac', async (event, updateURL) => {
+        try {
+            assertTrustedSender(event);
+            if (!isAllowedUpdateURL(updateURL)) throw new Error('Güncelleme adresine izin verilmiyor.');
+            await shell.openExternal(updateURL);
+            return { success: true };
         } catch (error) {
             return { success: false, error: error.message };
         }

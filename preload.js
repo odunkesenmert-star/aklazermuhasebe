@@ -10,5 +10,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     archiveAttachment: (payload) => ipcRenderer.invoke('belge-arsivle', payload),
     openAttachment: (filePath) => ipcRenderer.invoke('belge-ac', filePath),
     getAppVersion: () => ipcRenderer.invoke('app-surumu'),
+    checkForUpdates: () => ipcRenderer.invoke('guncelleme-kontrol'),
+    openUpdatePage: (updateURL) => ipcRenderer.invoke('guncelleme-sayfasi-ac', updateURL),
     getPathForFile: (file) => webUtils.getPathForFile(file)
 });

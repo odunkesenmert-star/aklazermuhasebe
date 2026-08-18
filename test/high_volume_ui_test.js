@@ -99,9 +99,27 @@ setTimeout(() => {
         dom.window.handleHighVolumeSearch('orders');
         assert(dom.window.document.querySelectorAll('#orders-tbody tr').length === 1, '130 iş emri müşteri adıyla daraltılabiliyor.');
 
+        db.denetimKayitlari = Array.from({ length: 230 }, (_, index) => ({
+            id: 5000 + index,
+            action: index % 2 === 0 ? 'Güncellendi' : 'Oluşturuldu',
+            entityType: index % 3 === 0 ? 'Cari' : 'Stok',
+            detail: `Seri denetim kaydı ${String(index + 1).padStart(4, '0')}`,
+            actor: 'Yerel Kullanıcı',
+            tarih: '18.08.2026 12:00:00'
+        }));
+        dom.window.renderAuditTrail();
+        assert(dom.window.document.querySelectorAll('#audit-tbody tr').length === 25, '230 denetim kaydı varsayılan olarak 25 kayıtlık sayfaya bölünüyor.');
+        assert(dom.window.document.getElementById('audit-page-info').textContent.includes('1–25 / 230 kayıt'), 'Denetim geçmişi toplamı ve gösterilen aralığı açıklıyor.');
+        assert(dom.window.document.getElementById('audit-page-info').textContent.includes('Sayfa 1/10'), '230 denetim kaydı için doğru toplam sayfa hesaplanıyor.');
+
+        const auditSearch = dom.window.document.getElementById('audit-search');
+        auditSearch.value = 'Seri denetim kaydı 0229';
+        dom.window.handleHighVolumeSearch('audit');
+        assert(dom.window.document.querySelectorAll('#audit-tbody tr').length === 1, '200+ denetim kaydı açıklamaya göre hızla daraltılabiliyor.');
+
         const css = fs.readFileSync('./style.css', 'utf8');
         assert(css.includes('max-height: clamp(360px, 56vh, 700px)'), 'Uzun tablolar sabit başlıklı kontrollü kaydırma alanına sahip.');
-        assert(dom.window.document.querySelectorAll('.list-page-size-select').length >= 10, 'Sayfa kapasitesi seçimi yoğun listelerde ortak kullanılıyor.');
+        assert(dom.window.document.querySelectorAll('.list-page-size-select').length >= 11, 'Sayfa kapasitesi seçimi yoğun listelerde ortak kullanılıyor.');
     } catch (error) {
         failures++;
         console.error('FAIL: Yüksek hacim senaryosu çalışırken hata oluştu:', error);

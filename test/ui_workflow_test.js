@@ -6,10 +6,9 @@ const root = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'style.css'), 'utf8');
-const modalReportPath = path.join(root, 'SONRAKI_BRIEF_MODAL_EKSIKLIK_RAPORU.md');
 
 const bulkIconActions = [...html.matchAll(/<button[^>]*class="[^"]*\bbulk-icon-action\b[^"]*"[^>]*>([\s\S]*?)<\/button>/g)];
-assert.strictEqual(bulkIconActions.length, 18, 'Tüm dokuz listede Excel ve yazdır ikon düğmeleri bulunmalı');
+assert.strictEqual(bulkIconActions.length, 20, 'Tüm on listede Excel ve yazdır ikon düğmeleri bulunmalı');
 bulkIconActions.forEach(([button, content]) => {
     assert(button.includes('aria-label=') && button.includes('title='), 'İkon düğmelerinde erişilebilir açıklama eksik');
     assert(/^<i\b[^>]*><\/i>$/.test(content.trim()), 'Toplu liste düğmesinde görünür metin kalmamalı');
@@ -48,11 +47,20 @@ assert(html.includes('id="dashboard-chart-a11y"'), 'Grafik ekran okuyucu özeti 
 assert(html.includes('role="tablist"') && html.includes('id="dashboard-tab-finance"'), 'Gösterge paneli hareket sekmeleri eksik');
 assert(html.includes('<option value="cnc_plazma">CNC Plazma</option>'), 'CNC Plazma işlem tipi eksik');
 assert(html.includes('id="quote-pricing-helper"'), 'Kilogram fiyatlandırma açıklaması eksik');
+assert(html.includes('data-target="audit"') && html.includes('id="view-audit"'), 'Denetim geçmişi yönetim ekranı eksik');
+assert(html.includes('id="audit-search"') && html.includes('id="audit-entity-filter"') && html.includes('id="audit-action-filter"'), 'Denetim arama ve filtreleri eksik');
+assert(html.includes('data-report-date-panel="audit"') && html.includes('id="audit-tbody"'), 'Denetim tarih aralığı ve tablosu eksik');
+assert(html.includes('id="settings-tab-update"') && html.includes('id="settings-panel-update"'), 'Sürüm kontrolü ayar ekranı eksik');
 
 assert(app.includes('function showImpactSummary'), 'İşlem etki özeti altyapısı eksik');
 assert(app.includes("{ label: 'Cari'"), 'Cari etki özeti eksik');
 assert(app.includes("{ label: 'Kasa'"), 'Kasa etki özeti eksik');
 assert(app.includes("{ label: 'Stok'"), 'Stok etki özeti eksik');
+assert(app.includes('window.undoManualCashMovement') && app.includes('reverseCashMovement(movement.id'), 'Manuel kasa hareketi ters kayıt akışı eksik');
+assert(app.includes('window.toggleKasaHesapStatus') && app.includes('window.deleteKasaHesap'), 'Kasa/banka düzenleme, pasife alma ve güvenli silme akışı eksik');
+assert(app.includes('window.undoPaymentPlanSettlement') && app.includes("openPaymentPlanModal('', '${plan.id}')"), 'Vade planı düzenleme ve ödeme geri alma akışı eksik');
+assert(app.includes("openFireModal('${f.id}')") && app.includes("existing ? 'Güncellendi' : 'Oluşturuldu'"), 'Fire/parça düzenleme akışı eksik');
+assert(app.includes("openCekSenetModal('${record.id}')") && html.includes('id="input-ceksenet-id"'), 'Bekleyen çek/senet düzenleme akışı eksik');
 assert(app.includes('function renderOrderLinkedRecords'), 'Bağlı kayıt düğmeleri eksik');
 assert(app.includes('window.toggleNavGroup'), 'Sol menü akordeon davranışı eksik');
 assert(app.includes('function openNavGroupForTarget'), 'Aktif menü grubunu açma davranışı eksik');
@@ -82,6 +90,9 @@ assert(app.includes("type === 'borc'") && app.includes('window.openAccountFromSt
 assert(app.includes('window.filterStatDetails'), 'Finansal dağılım araması eksik');
 assert(app.includes('window.handleDashboardActivityKey'), 'Gösterge paneli klavye sekme davranışı eksik');
 assert(app.includes('cnc_plazma: Object.freeze') && app.includes("pricing: 'kg'"), 'CNC Plazma kilogram fiyatlandırma tanımı eksik');
+assert(app.includes('window.renderAuditTrail') && app.includes('getFilteredAuditRecordsForReport'), 'Denetim geçmişi filtreleme ve render akışı eksik');
+assert(app.includes("addAuditLog('Oluşturuldu', 'Cari'") && app.includes("addAuditLog('Güncellendi', 'Stok'"), 'Temel cari ve stok denetim kayıtları eksik');
+assert(app.includes('window.checkForUpdates') && app.includes('scheduleAutomaticUpdateCheck'), 'Güvenli sürüm kontrolü akışı eksik');
 assert(app.includes('isKgPricedOperation(islemTipi)'), 'CNC Plazma teklif hesaplama yolu eksik');
 assert(app.includes("privacyState.hidden = isStatsVisible"), 'Gösterge paneli finansal gizlilik kapsamı eksik');
 assert(app.includes("type: 'line'"), 'Gelir gider eğilim grafiği çizgi grafiği olmalı');
@@ -100,6 +111,8 @@ assert(css.includes('.order-linked-card'), 'Bağlı kayıt kartı stili eksik');
 assert(css.includes('.filter-panel.is-collapsed'), 'Kompakt filtre paneli stili eksik');
 assert(css.includes('.quote-form-section.is-collapsed'), 'Teklif adımı daraltma stili eksik');
 assert(css.includes('.quote-pricing-helper'), 'Kilogram fiyatlandırma yardımcı metni stili eksik');
+assert(css.includes('.audit-data-table') && css.includes('.audit-action-badge'), 'Denetim geçmişi yoğun tablo stili eksik');
+assert(css.includes('.update-status-card') && css.includes('.update-actions'), 'Sürüm kontrolü durum stili eksik');
 assert(css.includes('.dashboard-insight-grid'), 'Gösterge paneli karar alanı stili eksik');
 assert(css.includes('.dashboard-status-chip.has-alerts'), 'Dinamik öncelik durumu stili eksik');
 assert(css.includes('.dashboard-health-chips'), 'Sağlıklı durum rozet stili eksik');
@@ -122,7 +135,20 @@ assert(css.includes('.modal-body') && css.includes('.modal-actions'), 'Sabit ba�
 assert(css.includes('#modal-gider .modal-body'), 'Kompakt gider formu düzeni eksik');
 assert(html.includes('Gideri Kaydet') && html.includes('modal-impact-note'), 'Gider penceresi işlem özeti ve açık eylem metni eksik');
 assert(!html.includes('📤') && !html.includes('📥') && !html.includes('🛒') && !html.includes('💸'), 'Form seçeneklerinde yapısal emoji kullanılmamalı');
-assert(fs.existsSync(modalReportPath), 'Sonraki brief için pencere eksiklik raporu eksik');
+['input-gider-tarih', 'input-gider-belge-no', 'input-gider-kdv-tipi', 'input-gider-cari',
+    'input-duzenle-stok-sahibi', 'input-duzenle-stok-kg', 'input-duzenle-stok-en', 'input-duzenle-stok-boy',
+    'input-fatura-tarih', 'input-fatura-vade', 'input-fatura-matrah', 'input-fatura-kdv-tutari', 'input-fatura-odeme-durumu',
+    'input-fire-tur', 'input-fire-miktar', 'input-fire-kg', 'input-fire-is-emri', 'input-fire-ek',
+    'input-ceksenet-kesideci', 'input-ceksenet-lehtar', 'input-ceksenet-seri', 'input-ceksenet-iban', 'input-ceksenet-ciro',
+    'input-personel-bolum', 'input-personel-tc', 'input-personel-sgk', 'input-personel-ucret-tarih'
+].forEach(id => assert(html.includes(`id="${id}"`), `${id} alanı eksik`));
+assert(html.includes('class="modal-disclosure"'), 'İsteğe bağlı ayrıntılar için açılır form bölümü eksik');
+assert(app.includes('function validateModalFields') && app.includes('function setFieldError'), 'Alan içi doğrulama altyapısı eksik');
+assert(app.includes('function beginModalSubmit') && app.includes("button.dataset.submitting = 'true'"), 'Mükerrer kayıt kilidi eksik');
+assert(app.includes('function requestCloseModal') && app.includes('isModalFormDirty'), 'Kaydedilmemiş değişiklik uyarısı eksik');
+assert(app.includes('MAX_ATTACHMENT_SIZE') && app.includes('renderFileInputSummary'), 'Dosya sınırı ve seçilen dosya özeti eksik');
+assert(app.includes("form.className = 'modal-form-element'"), 'Gerçek form ve Enter gönderim akışı eksik');
+assert(css.includes('.field-error') && css.includes('.file-input-summary') && css.includes('.currency-input-preview'), 'Form güvenliği görsel stilleri eksik');
 assert(css.includes('@media (prefers-reduced-motion: reduce)'), 'Azaltılmış hareket desteği eksik');
 assert(css.includes('body {') && css.includes('user-select: none') && css.includes('[contenteditable="true"]'), 'Arayüz metin seçimi sınırı ve form alanı istisnası eksik');
 

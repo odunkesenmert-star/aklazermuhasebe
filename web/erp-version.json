@@ -1,0 +1,9 @@
+{
+  "version": "1.3.33",
+  "releaseDate": "2026-08-18",
+  "notes": "Denetim geçmişi, güvenli sürüm kontrolü ve dağıtım iyileştirmeleri eklendi.",
+  "downloads": {
+    "mac": "https://aklazer.com.tr/downloads/AK_LAZER_ERP_Kurulum.dmg",
+    "windows": "https://aklazer.com.tr/downloads/AK%20LAZER%20ERP%20Setup%201.3.33-x64.exe"
+  }
+}

@@ -7,6 +7,7 @@ const packageData = require(path.join(projectRoot, 'package.json'));
 const html = fs.readFileSync(path.join(projectRoot, 'index.html'), 'utf8');
 const main = fs.readFileSync(path.join(projectRoot, 'main.js'), 'utf8');
 const preload = fs.readFileSync(path.join(projectRoot, 'preload.js'), 'utf8');
+const releaseManifest = JSON.parse(fs.readFileSync(path.join(projectRoot, 'web', 'erp-version.json'), 'utf8'));
 
 assert.match(
     html,
@@ -15,5 +16,10 @@ assert.match(
 );
 assert.match(main, /ipcMain\.handle\('app-surumu'/, 'Ana süreç sürüm bilgisini sunmalı.');
 assert.match(preload, /getAppVersion:\s*\(\)\s*=>\s*ipcRenderer\.invoke\('app-surumu'\)/, 'Sürüm API\'si güvenli köprüden sunulmalı.');
+assert.strictEqual(releaseManifest.version, packageData.version, 'Yayımlanan sürüm bilgisi package.json ile aynı olmalı.');
+assert.match(main, /ipcMain\.handle\('guncelleme-kontrol'/, 'Ana süreç güvenli sürüm kontrolünü sunmalı.');
+assert.match(main, /ALLOWED_UPDATE_HOSTS/, 'Güncelleme adresleri güvenilir alan adıyla sınırlandırılmalı.');
+assert.match(preload, /checkForUpdates:\s*\(\)\s*=>\s*ipcRenderer\.invoke\('guncelleme-kontrol'\)/, 'Güncelleme kontrolü güvenli köprüden sunulmalı.');
+assert.match(preload, /openUpdatePage:\s*\(updateURL\)\s*=>\s*ipcRenderer\.invoke\('guncelleme-sayfasi-ac'/, 'Güncelleme sayfası yalnızca ana süreç üzerinden açılmalı.');
 
 console.log(`Sürüm eşleşme testi geçti: v${packageData.version}`);

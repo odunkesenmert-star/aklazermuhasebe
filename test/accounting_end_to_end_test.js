@@ -192,8 +192,19 @@ setTimeout(() => {
         set('input-plan-kasa', bank.id);
         dom.window.savePaymentPlan();
         const plan = db.odemePlanlari[0];
+        dom.window.openPaymentPlanModal('', plan.id);
+        set('input-plan-tutar', 2500);
+        set('input-plan-aciklama', 'Kalan borç vade testi güncel');
+        dom.window.savePaymentPlan();
+        assert(plan.tutar === 2500 && db.odemePlanlari.length === 1, 'Bekleyen vade planı silinmeden düzenleniyor.');
         dom.window.markPaymentPlanPaid(plan.id, bank.id);
-        assert(balance(supplier) === -5000 && cashBalance(bank) === 46000, 'Vade planı ödendiğinde cari ve banka etkileniyor.');
+        assert(balance(supplier) === -4500 && cashBalance(bank) === 45500, 'Vade planı ödendiğinde cari ve banka etkileniyor.');
+        dom.window.undoPaymentPlanSettlement(plan.id);
+        assert(plan.durum === 'beklemede' && balance(supplier) === -7000 && cashBalance(bank) === 48000, 'Hatalı vade kapatma silmeden ters kayıtla geri alınıp plan yeniden beklemeye dönüyor.');
+        dom.window.openPaymentPlanModal('', plan.id);
+        set('input-plan-tutar', 2000);
+        dom.window.savePaymentPlan();
+        dom.window.markPaymentPlanPaid(plan.id, bank.id);
         dom.window.deletePaymentPlan(plan.id);
         assert(balance(supplier) === -7000 && cashBalance(bank) === 48000, 'Ödenmiş vade planı silinince her iki etki ters kayıtla geri dönüyor.');
 
@@ -235,12 +246,12 @@ setTimeout(() => {
         const payroll = db.personelPuantajlari[0];
         assert(payroll.netMaas === 29000 && cashBalance(bank) === 19000, 'Bir eksik günlü maaş 29.000 TL hesaplanıp bankadan çıkıyor.');
 
-        const alertsBeforeDuplicate = alerts.length;
         dom.window.openPayrollModal('', employee.id);
         set('input-puantaj-ay', '2026-07');
         set('input-puantaj-gun', 26);
         dom.window.savePuantaj();
-        assert(db.personelPuantajlari.length === 1 && alerts.length === alertsBeforeDuplicate + 1, 'Aynı personel ve ay için mükerrer maaş kaydı engelleniyor.');
+        const duplicateError = dom.window.document.getElementById('input-puantaj-ay-error');
+        assert(db.personelPuantajlari.length === 1 && duplicateError?.textContent.includes('seçilen dönemde kaydı var'), 'Aynı personel ve ay için mükerrer maaş kaydı alan içi uyarıyla engelleniyor.');
 
         dom.window.openPayrollModal(payroll.id, employee.id);
         set('input-puantaj-prim', 1000);
