@@ -1021,7 +1021,10 @@ function addCariMovement(cari, movement) {
         isGelir: !!movement.isGelir,
         ek: movement.ek || null,
         reversalOf: movement.reversalOf || null,
-        reversedBy: movement.reversedBy || null
+        reversedBy: movement.reversedBy || null,
+        correctionOf: movement.correctionOf || null,
+        correctedBy: movement.correctedBy || null,
+        correctionReversal: !!movement.correctionReversal
     };
 
     db.islemler.push(transaction);
@@ -2821,6 +2824,7 @@ const MODAL_PRESENTATION = Object.freeze({
 });
 
 const modalReturnFocus = new WeakMap();
+let modalOpenSequence = 0;
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
 
 function getModalFormSnapshot(modal) {
@@ -3959,6 +3963,9 @@ window.openModal = function(id) {
     if (!el) return;
     enhanceModalLayout(el);
     if (!el.classList.contains('active')) modalReturnFocus.set(el, document.activeElement);
+    el.dataset.modalOrder = String(++modalOpenSequence);
+    const activeModalCount = [...document.querySelectorAll('.modal-overlay.active')].filter(modal => modal !== el).length;
+    el.style.zIndex = String(1000 + (activeModalCount * 10));
     el.classList.add('active');
     document.body.classList.add('modal-open');
     setTimeout(() => {
@@ -3972,6 +3979,8 @@ window.closeModal = function(id) {
     const el = document.getElementById(id);
     if (!el) return;
     el.classList.remove('active');
+    delete el.dataset.modalOrder;
+    el.style.removeProperty('z-index');
     if (!document.querySelector('.modal-overlay.active')) document.body.classList.remove('modal-open');
     const returnTarget = modalReturnFocus.get(el);
     modalReturnFocus.delete(el);
@@ -3981,7 +3990,8 @@ window.closeModal = function(id) {
 }
 
 document.addEventListener('keydown', event => {
-    const activeModals = [...document.querySelectorAll('.modal-overlay.active')];
+    const activeModals = [...document.querySelectorAll('.modal-overlay.active')]
+        .sort((a, b) => Number(a.dataset.modalOrder || 0) - Number(b.dataset.modalOrder || 0));
     const modal = activeModals.at(-1);
     if (!modal || modal.id === 'modal-confirm') return;
 
@@ -4692,22 +4702,102 @@ window.saveAyarlar = function() {
     closeModal('modal-ayarlar');
 }
 
+function getCariMovementFormType(islem) {
+    const label = String(islem?.tip || '').toLocaleLowerCase('tr-TR');
+    if (label.includes('tahsilat')) return 'tahsilat';
+    if (label.includes('mal alımı')) return 'mal_alimi';
+    if (label.includes('ödeme yaptık')) return 'odeme_yaptik';
+    if (label.includes('fatura kesildi')) return 'fatura_kes';
+    return '';
+}
+
+function canEditCariMovement(islem) {
+    const type = getCariMovementFormType(islem);
+    return canReverseCariMovement(islem) && ['tahsilat', 'mal_alimi', 'odeme_yaptik'].includes(type);
+}
+
+function resetIslemModalState(id, adi) {
+    const setValue = (elementId, value = '') => {
+        const element = document.getElementById(elementId);
+        if (element) element.value = value;
+    };
+    setValue('input-islem-edit-id');
+    setValue('input-islem-cari-id', id);
+    setValue('input-islem-firma-adi', adi);
+    setValue('input-islem-payment-order-id');
+    setValue('input-islem-aciklama');
+    setValue('input-islem-fatura-no');
+    setValue('input-islem-tutar');
+    setValue('input-islem-kasa');
+    setValue('input-islem-ek-not');
+    resetAttachmentInputs('input-islem-ek', 'input-islem-ek-not');
+
+    const typeSelect = document.getElementById('input-islem-tipi');
+    if (typeSelect) {
+        [...typeSelect.options].forEach(option => { option.disabled = false; });
+        typeSelect.value = 'tahsilat';
+    }
+    const editNotice = document.getElementById('islem-edit-notice');
+    if (editNotice) editNotice.hidden = true;
+    const attachmentNote = document.getElementById('islem-existing-attachment-note');
+    if (attachmentNote) attachmentNote.hidden = true;
+    const saveButton = document.getElementById('btn-islem-save');
+    if (saveButton) saveButton.innerHTML = '<i class="fa-solid fa-check" aria-hidden="true"></i> Kaydet';
+}
+
 window.openIslemModal = function(id, adi) {
-    document.getElementById('input-islem-cari-id').value = id;
-    document.getElementById('input-islem-firma-adi').value = adi;
+    resetIslemModalState(id, adi);
     document.getElementById('modal-islem-title').textContent = adi + " - İşlem Ekle";
-    document.getElementById('input-islem-tutar').value = '';
     const orderSelect = document.getElementById('input-islem-order-id');
     if (orderSelect) {
         orderSelect.value = '';
         renderInvoiceOrderOptions(id);
     }
-    const paymentOrderEl = document.getElementById('input-islem-payment-order-id');
-    if (paymentOrderEl) paymentOrderEl.value = '';
     populateKasaOptions();
     updateIslemTipiInfo();
     openModal('modal-islem');
 }
+
+window.openEditCariMovement = function(id) {
+    const original = getDBArray('islemler').find(item => String(item.id) === String(id));
+    if (!original) return alert('Düzeltilecek cari hareketi bulunamadı.');
+    if (!canEditCariMovement(original)) {
+        const owner = getCariMovementOwner(original);
+        return alert(owner
+            ? `Bu hareket ${owner} kaydına bağlı. Düzeltmeyi ilgili modülden yapın.`
+            : 'Bu hareket düzeltilemez. Geri alınmış veya sistem tarafından oluşturulmuş olabilir.');
+    }
+
+    const cari = findCariByReference(original.cariId, original.firma);
+    if (!cari) return alert('Cari bulunamadığı için hareket düzeltilemiyor.');
+    const type = getCariMovementFormType(original);
+    const originalCash = original.kasaHareketId
+        ? getDBArray('kasaHareketleri').find(item => String(item.id) === String(original.kasaHareketId))
+        : null;
+    if (originalCash?.reversedBy) return alert('Bağlı kasa/banka hareketi daha önce geri alındığı için bu kayıt düzeltilemez.');
+
+    openIslemModal(cari.id, cari.adi);
+    document.getElementById('input-islem-edit-id').value = original.id;
+    document.getElementById('modal-islem-title').textContent = `${cari.adi} - İşlem Düzelt`;
+    document.getElementById('input-islem-tipi').value = type;
+    document.getElementById('input-islem-aciklama').value = original.aciklama || '';
+    document.getElementById('input-islem-tutar').value = roundMoney(original.tutar || 0);
+    document.getElementById('input-islem-payment-order-id').value = original.orderId || '';
+    populateKasaOptions(originalCash?.kasaId || '');
+    document.getElementById('input-islem-kasa').value = originalCash?.kasaId || '';
+    document.getElementById('input-islem-ek-not').value = original.ek?.note || '';
+
+    const invoiceOption = document.querySelector('#input-islem-tipi option[value="fatura_kes"]');
+    if (invoiceOption) invoiceOption.disabled = true;
+    const editNotice = document.getElementById('islem-edit-notice');
+    if (editNotice) editNotice.hidden = false;
+    const attachmentNote = document.getElementById('islem-existing-attachment-note');
+    if (attachmentNote) attachmentNote.hidden = !original.ek;
+    const saveButton = document.getElementById('btn-islem-save');
+    if (saveButton) saveButton.innerHTML = '<i class="fa-solid fa-pen-to-square" aria-hidden="true"></i> Düzeltmeyi Kaydet';
+    updateIslemTipiInfo();
+    markModalFormClean('modal-islem');
+};
 
 function renderInvoiceOrderOptions(cariId) {
     const orderSelect = document.getElementById('input-islem-order-id');
@@ -4747,7 +4837,15 @@ function getCurrentIslemCari() {
 }
 
 function getTahsilEdilebilirBorc(cari) {
-    return roundMoney(Math.max(Number(cari?.bakiye) || 0, 0));
+    let effectiveBalance = Number(cari?.bakiye) || 0;
+    const editId = document.getElementById('input-islem-edit-id')?.value || '';
+    if (editId) {
+        const original = getDBArray('islemler').find(item => String(item.id) === String(editId));
+        if (original && String(original.cariId) === String(cari?.id)) {
+            effectiveBalance = roundMoney(effectiveBalance - (Number(original.bakiyeDegisimi) || 0));
+        }
+    }
+    return roundMoney(Math.max(effectiveBalance, 0));
 }
 
 window.fillFullTahsilatAmount = function() {
@@ -4789,8 +4887,135 @@ window.updateTahsilatSummary = function() {
     summaryEl.style.display = 'block';
 };
 
-window.saveIslem = function() {
+function getCashMovementDelta(movement) {
+    if (!movement) return 0;
+    const amount = roundMoney(Number(movement.tutar) || 0);
+    return movement.tip === 'cikis' ? -amount : amount;
+}
+
+function saveCorrectedCariMovement(options = {}) {
+    const {
+        original, cari, tip, tipText, tutar, bakiyeArtisi,
+        aciklama, kasaId, relatedOrder, isSuccess, isGelir, ek
+    } = options;
+    if (!original || !cari) return false;
+
+    const originalCash = original.kasaHareketId
+        ? getDBArray('kasaHareketleri').find(item => String(item.id) === String(original.kasaHareketId))
+        : null;
+    if (original.kasaHareketId && !originalCash) {
+        alert('Eski kasa/banka hareketi bulunamadığı için düzeltme yapılamadı.');
+        return false;
+    }
+    if (originalCash?.reversedBy) {
+        alert('Eski kasa/banka hareketi daha önce geri alınmış. Düzeltme yapılamadı.');
+        return false;
+    }
+
+    const originalDelta = roundMoney(Number(original.bakiyeDegisimi) || 0);
+    const oldCashDelta = getCashMovementDelta(originalCash);
+    const cashBalances = new Map(getDBArray('kasaHesaplari').map(account => [String(account.id), Number(account.bakiye) || 0]));
+    const snapshot = {
+        cariBalance: Number(cari.bakiye) || 0,
+        islemLength: getDBArray('islemler').length,
+        cashLength: getDBArray('kasaHareketleri').length,
+        auditLength: getDBArray('denetimKayitlari').length,
+        reversedBy: original.reversedBy || null,
+        correctedBy: original.correctedBy || null,
+        cashReversedBy: originalCash?.reversedBy || null
+    };
+
     try {
+        const reversal = addCariMovement(cari, {
+            tip: `Düzeltme Ters Kaydı (${original.tip || 'Cari İşlem'})`,
+            aciklama: `Hatalı kayıt düzeltme amacıyla ters çevrildi.${original.aciklama ? ` Önceki açıklama: ${original.aciklama}` : ''}`,
+            tutar: original.tutar,
+            bakiyeDegisimi: -originalDelta,
+            isSuccess: false,
+            isGelir: false,
+            reversalOf: original.id,
+            correctionReversal: true
+        });
+        if (!reversal) throw new Error('Düzeltme ters kaydı oluşturulamadı.');
+        original.reversedBy = reversal.id;
+
+        if (originalCash) {
+            const cashReversal = reverseCashMovement(originalCash.id, `Cari hareketi düzeltildi: ${original.tip || 'Cari İşlem'}`);
+            if (!cashReversal) throw new Error('Eski kasa/banka etkisi geri alınamadı.');
+            reversal.kasaHareketId = cashReversal.id;
+        }
+
+        const corrected = addCariMovement(cari, {
+            tip: tipText,
+            aciklama: aciklama || (relatedOrder ? `${relatedOrder.orderNo || 'İş emri'} tahsilatı` : ''),
+            tutar,
+            bakiyeDegisimi: bakiyeArtisi,
+            orderId: relatedOrder?.id || null,
+            orderNo: relatedOrder?.orderNo || '',
+            isSuccess,
+            isGelir,
+            ek,
+            correctionOf: original.id
+        });
+        if (!corrected) throw new Error('Düzeltilmiş cari hareketi oluşturulamadı.');
+
+        let correctedCash = null;
+        if (tip === 'tahsilat' || tip === 'odeme_yaptik') {
+            correctedCash = addCashMovement(kasaId, {
+                tip: tip === 'tahsilat' ? 'giris' : 'cikis',
+                tutar,
+                aciklama: `${cari.adi} - ${tipText} (Düzeltildi)`,
+                kaynak: 'cari-islem-duzeltme',
+                refId: corrected.id
+            });
+            if (!correctedCash) throw new Error('Düzeltilmiş kasa/banka hareketi oluşturulamadı.');
+            corrected.kasaHareketId = correctedCash.id;
+        }
+
+        original.correctedBy = corrected.id;
+        reversal.correctedBy = corrected.id;
+        scheduleAttachmentArchive(ek, 'Cari Islemler', cari.adi);
+        addAuditLog('Güncellendi', 'Cari İşlem', original.id, `${cari.adi} / ${original.tip || 'Cari İşlem'} ${formatCurrency(original.tutar || 0)} → ${tipText} ${formatCurrency(tutar)}`);
+        saveDB();
+        closeModal('modal-islem');
+        document.getElementById('input-islem-edit-id').value = '';
+        resetAttachmentInputs('input-islem-ek', 'input-islem-ek-not');
+        renderCariler();
+        renderDashboard();
+        openCariDetay(cari.id);
+
+        const newCashDelta = getCashMovementDelta(correctedCash);
+        const impacts = [{ label: 'Cari', value: roundMoney(bakiyeArtisi - originalDelta) }];
+        if (originalCash || correctedCash) impacts.push({ label: 'Kasa', value: roundMoney(newCashDelta - oldCashDelta) });
+        showImpactSummary('İşlem düzeltildi', impacts, {
+            message: `${formatCurrency(original.tutar || 0)} tutarındaki eski kayıt kapatıldı; ${formatCurrency(tutar)} tutarında düzeltilmiş kayıt oluşturuldu.`
+        });
+        return true;
+    } catch (error) {
+        db.islemler.splice(snapshot.islemLength);
+        db.kasaHareketleri.splice(snapshot.cashLength);
+        db.denetimKayitlari.splice(snapshot.auditLength);
+        original.reversedBy = snapshot.reversedBy;
+        original.correctedBy = snapshot.correctedBy;
+        if (originalCash) originalCash.reversedBy = snapshot.cashReversedBy;
+        cari.bakiye = snapshot.cariBalance;
+        updateCariStatus(cari);
+        getDBArray('kasaHesaplari').forEach(account => {
+            if (cashBalances.has(String(account.id))) account.bakiye = cashBalances.get(String(account.id));
+        });
+        alert(`İşlem düzeltilemedi: ${error.message}`);
+        return false;
+    }
+}
+
+window.saveIslem = function() {
+    const editId = document.getElementById('input-islem-edit-id')?.value || '';
+    const unlock = beginModalSubmit('modal-islem', editId ? 'Düzeltiliyor...' : 'Kaydediliyor...');
+    if (!unlock) return;
+    try {
+        const original = editId ? getDBArray('islemler').find(item => String(item.id) === String(editId)) : null;
+        if (editId && !original) return alert('Düzeltilecek cari hareketi bulunamadı.');
+        if (original && !canEditCariMovement(original)) return alert('Bu hareket artık düzeltilemez. Listeyi yenileyip tekrar deneyin.');
         const cariId = parseInt(document.getElementById('input-islem-cari-id').value);
         const firmaAdi = document.getElementById('input-islem-firma-adi').value;
         const tip = document.getElementById('input-islem-tipi').value;
@@ -4803,9 +5028,14 @@ window.saveIslem = function() {
         const paymentOrder = paymentOrderId ? getDBArray('isEmirleri').find(o => o.id == paymentOrderId) : null;
         const relatedOrder = linkedOrder || paymentOrder;
         const tutar = linkedOrder ? roundMoney(linkedOrder.total) : parseFloat(document.getElementById('input-islem-tutar').value);
-        const ek = getAttachmentFromInputs('input-islem-ek', 'input-islem-ek-not');
+        const selectedFile = document.getElementById('input-islem-ek')?.files?.[0] || null;
+        const newAttachment = getAttachmentFromInputs('input-islem-ek', 'input-islem-ek-not');
+        const ek = original?.ek && !selectedFile
+            ? { ...original.ek, note: plainText(document.getElementById('input-islem-ek-not')?.value || original.ek.note || '') }
+            : (newAttachment || original?.ek || null);
 
         if (!Number.isFinite(tutar) || tutar <= 0) return alert("Geçerli bir tutar girin!");
+        if (original && tip === 'fatura_kes') return alert('Fatura hareketleri cari geçmişinden düzeltilemez. Faturalar bölümünü kullanın.');
         if (tip === 'fatura_kes' && !faturaNo.trim()) return alert("Fatura kesmek için Fatura No girmek zorunludur!");
         if (tip === 'fatura_kes' && hasDuplicateInvoiceNo(faturaNo, { tur: 'kesilen' })) return alert('Bu fatura numarası daha önce kullanılmış. Farklı bir fatura numarası girin.');
         if (linkedOrder && linkedOrder.customerId != cariId) return alert("Seçilen iş emri bu cariye ait değil.");
@@ -4849,6 +5079,23 @@ window.saveIslem = function() {
             bakiyeArtisi = tutar;
             isSuccess = true;
             isGelir = false;
+        }
+
+        if (original) {
+            return saveCorrectedCariMovement({
+                original,
+                cari,
+                tip,
+                tipText,
+                tutar,
+                bakiyeArtisi,
+                aciklama,
+                kasaId,
+                relatedOrder,
+                isSuccess,
+                isGelir,
+                ek
+            });
         }
 
         const eskiBakiye = cari.bakiye || 0;
@@ -4946,6 +5193,8 @@ window.saveIslem = function() {
 
     } catch(e) {
         alert("İşlem kaydedilirken hata oluştu: " + e.message);
+    } finally {
+        unlock();
     }
 }
 
@@ -5472,7 +5721,9 @@ window.openCariDetay = function(id) {
             ek: islem.ek || null,
             kaynak: islem.orderId ? 'satis' : 'finans',
             canReverse: canReverseCariMovement(islem),
-            reversed: !!islem.reversedBy
+            canEdit: canEditCariMovement(islem),
+            reversed: !!islem.reversedBy,
+            corrected: !!islem.correctedBy
         });
     });
 
@@ -5570,8 +5821,11 @@ window.renderCariHistory = function() {
             </td>
             <td style="text-align:right;">
                 ${h.canReverse
-                    ? `<button class="btn btn-outline" style="padding:4px 8px; font-size:12px;" onclick="reverseCariMovement(${escapeJSStringForAttr(h.id)})"><i class="fa-solid fa-rotate-left"></i> Geri Al</button>`
-                    : (h.reversed ? '<span class="badge warning">Geri Alındı</span>' : '-')}
+                    ? `<div class="cari-history-actions">
+                        ${h.canEdit ? `<button type="button" class="btn btn-outline cari-history-action cari-history-edit" onclick="openEditCariMovement(${escapeJSStringForAttr(h.id)})" aria-label="Cari hareketini düzelt" title="Düzelt"><i class="fa-solid fa-pen-to-square" aria-hidden="true"></i> Düzelt</button>` : ''}
+                        <button type="button" class="btn btn-outline cari-history-action cari-history-undo" onclick="reverseCariMovement(${escapeJSStringForAttr(h.id)})" aria-label="Cari hareketini geri al" title="Geri Al"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Geri Al</button>
+                    </div>`
+                    : (h.corrected ? '<span class="badge info"><i class="fa-solid fa-pen-to-square" aria-hidden="true"></i> Düzeltildi</span>' : (h.reversed ? '<span class="badge warning">Geri Alındı</span>' : '-'))}
             </td>
         </tr>
     `).join('') || renderTableEmptyState(5, 'Geçmiş hareket bulunamadı.', 'Cari işlemleri kaydedildikçe ekstre burada oluşacak.', 'fa-clock-rotate-left');
@@ -10386,7 +10640,7 @@ const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 let latestUpdateInfo = null;
 
 function getVisibleAppVersion() {
-    return plainText(document.getElementById('app-version')?.textContent || 'v1.3.35').replace(/^v/i, '') || '1.3.35';
+    return plainText(document.getElementById('app-version')?.textContent || 'v1.3.36').replace(/^v/i, '') || '1.3.36';
 }
 
 function setUpdateStatus(state, title, message, options = {}) {

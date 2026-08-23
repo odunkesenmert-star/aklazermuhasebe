@@ -168,6 +168,21 @@ setTimeout(() => {
         dom.window.reverseCariMovement(collection.id);
         assert(db.islemler.length === movementCountAfterFirstReversal && alerts.at(-1).includes('daha önce'), 'Aynı hareket ikinci kez geri alınamıyor.');
         collection = saveCariTransaction(customer, 'tahsilat', 3000, 'Geçerli kısmi tahsilat');
+        dom.window.openCariDetay(customer.id);
+        assert(dom.window.document.getElementById('ekstre-tbody').innerHTML.includes('Düzelt') && dom.window.document.getElementById('ekstre-tbody').innerHTML.includes('Geri Al'), 'Bağımsız cari hareketinde Düzelt ve Geri Al işlemleri birlikte gösteriliyor.');
+        const originalCollection = collection;
+        dom.window.openEditCariMovement(collection.id);
+        assert(Number(dom.window.document.getElementById('modal-islem').style.zIndex) > Number(dom.window.document.getElementById('modal-cari-ekstre').style.zIndex), 'Düzeltme penceresi cari geçmişinin önünde ve etkileşime açık gösteriliyor.');
+        assert(set('input-islem-tutar', 2800) && dom.window.document.getElementById('modal-islem-title').textContent.includes('İşlem Düzelt'), 'Düzeltme penceresi eski hareket bilgileriyle açılıyor.');
+        dom.window.saveIslem();
+        let correctedCollection = db.islemler.at(-1);
+        assert(balance(customer) === 5840 && cashBalance(bank) === 52800, 'Tahsilat düzeltildiğinde cari ve banka yalnızca tutar farkı kadar güncelleniyor.');
+        assert(String(originalCollection.correctedBy) === String(correctedCollection.id) && db.islemler.some(item => String(item.reversalOf) === String(originalCollection.id)), 'Düzeltme eski kaydı silmeden ters kayıt ve yeni hareket bağlantısı oluşturuyor.');
+        dom.window.openEditCariMovement(correctedCollection.id);
+        set('input-islem-tutar', 3000);
+        dom.window.saveIslem();
+        collection = db.islemler.at(-1);
+        assert(balance(customer) === 5640 && cashBalance(bank) === 53000, 'Düzeltilmiş hareket yeniden düzeltildiğinde mutabakat korunuyor.');
 
         console.log('\n--- Alış faturası, tedarikçi ödemesi ve vade planı ---');
         dom.window.renderCariler();

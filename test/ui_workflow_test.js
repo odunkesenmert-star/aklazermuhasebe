@@ -27,6 +27,7 @@ assert(html.includes('id="toast-region"'), 'Toast bildirim bölgesi eksik');
 assert(html.includes('id="modal-confirm"'), 'Özel onay penceresi eksik');
 assert(html.includes('id="history-linked-records"'), 'İş emri bağlı kayıt alanı eksik');
 assert(html.includes('id="input-islem-payment-order-id"'), 'İş emri tahsilat bağlantısı eksik');
+assert(html.includes('id="input-islem-edit-id"') && html.includes('id="islem-edit-notice"'), 'Cari hareketi güvenli düzeltme alanları eksik');
 assert(html.includes('secondary-data-panel is-collapsed'), 'İkincil hareket panellerinin kapalı başlangıç durumu eksik');
 assert(html.includes('secondary-panel-toggle'), 'İkincil hareket paneli açma düğmesi eksik');
 assert(html.includes('accounts-toolbar workspace-toolbar'), 'Cari çalışma alanı gruplaması eksik');
@@ -57,6 +58,8 @@ assert(app.includes("{ label: 'Cari'"), 'Cari etki özeti eksik');
 assert(app.includes("{ label: 'Kasa'"), 'Kasa etki özeti eksik');
 assert(app.includes("{ label: 'Stok'"), 'Stok etki özeti eksik');
 assert(app.includes('window.undoManualCashMovement') && app.includes('reverseCashMovement(movement.id'), 'Manuel kasa hareketi ters kayıt akışı eksik');
+assert(app.includes('window.openEditCariMovement') && app.includes('saveCorrectedCariMovement'), 'Cari hareketinde Düzelt ve ters kayıtlı güncelleme akışı eksik');
+assert(app.includes('correctionOf: original.id') && app.includes("addAuditLog('Güncellendi', 'Cari İşlem'"), 'Cari düzeltme bağlantısı ve denetim kaydı eksik');
 assert(app.includes('window.toggleKasaHesapStatus') && app.includes('window.deleteKasaHesap'), 'Kasa/banka düzenleme, pasife alma ve güvenli silme akışı eksik');
 assert(app.includes('window.undoPaymentPlanSettlement') && app.includes("openPaymentPlanModal('', '${plan.id}')"), 'Vade planı düzenleme ve ödeme geri alma akışı eksik');
 assert(app.includes("openFireModal('${f.id}')") && app.includes("existing ? 'Güncellendi' : 'Oluşturuldu'"), 'Fire/parça düzenleme akışı eksik');
@@ -72,6 +75,7 @@ assert(app.includes('function enhanceTableHeaderScopes'), 'Dinamik tablo başlı
 assert(app.includes('function enhanceModalLayout'), 'Ortak pencere düzeni eksik');
 assert(app.includes('const MODAL_PRESENTATION'), 'Pencere başlık ve renk tasarım sistemi eksik');
 assert(app.includes('function getModalFocusables'), 'Pencere klavye odak yönetimi eksik');
+assert(app.includes('modalOpenSequence') && app.includes('dataset.modalOrder'), 'İç içe açılan düzeltme pencerelerinde görünürlük ve odak sırası eksik');
 assert(!app.includes('.brand-header::before'), 'Yazdırılan belge logosunun üstünde dekoratif çizgi kalmamalı');
 assert(app.includes("event.key !== 'Tab'"), 'Pencere odak döngüsü eksik');
 assert(app.includes('function renderTableEmptyState'), 'Ortak tablo boş durum bileşeni eksik');
@@ -105,6 +109,7 @@ assert(app.includes("type: 'quote'") && app.includes("type: 'payment'"), 'İş e
 assert(!/(^|[^A-Za-z0-9_])confirm\s*\(/m.test(app), 'Yerel confirm kullanımı kaldı');
 
 assert(css.includes('.table-action-button'), 'Büyütülmüş tablo düğmesi stili eksik');
+assert(css.includes('.cari-history-actions') && css.includes('.cari-history-edit') && css.includes('min-height: 44px'), 'Cari Düzelt ve Geri Al düğmelerinin erişilebilir stili eksik');
 assert(css.includes('.account-action-secondary-group'), 'Cari düzenle ve sil ayırıcı grubu eksik');
 assert(css.includes('.high-volume-list-toolbar'), '200+ kayıt için yoğun liste araç çubuğu eksik');
 assert(css.includes('.list-page-size-control'), 'Sayfa kayıt kapasitesi seçimi stili eksik');

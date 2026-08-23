@@ -6555,6 +6555,86 @@ body.modal-open {
     color: #8bdff8;
 }
 
+.transaction-edit-notice {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin: 0 0 16px;
+    padding: 12px 14px;
+    border: 1px solid rgba(76, 201, 240, .26);
+    border-radius: 10px;
+    background: rgba(76, 201, 240, .08);
+    color: #b9ecfb;
+}
+
+.transaction-edit-notice[hidden] {
+    display: none;
+}
+
+.transaction-edit-notice > i {
+    display: grid;
+    flex: 0 0 36px;
+    width: 36px;
+    height: 36px;
+    place-items: center;
+    border-radius: 9px;
+    background: rgba(76, 201, 240, .12);
+    color: #8bdff8;
+}
+
+.transaction-edit-notice strong,
+.transaction-edit-notice span {
+    display: block;
+}
+
+.transaction-edit-notice strong {
+    margin-bottom: 3px;
+    color: var(--text-main);
+    font-size: 13px;
+}
+
+.transaction-edit-notice span {
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.cari-history-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    white-space: nowrap;
+}
+
+.cari-history-action {
+    min-height: 44px;
+    padding: 0 11px;
+    font-size: 12px;
+}
+
+.cari-history-edit {
+    border-color: rgba(76, 201, 240, .3);
+    color: #9be7fb;
+    background: rgba(76, 201, 240, .06);
+}
+
+.cari-history-edit:hover:not(:disabled) {
+    border-color: rgba(76, 201, 240, .52);
+    background: rgba(76, 201, 240, .12);
+}
+
+.cari-history-undo {
+    border-color: rgba(255, 209, 102, .24);
+    color: #f6d783;
+}
+
+@media (max-width: 860px) {
+    .cari-history-actions {
+        flex-wrap: wrap;
+    }
+}
+
 .cash-movement-locked {
     display: inline-grid;
     width: 36px;
