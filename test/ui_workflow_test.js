@@ -72,6 +72,7 @@ assert(app.includes('function enhanceTableHeaderScopes'), 'Dinamik tablo başlı
 assert(app.includes('function enhanceModalLayout'), 'Ortak pencere düzeni eksik');
 assert(app.includes('const MODAL_PRESENTATION'), 'Pencere başlık ve renk tasarım sistemi eksik');
 assert(app.includes('function getModalFocusables'), 'Pencere klavye odak yönetimi eksik');
+assert(!app.includes('.brand-header::before'), 'Yazdırılan belge logosunun üstünde dekoratif çizgi kalmamalı');
 assert(app.includes("event.key !== 'Tab'"), 'Pencere odak döngüsü eksik');
 assert(app.includes('function renderTableEmptyState'), 'Ortak tablo boş durum bileşeni eksik');
 assert(app.includes('account-identity-button') && app.includes('account-balance-cell'), 'Cari kimlik ve bakiye satır düzeni eksik');

@@ -1308,7 +1308,6 @@ function getPrintBaseStyles(options = {}) {
             body { padding: 0; }
         }
         .brand-header { position: relative; display: grid; grid-template-columns: 190px minmax(0, 1fr) 175px; align-items: stretch; gap: 16px; margin-bottom: 22px; padding: 10px 0 16px; border-bottom: 1px solid var(--line-strong); break-inside: avoid; page-break-inside: avoid; }
-        .brand-header::before { content: ""; position: absolute; top: 0; left: 0; width: 42px; height: 3px; background: var(--accent); }
         .brand-mark { display: flex; align-items: center; padding-right: 12px; border-right: 1px solid var(--line); }
         .brand-copy { display: flex; min-width: 0; flex-direction: column; justify-content: center; }
         .brand-logo { display: block; width: 100%; max-height: 78px; object-fit: contain; object-position: left center; }
@@ -10311,7 +10310,7 @@ const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 let latestUpdateInfo = null;
 
 function getVisibleAppVersion() {
-    return plainText(document.getElementById('app-version')?.textContent || 'v1.3.33').replace(/^v/i, '') || '1.3.33';
+    return plainText(document.getElementById('app-version')?.textContent || 'v1.3.34').replace(/^v/i, '') || '1.3.34';
 }
 
 function setUpdateStatus(state, title, message, options = {}) {

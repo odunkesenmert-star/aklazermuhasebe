@@ -1,9 +1,9 @@
 {
-  "version": "1.3.33",
-  "releaseDate": "2026-08-18",
-  "notes": "Denetim geçmişi, güvenli sürüm kontrolü ve dağıtım iyileştirmeleri eklendi.",
+  "version": "1.3.34",
+  "releaseDate": "2026-08-23",
+  "notes": "Yazdırılan belgelerde logo üstündeki gereksiz dekoratif çizgi kaldırıldı.",
   "downloads": {
     "mac": "https://aklazer.com.tr/downloads/AK_LAZER_ERP_Kurulum.dmg",
-    "windows": "https://aklazer.com.tr/downloads/AK%20LAZER%20ERP%20Setup%201.3.33-x64.exe"
+    "windows": "https://aklazer.com.tr/downloads/AK%20LAZER%20ERP%20Setup%201.3.34-x64.exe"
   }
 }
