@@ -94,6 +94,8 @@ assert(app.includes('cnc_plazma: Object.freeze') && app.includes("pricing: 'kg'"
 assert(app.includes('window.renderAuditTrail') && app.includes('getFilteredAuditRecordsForReport'), 'Denetim geçmişi filtreleme ve render akışı eksik');
 assert(app.includes("addAuditLog('Oluşturuldu', 'Cari'") && app.includes("addAuditLog('Güncellendi', 'Stok'"), 'Temel cari ve stok denetim kayıtları eksik');
 assert(app.includes('window.checkForUpdates') && app.includes('scheduleAutomaticUpdateCheck'), 'Güvenli sürüm kontrolü akışı eksik');
+assert(app.includes('id="btn-print-preview-whatsapp"') && app.includes('sharePrintPreviewOnWhatsApp'), 'Yazdırma önizlemesinde WhatsApp paylaşım düğmesi eksik');
+assert(app.includes('quoteCari?.tel') && app.includes('customerCari?.tel'), 'Müşteri belgeleri WhatsApp telefonu bağlamını taşımıyor');
 assert(app.includes('isKgPricedOperation(islemTipi)'), 'CNC Plazma teklif hesaplama yolu eksik');
 assert(app.includes("privacyState.hidden = isStatsVisible"), 'Gösterge paneli finansal gizlilik kapsamı eksik');
 assert(app.includes("type: 'line'"), 'Gelir gider eğilim grafiği çizgi grafiği olmalı');
@@ -114,6 +116,7 @@ assert(css.includes('.quote-form-section.is-collapsed'), 'Teklif adımı daraltm
 assert(css.includes('.quote-pricing-helper'), 'Kilogram fiyatlandırma yardımcı metni stili eksik');
 assert(css.includes('.audit-data-table') && css.includes('.audit-action-badge'), 'Denetim geçmişi yoğun tablo stili eksik');
 assert(css.includes('.update-status-card') && css.includes('.update-actions'), 'Sürüm kontrolü durum stili eksik');
+assert(css.includes('.btn-whatsapp') && css.includes('min-height: 44px'), 'WhatsApp paylaşım düğmesinin erişilebilir stili eksik');
 assert(css.includes('.dashboard-insight-grid'), 'Gösterge paneli karar alanı stili eksik');
 assert(css.includes('.dashboard-status-chip.has-alerts'), 'Dinamik öncelik durumu stili eksik');
 assert(css.includes('.dashboard-health-chips'), 'Sağlıklı durum rozet stili eksik');

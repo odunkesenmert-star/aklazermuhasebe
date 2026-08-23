@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     loadDBFromFile: () => ipcRenderer.invoke('db-dosyadan-yukle'),
     saveDBToFile: (data) => ipcRenderer.invoke('db-dosyaya-kaydet', data),
     savePDF: (payload) => ipcRenderer.invoke('pdf-kaydet', payload),
+    sharePDFWhatsApp: (payload) => ipcRenderer.invoke('pdf-whatsapp-paylas', payload),
     archiveAttachment: (payload) => ipcRenderer.invoke('belge-arsivle', payload),
     openAttachment: (filePath) => ipcRenderer.invoke('belge-ac', filePath),
     getAppVersion: () => ipcRenderer.invoke('app-surumu'),

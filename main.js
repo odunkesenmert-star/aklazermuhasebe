@@ -190,6 +190,68 @@ function preparePDFHTML(html) {
     return html.replace(/<head([^>]*)>/i, `<head$1>\n            ${baseTag}`);
 }
 
+function validatePDFPayload(payload = {}) {
+    const html = preparePDFHTML(String(payload.html || ''));
+    const title = makeSafeFileName(payload.title || 'AK LAZER Belge');
+    if (!html.trim()) throw new Error('PDF içeriği boş.');
+    if (Buffer.byteLength(html, 'utf8') > MAX_PDF_HTML_BYTES) {
+        throw new Error('PDF içeriği 20 MB sınırını aşıyor.');
+    }
+    return { html, title };
+}
+
+async function renderPDFBuffer(html) {
+    let pdfWindow;
+    let tempHTMLPath = '';
+    try {
+        pdfWindow = new BrowserWindow({
+            show: false,
+            width: 1240,
+            height: 1754,
+            webPreferences: {
+                nodeIntegration: false,
+                contextIsolation: true,
+                sandbox: true,
+                webSecurity: true
+            }
+        });
+
+        tempHTMLPath = path.join(app.getPath('temp'), `ak-lazer-pdf-${Date.now()}-${Math.floor(Math.random() * 10000)}.html`);
+        writeTextFileAtomic(tempHTMLPath, html);
+        await pdfWindow.loadFile(tempHTMLPath);
+        return await pdfWindow.webContents.printToPDF({
+            printBackground: true,
+            preferCSSPageSize: true,
+            pageSize: 'A4',
+            margins: { marginType: 'none' }
+        });
+    } finally {
+        if (pdfWindow && !pdfWindow.isDestroyed()) pdfWindow.close();
+        if (tempHTMLPath) fs.rm(tempHTMLPath, { force: true }, () => {});
+    }
+}
+
+function normalizeWhatsAppPhone(value) {
+    let digits = String(value || '').replace(/\D/g, '');
+    if (digits.startsWith('00')) digits = digits.slice(2);
+    if (digits.length === 11 && digits.startsWith('0')) digits = `90${digits.slice(1)}`;
+    else if (digits.length === 10) digits = `90${digits}`;
+    return /^\d{8,15}$/.test(digits) ? digits : '';
+}
+
+function getWhatsAppShareURL(phone, message) {
+    const normalizedPhone = normalizeWhatsAppPhone(phone);
+    const url = new URL(normalizedPhone ? `https://wa.me/${normalizedPhone}` : 'https://wa.me/');
+    if (message) url.searchParams.set('text', String(message).slice(0, 1000));
+    return { url: url.toString(), normalizedPhone };
+}
+
+function getWhatsAppPDFPath(title) {
+    const shareDirectory = path.join(app.getPath('documents'), 'AkLazerBelgeler', 'WhatsApp');
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    return path.join(shareDirectory, `${title}-${timestamp}.pdf`);
+}
+
 function createWindow() {
     const win = new BrowserWindow({
         width: 1280,
@@ -383,18 +445,9 @@ app.whenReady().then(() => {
     });
 
     ipcMain.handle('pdf-kaydet', async (event, payload = {}) => {
-        let pdfWindow;
-        let tempHTMLPath = '';
         try {
             assertTrustedSender(event);
-            const html = preparePDFHTML(String(payload.html || ''));
-            const title = makeSafeFileName(payload.title || 'AK LAZER Belge');
-            if (!html.trim()) {
-                return { success: false, error: 'PDF içeriği boş.' };
-            }
-            if (Buffer.byteLength(html, 'utf8') > MAX_PDF_HTML_BYTES) {
-                return { success: false, error: 'PDF içeriği 20 MB sınırını aşıyor.' };
-            }
+            const { html, title } = validatePDFPayload(payload);
 
             const { filePath, canceled } = await dialog.showSaveDialog(BrowserWindow.fromWebContents(event.sender), {
                 title: 'PDF Olarak Kaydet',
@@ -406,41 +459,35 @@ app.whenReady().then(() => {
                 return { success: false, canceled: true };
             }
 
-            pdfWindow = new BrowserWindow({
-                show: false,
-                width: 1240,
-                height: 1754,
-                webPreferences: {
-                    nodeIntegration: false,
-                    contextIsolation: true,
-                    sandbox: true,
-                    webSecurity: true
-                }
-            });
-
-            tempHTMLPath = path.join(app.getPath('temp'), `ak-lazer-pdf-${Date.now()}-${Math.floor(Math.random() * 10000)}.html`);
-            writeTextFileAtomic(tempHTMLPath, html);
-            await pdfWindow.loadFile(tempHTMLPath);
-            const pdfData = await pdfWindow.webContents.printToPDF({
-                printBackground: true,
-                preferCSSPageSize: true,
-                pageSize: 'A4',
-                margins: {
-                    marginType: 'none'
-                }
-            });
+            const pdfData = await renderPDFBuffer(html);
             writeTextFileAtomic(filePath, pdfData);
             return { success: true, path: filePath };
         } catch (error) {
             console.error("PDF kaydetme hatası:", error);
             return { success: false, error: error.message };
-        } finally {
-            if (pdfWindow && !pdfWindow.isDestroyed()) {
-                pdfWindow.close();
-            }
-            if (tempHTMLPath) {
-                fs.rm(tempHTMLPath, { force: true }, () => {});
-            }
+        }
+    });
+
+    ipcMain.handle('pdf-whatsapp-paylas', async (event, payload = {}) => {
+        try {
+            assertTrustedSender(event);
+            const { html, title } = validatePDFPayload(payload);
+            const message = String(payload.message || `${title} belgesini iletiyorum.`).trim().slice(0, 1000);
+            const pdfData = await renderPDFBuffer(html);
+            const filePath = getWhatsAppPDFPath(title);
+            writeTextFileAtomic(filePath, pdfData);
+
+            const share = getWhatsAppShareURL(payload.phone, message);
+            shell.showItemInFolder(filePath);
+            await shell.openExternal(share.url);
+            return {
+                success: true,
+                path: filePath,
+                phoneMatched: Boolean(share.normalizedPhone)
+            };
+        } catch (error) {
+            console.error('WhatsApp paylaşım hazırlama hatası:', error);
+            return { success: false, error: error.message };
         }
     });
 });

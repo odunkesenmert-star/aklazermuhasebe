@@ -1479,6 +1479,51 @@ async function savePrintPreviewDocument(title, html) {
     }
 }
 
+function getWhatsAppShareMessage(title, shareContext = {}) {
+    const customerName = plainText(shareContext.customerName || '');
+    const documentNo = plainText(shareContext.documentNo || '');
+    const greeting = customerName ? `Merhaba ${customerName},` : 'Merhaba,';
+    const reference = documentNo ? ` (${documentNo})` : '';
+    return `${greeting}\n\n${plainText(title)}${reference} belgesini iletiyorum.\n\nAK LAZER`;
+}
+
+async function sharePrintPreviewOnWhatsApp(title, html, shareContext = {}) {
+    const button = document.getElementById('btn-print-preview-whatsapp');
+    const originalHTML = button?.innerHTML;
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '<i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Hazırlanıyor';
+    }
+
+    try {
+        if (!window.electronAPI?.sharePDFWhatsApp) {
+            alert('WhatsApp paylaşımı masaüstü uygulamasında çalışır.');
+            return;
+        }
+        const result = await window.electronAPI.sharePDFWhatsApp({
+            title,
+            html,
+            phone: plainText(shareContext.phone || ''),
+            message: getWhatsAppShareMessage(title, shareContext)
+        });
+        if (!result?.success) {
+            alert(`WhatsApp paylaşımı hazırlanamadı: ${result?.error || 'Bilinmeyen hata'}`);
+            return;
+        }
+        const chatNote = result.phoneMatched
+            ? 'Müşterinin WhatsApp sohbeti açıldı.'
+            : 'Kayıtlı geçerli telefon bulunamadığı için WhatsApp kişi seçme ekranı açıldı.';
+        alert(`PDF hazırlandı. ${chatNote}\n\nFinder/Dosya Gezgini'nde seçili PDF'yi sohbete sürükleyip Gönder'e basın.\n${result.path}`);
+    } catch (error) {
+        alert(`WhatsApp paylaşımı hazırlanırken hata oluştu: ${error.message}`);
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = originalHTML;
+        }
+    }
+}
+
 function openPrintPreview(title, contentHTML, extraStyles = '', options = {}) {
     const existingPreview = document.getElementById('print-preview-overlay');
     if (existingPreview) {
@@ -1519,6 +1564,7 @@ function openPrintPreview(title, contentHTML, extraStyles = '', options = {}) {
             </div>
             <div class="print-preview-actions">
                 <button type="button" class="btn btn-outline" id="btn-print-preview-close">Kapat</button>
+                <button type="button" class="btn btn-whatsapp" id="btn-print-preview-whatsapp" aria-label="PDF belgesini WhatsApp ile gönder"><i class="fa-brands fa-whatsapp" aria-hidden="true"></i> WhatsApp'tan Gönder</button>
                 <button type="button" class="btn btn-outline" id="btn-print-preview-download"><i class="fa-solid fa-file-pdf"></i> PDF İndir</button>
                 <button type="button" class="btn btn-primary" id="btn-print-preview-print"><i class="fa-solid fa-print"></i> Yazdır</button>
             </div>
@@ -1558,6 +1604,9 @@ function openPrintPreview(title, contentHTML, extraStyles = '', options = {}) {
     overlay.querySelector('#btn-print-preview-close')?.addEventListener('click', () => overlay.closePreview());
     overlay.querySelector('#btn-print-preview-download')?.addEventListener('click', () => {
         savePrintPreviewDocument(title, previewHTML);
+    });
+    overlay.querySelector('#btn-print-preview-whatsapp')?.addEventListener('click', () => {
+        sharePrintPreviewOnWhatsApp(title, previewHTML, options.share || {});
     });
     overlay.querySelector('#btn-print-preview-print')?.addEventListener('click', () => {
         const frameWindow = frame.contentWindow;
@@ -3541,7 +3590,14 @@ function printAccountStatement(cariId) {
         .statement-balance { color: var(--primary); }
         .statement-empty { text-align: center; color: var(--muted); padding: 24px; }
         .statement-summary-wrap { width: 285px; margin: 20px 0 0 auto; break-inside: avoid; page-break-inside: avoid; }
-    `, { orientation: 'portrait' });
+    `, {
+        orientation: 'portrait',
+        share: {
+            phone: cari.tel || cari.telefon || '',
+            customerName: cari.adi || '',
+            documentNo: cari.kodu || ''
+        }
+    });
 }
 
 function printOrderStatement(orderId) {
@@ -3550,7 +3606,8 @@ function printOrderStatement(orderId) {
 
     const amounts = getOrderStatementAmounts(order);
     const orderDate = order.faturaTarihi || order.tarih || new Date().toLocaleDateString('tr-TR');
-    const customerName = order.customerName || findCariByReference(order.customerId)?.adi || '-';
+    const customerCari = findCariByReference(order.customerId, order.customerName);
+    const customerName = order.customerName || customerCari?.adi || '-';
     const description = order.description || (order.islemTipi === 'hammadde' ? `${order.kgAmount || 0} KG hammadde satışı` : 'Teslim edilen iş');
 
     const contentHTML = `
@@ -3627,7 +3684,13 @@ function printOrderStatement(orderId) {
         .statement-table th:nth-child(3) { width: 14%; }
         .statement-table th:nth-child(4) { width: 14%; }
         .statement-table th:nth-child(5) { width: 15%; }
-    `);
+    `, {
+        share: {
+            phone: customerCari?.tel || customerCari?.telefon || '',
+            customerName,
+            documentNo: order.orderNo || ''
+        }
+    });
 }
 
 function getInvoiceDocumentLine(fatura) {
@@ -3752,7 +3815,13 @@ window.printInvoiceDocument = function(faturaId) {
         .invoice-lines th:nth-child(3) { width: 14%; }
         .invoice-lines th:nth-child(4) { width: 14%; }
         .invoice-lines th:nth-child(5) { width: 15%; }
-    `);
+    `, {
+        share: {
+            phone: cari?.tel || cari?.telefon || '',
+            customerName: fatura.firma || cari?.adi || '',
+            documentNo: fatura.faturaNo || ''
+        }
+    });
 };
 
 window.printList = function(type, selectedOnly = false) {
@@ -7298,6 +7367,7 @@ function getQuoteData() {
 function printQuoteDocument(quoteData) {
     if (!quoteData) return;
 
+    const quoteCari = findCariByReference(quoteData.customerId, quoteData.customerName);
     const tipLabel = getQuoteOperationMeta(quoteData.islemTipi).label;
     const taxRate = quoteData.taxRate ?? 20;
     const subTotal = quoteData.subTotal ?? Math.max(0, (quoteData.total || 0) - (quoteData.tax || 0));
@@ -7403,7 +7473,13 @@ function printQuoteDocument(quoteData) {
         .quote-footer .totals-panel .total-row td { padding-top: 11px; padding-bottom: 11px; }
         .quote-footer .totals-panel .total-row td:last-child { font-size: 17px; }
         .bank-details { margin-top: 34px; }
-    `);
+    `, {
+        share: {
+            phone: quoteCari?.tel || quoteCari?.telefon || '',
+            customerName: quoteData.customerName || quoteCari?.adi || '',
+            documentNo: quoteData.teklifNo || ''
+        }
+    });
 }
 
 window.printCurrentQuote = function() {
@@ -10310,7 +10386,7 @@ const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 let latestUpdateInfo = null;
 
 function getVisibleAppVersion() {
-    return plainText(document.getElementById('app-version')?.textContent || 'v1.3.34').replace(/^v/i, '') || '1.3.34';
+    return plainText(document.getElementById('app-version')?.textContent || 'v1.3.35').replace(/^v/i, '') || '1.3.35';
 }
 
 function setUpdateStatus(state, title, message, options = {}) {

@@ -3824,6 +3824,40 @@ label {
     gap: 10px;
 }
 
+.print-preview-actions .btn {
+    min-height: 44px;
+}
+
+.btn-whatsapp {
+    color: #07150d;
+    background: #25d366;
+    border-color: #25d366;
+    box-shadow: 0 8px 20px rgba(37, 211, 102, 0.18);
+}
+
+.btn-whatsapp:hover:not(:disabled) {
+    color: #07150d;
+    background: #35df75;
+    border-color: #35df75;
+}
+
+.btn-whatsapp:focus-visible {
+    outline: 3px solid rgba(37, 211, 102, 0.35);
+    outline-offset: 2px;
+}
+
+@media (max-width: 860px) {
+    .print-preview-toolbar {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .print-preview-actions {
+        width: 100%;
+        flex-wrap: wrap;
+    }
+}
+
 .print-preview-body {
     flex: 1;
     overflow: auto;

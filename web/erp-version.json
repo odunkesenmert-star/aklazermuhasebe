@@ -1,9 +1,9 @@
 {
-  "version": "1.3.34",
+  "version": "1.3.35",
   "releaseDate": "2026-08-23",
-  "notes": "Yazdırılan belgelerde logo üstündeki gereksiz dekoratif çizgi kaldırıldı.",
+  "notes": "Yazdırma önizlemesine PDF hazırlayan ve müşteri sohbetini açan WhatsApp paylaşım akışı eklendi.",
   "downloads": {
     "mac": "https://aklazer.com.tr/downloads/AK_LAZER_ERP_Kurulum.dmg",
-    "windows": "https://aklazer.com.tr/downloads/AK%20LAZER%20ERP%20Setup%201.3.34-x64.exe"
+    "windows": "https://aklazer.com.tr/downloads/AK%20LAZER%20ERP%20Setup%201.3.35-x64.exe"
   }
 }
