@@ -410,14 +410,14 @@ setTimeout(() => {
     assert(statementText.includes('Cari Hesap Ekstresi'), "Selected account print uses a detailed account statement.");
     assert(statementText.includes('size: A4 portrait') && statementText.includes('table-header-group'), "Detailed account statement uses the portrait multi-page print profile.");
     assert(statementText.includes('İlk kesim işi') && statementText.includes('İkinci kesim işi'), "Statement keeps the work descriptions separate.");
-    assert(statementText.includes('Tahsilat / Ödeme') && statementText.includes('Kalan Bakiye'), "Statement prints a single chronological ledger with running balance.");
-    assert(!statementText.includes('Belge / İş Emri'), "Statement removes the extra document/work-order column.");
+    assert(statementText.includes('İşlem Kodu') && statementText.includes('Borç') && statementText.includes('Tahsilat') && statementText.includes('Bakiye'), "Statement uses the compact debt, collection and balance ledger columns.");
+    assert(statementText.includes('EMR-13000') && statementText.includes('HRK-701'), "Statement prints traceable transaction codes for sales and collections.");
+    assert(!statementText.includes('Belge / İş Emri') && !statementText.includes('Vergi / İskonto'), "Statement removes the extra document and tax columns.");
     assert(!statementText.includes('<div class=\"label\">Durum</div>') && !statementText.includes('<strong>Alacaklı</strong>'), "Statement removes the extra status box.");
-    assert(statementText.includes('KDV Oranı') && statementText.includes('%20'), "Statement shows the VAT rate.");
+    assert(statementText.includes('KDV %20'), "Statement keeps the VAT rate alongside the related description.");
     assert(!statementText.includes('KDV %20:') && !statementText.includes('Ekstre Bilgisi'), "Statement keeps row VAT details rate-only and removes the explanatory note.");
-    assert(statementText.includes('İskonto Oranı') && statementText.includes('%7,76'), "Statement shows the discount rate.");
-    assert(statementText.includes('İskonto Toplamı') && statementText.includes('1.000,00'), "Statement summarizes discount totals.");
-    assert(statementText.includes('Genel Toplam') && statementText.includes('27.972,00'), "Statement summarizes the total amount.");
+    assert(statementText.includes('İskonto %7,76') && statementText.includes('1.000,00'), "Statement keeps discount detail alongside the related description.");
+    assert(statementText.includes('Toplam Borç') && statementText.includes('27.972,00'), "Statement summarizes total debt from the printed ledger.");
     assert(statementText.includes('22.06.2026 10:15') && statementText.includes('Banka havalesi'), "Statement prints dated collection rows in the ledger.");
     assert(statementText.includes('EFT ödemesi') && statementText.includes('7.500,00') && statementText.includes('20.472,00'), "Statement summarizes customer collections and remaining balance from the printed rows.");
 
@@ -429,7 +429,7 @@ setTimeout(() => {
     assert(rangedStatementText.includes('Seçilen tarih öncesi bakiye') && rangedStatementText.includes('27.972,00'), "Statement carries previous sales into the opening balance.");
     assert(!rangedStatementText.includes('İlk kesim işi') && !rangedStatementText.includes('İkinci kesim işi'), "Statement hides sales outside the selected date range.");
     assert(rangedStatementText.includes('Banka havalesi') && rangedStatementText.includes('EFT ödemesi'), "Statement keeps collections inside the selected date range.");
-    assert(rangedStatementText.includes('Dönem Sonu Bakiye') && rangedStatementText.includes('20.472,00'), "Statement shows the closing balance for the selected period.");
+    assert(rangedStatementText.includes('Toplam Borç') && rangedStatementText.includes('Toplam Tahsilat') && rangedStatementText.includes('Bakiye') && rangedStatementText.includes('20.472,00'), "Statement shows the three-column totals and closing balance for the selected period.");
     dom.window.document.getElementById('account-print-date-start').value = '';
     dom.window.document.getElementById('account-print-date-end').value = '';
 

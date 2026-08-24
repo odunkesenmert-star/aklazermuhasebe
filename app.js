@@ -3247,22 +3247,6 @@ function formatPercentLabel(value) {
     return `%${number.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}`;
 }
 
-function getCariStatementTaxRateLabel(lines) {
-    const rates = [...new Set(lines
-        .map(line => Number(line.taxRate))
-        .filter(rate => Number.isFinite(rate))
-        .map(rate => formatPercentLabel(rate)))];
-    return rates.length ? rates.join(', ') : '-';
-}
-
-function getCariStatementDiscountRateLabel(lines) {
-    const rates = [...new Set(lines
-        .map(line => Number(line.discountPercent))
-        .filter(rate => Number.isFinite(rate))
-        .map(rate => formatPercentLabel(rate)))];
-    return rates.length ? rates.join(', ') : '-';
-}
-
 function getOrderStatementAmounts(order) {
     const total = roundMoney(order.total || 0);
     const discountPercent = Number.isFinite(Number(order.discountPercent)) ? Number(order.discountPercent) : 0;
@@ -3305,6 +3289,7 @@ function getCariStatementLines(cari) {
                 id: `order-${order.id}`,
                 tarih: order.faturaTarihi || order.tarih || '-',
                 belge: order.faturaNo ? `Fatura ${order.faturaNo}` : (order.orderNo || 'İş Emri'),
+                faturaNo: order.faturaNo || '',
                 orderNo: order.orderNo || '',
                 aciklama: order.description || (order.islemTipi === 'hammadde' ? `${order.kgAmount || 0} KG hammadde satışı` : 'Teslim edilen iş'),
                 ...amounts
@@ -3329,6 +3314,7 @@ function getCariStatementLines(cari) {
                 id: `invoice-${fatura.id}`,
                 tarih: fatura.tarih || '-',
                 belge: fatura.faturaNo ? `Fatura ${fatura.faturaNo}` : 'Kesilen Fatura',
+                faturaNo: fatura.faturaNo || '',
                 orderNo: fatura.orderNo || '',
                 aciklama: fatura.aciklama || 'Kesilen fatura',
                 gross: total,
@@ -3384,6 +3370,7 @@ function getCariMovementLines(cari, saleLines = []) {
             tip: islem.tip || 'Cari İşlem',
             aciklama: islem.aciklama || islem.tip || 'Cari işlem',
             faturaNo: islem.faturaNo || '',
+            orderNo: islem.orderNo || '',
             tutar: roundMoney(islem.tutar || 0),
             delta: Number.isFinite(Number(islem.bakiyeDegisimi))
                 ? roundMoney(islem.bakiyeDegisimi)
@@ -3402,6 +3389,7 @@ function getCariLedgerLines(cari, saleLines, currentBalance, dateRange = null) {
     const allLedgerLines = [
         ...saleLines.map(line => ({
             id: line.id,
+            code: line.faturaNo || line.orderNo || `SAT-${String(line.sourceId || '').slice(-6) || 'KAYIT'}`,
             date: getCariStatementDate(line),
             type: 'Satış',
             description: line.aciklama || 'Satış',
@@ -3417,6 +3405,7 @@ function getCariLedgerLines(cari, saleLines, currentBalance, dateRange = null) {
             const isCredit = line.delta < 0;
             return {
                 id: `movement-${line.id}`,
+                code: line.faturaNo || line.orderNo || `HRK-${String(line.id || '').slice(-6) || 'KAYIT'}`,
                 date: line.tarih || '-',
                 type: isCredit ? 'Tahsilat / Ödeme' : 'Cari Borç',
                 description: line.aciklama || line.tip || 'Cari işlem',
@@ -3446,6 +3435,7 @@ function getCariLedgerLines(cari, saleLines, currentBalance, dateRange = null) {
     if (Math.abs(visibleOpeningBalance) >= 0.01) {
         ledgerLines.unshift({
             id: 'opening-balance',
+            code: 'DEVİR',
             date: '-',
             type: 'Devir',
             description: dateRange?.startValue ? 'Seçilen tarih öncesi bakiye' : 'Önceki bakiye / kayıt dışı devir',
@@ -3475,50 +3465,38 @@ function printAccountStatement(cariId) {
         return alert('Başlangıç tarihi bitiş tarihinden büyük olamaz.');
     }
     const allLines = getCariStatementLines(cari);
-    const visibleLines = allLines.filter(line => isDateInRange(getCariStatementDate(line), dateRange));
-    const totals = visibleLines.reduce((acc, line) => {
-        acc.gross += roundMoney(line.gross || 0);
-        acc.discount += roundMoney(line.discountAmount || 0);
-        acc.subTotal += roundMoney(line.subTotal || 0);
-        acc.tax += roundMoney(line.tax || 0);
-        acc.total += roundMoney(line.total || 0);
-        return acc;
-    }, { gross: 0, discount: 0, subTotal: 0, tax: 0, total: 0 });
-    Object.keys(totals).forEach(key => totals[key] = roundMoney(totals[key]));
-
     const remainingBalance = roundMoney(cari.bakiye || 0);
     const ledgerLines = getCariLedgerLines(cari, allLines, remainingBalance, dateRange);
     const periodClosingBalance = roundMoney(ledgerLines.length ? (ledgerLines[ledgerLines.length - 1].balance || 0) : 0);
-    const collectionTotal = roundMoney(ledgerLines
-        .filter(line => line.type !== 'Devir')
+    const totalCollection = roundMoney(ledgerLines
         .reduce((total, line) => total + roundMoney(line.credit || 0), 0));
-    const periodDebitTotal = roundMoney(ledgerLines
-        .filter(line => line.type !== 'Devir')
+    const totalDebt = roundMoney(ledgerLines
         .reduce((total, line) => total + roundMoney(line.debit || 0), 0));
-    const taxRateLabel = getCariStatementTaxRateLabel(visibleLines);
-    const discountRateLabel = getCariStatementDiscountRateLabel(visibleLines);
     const emptyRow = `
         <tr>
             <td colspan="6" class="statement-empty">Bu cari için yazdırılacak hareket bulunamadı.</td>
         </tr>
     `;
-    const ledgerRows = ledgerLines.map(line => `
+    const ledgerRows = ledgerLines.map(line => {
+        const detailParts = [
+            line.type,
+            line.taxRate === null ? '' : `KDV ${formatPercentLabel(line.taxRate)}`,
+            line.discountAmount ? `İskonto ${formatPercentLabel(line.discountPercent)} (-${formatCurrency(line.discountAmount)})` : ''
+        ].filter(Boolean);
+        return `
         <tr>
-            <td>${escapeHTML(line.date || '-')}</td>
+            <td class="statement-code"><strong>${escapeHTML(line.code || '-')}</strong></td>
+            <td class="statement-date">${escapeHTML(line.date || '-')}</td>
             <td>
-                <strong class="statement-movement">${escapeHTML(line.type || '-')}</strong>
-                <div class="statement-description">${escapeHTML(line.description || '-')}</div>
+                <strong class="statement-description-title">${escapeHTML(line.description || line.type || '-')}</strong>
+                <div class="statement-description-meta">${detailParts.map(part => `<span>${escapeHTML(part)}</span>`).join('<i aria-hidden="true">·</i>')}</div>
             </td>
             <td class="number-cell">${line.debit ? escapeHTML(formatCurrency(line.debit)) : '—'}</td>
             <td class="number-cell">${line.credit ? escapeHTML(formatCurrency(line.credit)) : '—'}</td>
-            <td class="statement-detail-cell">
-                ${line.taxRate === null ? '' : `<span>KDV ${escapeHTML(formatPercentLabel(line.taxRate))}</span>`}
-                ${line.discountAmount ? `<span>İsk. ${escapeHTML(formatPercentLabel(line.discountPercent))}: <strong>-${escapeHTML(formatCurrency(line.discountAmount))}</strong></span>` : ''}
-                ${line.taxRate === null && !line.discountAmount ? '—' : ''}
-            </td>
             <td class="number-cell statement-balance"><strong>${escapeHTML(formatCurrency(line.balance || 0))}</strong></td>
         </tr>
-    `).join('');
+    `;
+    }).join('');
 
     const contentHTML = `
         ${getPrintBrandHTML('Cari Hesap Ekstresi', getPrintMetaHTML([
@@ -3540,39 +3518,38 @@ function printAccountStatement(cariId) {
             </div>
         </div>
         <div class="metric-strip" aria-label="Cari hesap özeti">
-            <div class="metric-item"><span class="metric-label">Dönem Borç / Satış</span><strong class="metric-value">${escapeHTML(formatCurrency(periodDebitTotal))}</strong></div>
-            <div class="metric-item"><span class="metric-label">Tahsilat / Ödeme</span><strong class="metric-value">${escapeHTML(formatCurrency(collectionTotal))}</strong></div>
-            <div class="metric-item is-accent"><span class="metric-label">Kalan Bakiye</span><strong class="metric-value">${escapeHTML(formatCurrency(periodClosingBalance))}</strong></div>
+            <div class="metric-item"><span class="metric-label">Toplam Borç</span><strong class="metric-value">${escapeHTML(formatCurrency(totalDebt))}</strong></div>
+            <div class="metric-item"><span class="metric-label">Toplam Tahsilat</span><strong class="metric-value">${escapeHTML(formatCurrency(totalCollection))}</strong></div>
+            <div class="metric-item is-accent"><span class="metric-label">Bakiye</span><strong class="metric-value">${escapeHTML(formatCurrency(periodClosingBalance))}</strong></div>
         </div>
         <div class="section-heading">
             <h2>Hesap Hareketleri</h2>
             <span>${ledgerLines.length} hareket · ${escapeHTML(formatDateRangeLabel(dateRange))}</span>
         </div>
-        <table class="statement-table">
+        <table class="statement-table" aria-label="Cari hesap hareketleri">
             <thead>
                 <tr>
-                    <th>Tarih</th>
-                    <th>Hareket / Açıklama</th>
-                    <th class="text-right">Borç / Satış</th>
-                    <th class="text-right">Tahsilat / Ödeme</th>
-                    <th>Vergi / İskonto</th>
-                    <th class="text-right">Kalan Bakiye</th>
+                    <th scope="col">İşlem Kodu</th>
+                    <th scope="col">Tarih</th>
+                    <th scope="col">Açıklama</th>
+                    <th scope="col" class="text-right">Borç</th>
+                    <th scope="col" class="text-right">Tahsilat</th>
+                    <th scope="col" class="text-right">Bakiye</th>
                 </tr>
             </thead>
             <tbody>${ledgerLines.length ? ledgerRows : emptyRow}</tbody>
         </table>
         <div class="statement-summary-wrap">
-            <table class="totals-panel" aria-label="Cari dönem özeti">
+            <table class="statement-summary-table" aria-label="Cari hesap toplamları">
+                <thead>
+                    <tr><th scope="col">Toplam Borç</th><th scope="col">Toplam Tahsilat</th><th scope="col">Bakiye</th></tr>
+                </thead>
                 <tbody>
-                    <tr><td>Satış Tutarı</td><td>${escapeHTML(formatCurrency(totals.gross))}</td></tr>
-                    <tr><td>İskonto Oranı</td><td>${escapeHTML(discountRateLabel)}</td></tr>
-                    <tr><td>İskonto Toplamı</td><td>-${escapeHTML(formatCurrency(totals.discount))}</td></tr>
-                    <tr><td>Ara Toplam</td><td>${escapeHTML(formatCurrency(totals.subTotal))}</td></tr>
-                    <tr><td>KDV Oranı</td><td>${escapeHTML(taxRateLabel)}</td></tr>
-                    <tr><td>KDV Toplamı</td><td>${escapeHTML(formatCurrency(totals.tax))}</td></tr>
-                    <tr><td>Genel Toplam</td><td>${escapeHTML(formatCurrency(totals.total))}</td></tr>
-                    <tr><td>Tahsilat / Ödeme Toplamı</td><td>-${escapeHTML(formatCurrency(collectionTotal))}</td></tr>
-                    <tr class="total-row"><td>Dönem Sonu Bakiye</td><td>${escapeHTML(formatCurrency(periodClosingBalance))}</td></tr>
+                    <tr>
+                        <td>${escapeHTML(formatCurrency(totalDebt))}</td>
+                        <td>${escapeHTML(formatCurrency(totalCollection))}</td>
+                        <td>${escapeHTML(formatCurrency(periodClosingBalance))}</td>
+                    </tr>
                 </tbody>
             </table>
         </div>
@@ -3580,20 +3557,24 @@ function printAccountStatement(cariId) {
 
     openPrintPreview('Cari Hesap Ekstresi', contentHTML, `
         .statement-table { table-layout: fixed; }
-        .statement-table th:nth-child(1) { width: 12%; }
-        .statement-table th:nth-child(2) { width: 30%; }
-        .statement-table th:nth-child(3) { width: 14%; }
-        .statement-table th:nth-child(4) { width: 14%; }
-        .statement-table th:nth-child(5) { width: 15%; }
-        .statement-table th:nth-child(6) { width: 15%; }
-        .statement-movement { display: block; color: var(--ink); font-size: 9.5px; }
-        .statement-description { margin-top: 2px; color: var(--muted); font-size: 8.5px; line-height: 1.4; }
-        .statement-detail-cell { color: var(--muted); font-size: 8px; line-height: 1.35; }
-        .statement-detail-cell span { display: block; }
-        .statement-detail-cell strong { color: var(--ink-soft); }
+        .statement-table th:nth-child(1) { width: 15%; }
+        .statement-table th:nth-child(2) { width: 15%; }
+        .statement-table th:nth-child(3) { width: 34%; }
+        .statement-table th:nth-child(4),
+        .statement-table th:nth-child(5),
+        .statement-table th:nth-child(6) { width: 12%; }
+        .statement-code { color: var(--primary); font-size: 8.5px; letter-spacing: .015em; }
+        .statement-date { white-space: nowrap; }
+        .statement-description-title { display: block; color: var(--ink); font-size: 9.5px; line-height: 1.35; }
+        .statement-description-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 5px; margin-top: 2px; color: var(--muted); font-size: 7.75px; line-height: 1.35; }
+        .statement-description-meta i { color: var(--line-strong); font-style: normal; }
         .statement-balance { color: var(--primary); }
         .statement-empty { text-align: center; color: var(--muted); padding: 24px; }
-        .statement-summary-wrap { width: 285px; margin: 20px 0 0 auto; break-inside: avoid; page-break-inside: avoid; }
+        .statement-summary-wrap { width: 390px; max-width: 64%; margin: 16px 0 0 auto; break-inside: avoid; page-break-inside: avoid; }
+        .statement-summary-table { table-layout: fixed; border: 1px solid var(--line-strong); }
+        .statement-summary-table th { width: 33.333%; padding: 6px 8px; text-align: center; }
+        .statement-summary-table td { padding: 7px 8px; border-right: 1px solid var(--line-strong); background: #fff !important; color: var(--ink); font-size: 10px; font-weight: 700; text-align: right; white-space: nowrap; }
+        .statement-summary-table td:last-child { border-right: 0; background: var(--surface-blue) !important; color: var(--primary); }
     `, {
         orientation: 'portrait',
         share: {
@@ -10640,7 +10621,7 @@ const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 let latestUpdateInfo = null;
 
 function getVisibleAppVersion() {
-    return plainText(document.getElementById('app-version')?.textContent || 'v1.3.36').replace(/^v/i, '') || '1.3.36';
+    return plainText(document.getElementById('app-version')?.textContent || 'v1.3.37').replace(/^v/i, '') || '1.3.37';
 }
 
 function setUpdateStatus(state, title, message, options = {}) {
