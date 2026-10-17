@@ -288,7 +288,7 @@ setTimeout(() => {
     assert(plasmaQuote?.total === 1200, "CNC plasma quote adds the selected KDV to KG-based pricing.");
     dom.window.printCurrentQuote();
     const plasmaPrint = dom.window.document.querySelector('.print-preview-frame')?.srcdoc || '';
-    assert(plasmaPrint.includes('CNC Plazma') && plasmaPrint.includes('125 KG'), "CNC plasma print preview keeps the operation type and KG calculation.");
+    assert(plasmaPrint.includes('CNC Plazma') && plasmaPrint.includes('<strong>125</strong><small>KG</small>'), "CNC plasma print preview keeps the operation type and KG calculation.");
     dom.window.approveQuoteAsOrder();
     const plasmaOrder = db.isEmirleri.find(o => o.description === 'CNC plazma kesim testi');
     assert(plasmaOrder?.islemTipi === 'cnc_plazma' && plasmaOrder.kgAmount === 125, "CNC plasma pricing data is preserved in the work order.");
@@ -783,7 +783,7 @@ setTimeout(() => {
     assert(!customerQuotePrint.includes('Brüt Kâr') && !customerQuotePrint.includes('Kâr Marjı') && !customerQuotePrint.includes('Toplam Maliyet'), "Customer-facing quote print hides internal profitability data.");
     assert(customerQuotePrint.includes('Fiyat Teklifi') && customerQuotePrint.includes('15 gün geçerlidir'), "Customer-facing quote print uses the requested title and validity statement.");
     assert(!customerQuotePrint.includes('Teklif No: Taslak') && !customerQuotePrint.includes('Ad Soyad'), "Draft quote print hides the empty document number and name-surname prompts.");
-    assert(!customerQuotePrint.includes('Hazırlayan / İmza') && !customerQuotePrint.includes('Müşteri Onayı / İmza'), "Quote print does not include signature fields.");
+    assert(customerQuotePrint.includes('Müşteri Onayı') && customerQuotePrint.includes('Bu teklifi yukarıdaki koşullarla kabul ediyoruz.'), "Quote print includes the approved customer acceptance box.");
     assert(!customerQuotePrint.includes('Teklif Toplamı') && !customerQuotePrint.includes('İşin Kapsamı'), "Quote print keeps the top section minimal.");
     assert(customerQuotePrint.includes('Genel Toplam') && !customerQuotePrint.includes('Banka ve IBAN bilgileri'), "Quote print keeps the standard total and omits unfilled bank fields.");
 

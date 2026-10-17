@@ -228,3 +228,10 @@ ANLAŞILIR KAYIT KODLARI (1.5.18)
 - İş emrine dönüşmüş teklifin durumu değiştirilemez; reddedilen teklif önce Revize edilmeden iş emrine çevrilemez.
 - Hızlı satış ve sac alımında ileri tarih engellenir.
 - Excel çıktısındaki tutarlar sayı olarak aktarılır ve toplanabilir.
+
+1.5.24 — Yeni belge tasarımı
+- Fiyat teklifi, fatura, iş emri dökümü, cari ekstre, satış özeti, maaş bordrosu ve liste çıktıları yeni ortak tasarıma geçti: belge bilgileri kutusu, kart düzeni, miktar / birim fiyat sütunlu kalem tablosu ve "Yalnız ..." tutar yazısı.
+- Ayarlar: firma e-posta, web, vergi dairesi ve vergi no alanları; yeni "Belge Ayarları" sekmesinde banka / IBAN ve teklif varsayılanları (geçerlilik günü, teslim süresi, teslim şekli, ödeme şekli, hazırlayan, ek koşullar).
+- Teklif formu: "Teslim ve Ödeme" bölümü; teklif belgesinde son geçerlilik tarihi, koşullar, ödeme bilgileri ve müşteri onay alanı.
+- Fatura kalem dökümü fatura anında dondurulur; iş emri dökümü atölye bilgilerini, ekstre mutabakat metnini, bordro T.C. / SGK ve mesai ayrıntısını içerir.
+- Telefonu girilmemiş carilerde "-" basılmaz; açıklama boşsa iş başlığı tekrarlanmaz. Tahsil edilmiş satış özetinde IBAN gösterilmez.

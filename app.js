@@ -216,6 +216,23 @@ const defaultNumberingSettings = {
     kasa: { prefix: 'KASA', next: 2, pad: 3, useYear: false }
 };
 
+// Printed-document defaults. Bank details keep the account used before they became editable.
+const DEFAULT_DOCUMENT_SETTINGS = Object.freeze({
+    bankaAdi: 'ZİRAAT BANKASI',
+    hesapSahibi: 'MERT ODUNKESEN',
+    iban: 'TR04 0001 0090 1065 8664 4050 01',
+    teklifGecerlilikGun: 15,
+    teslimSuresi: '',
+    teslimSekli: '',
+    odemeSekli: '',
+    hazirlayan: '',
+    teklifKosullari: [
+        'Kesim, onaylanan DXF / teknik çizime göre yapılır; çizim değişikliği yeni teklif gerektirir.',
+        'Teslim süresi sipariş onayı ve çizimlerin tamamlanmasından sonra başlar.',
+        'Müşteri malzemesiyle yapılan işlerde fire ve kalan parçalar müşteriye teslim edilir.'
+    ].join('\n')
+});
+
 const defaultDB = {
     schemaVersion: CURRENT_SCHEMA_VERSION,
     codeMigration: {version:9, mappings:[]},
@@ -244,6 +261,11 @@ const defaultDB = {
         firmaAdi: 'AK LAZER Fiber Lazer Kesimleri',
         telefon: '',
         adres: '',
+        eposta: '',
+        web: '',
+        vergiDairesi: '',
+        vergiNo: '',
+        belge: { ...DEFAULT_DOCUMENT_SETTINGS },
         numaralandirma: defaultNumberingSettings,
         karlilik: { makineDakikaMaliyeti: 0, iscilikSaatMaliyeti: 0 }
     }
@@ -469,6 +491,7 @@ function validateAndNormalizeDB(rawData, requireRecords = false) {
     ['makineDakikaMaliyeti', 'iscilikSaatMaliyeti'].forEach(field => {
         normalized.ayarlar.karlilik[field] = Math.max(0, roundMoney(normalized.ayarlar.karlilik[field]));
     });
+    normalized.ayarlar.belge = getDocumentSettings(normalized.ayarlar);
     initializeInvoiceDocuments(normalized);
     syncInvoicePaymentStates(normalized);
     normalized.schemaVersion = CURRENT_SCHEMA_VERSION;
@@ -643,6 +666,25 @@ async function createSafetyBackup(data) {
 function getDBArray(key) {
     if (!db || !db[key]) return [];
     return Array.isArray(db[key]) ? db[key] : [];
+}
+
+function getDocumentSettings(settings = db?.ayarlar) {
+    const saved = settings?.belge && typeof settings.belge === 'object' && !Array.isArray(settings.belge) ? settings.belge : {};
+    const text = (value, fallback = '') => typeof value === 'string' ? plainText(value) : fallback;
+    const days = Number(saved.teklifGecerlilikGun);
+    return {
+        bankaAdi: text(saved.bankaAdi, DEFAULT_DOCUMENT_SETTINGS.bankaAdi),
+        hesapSahibi: text(saved.hesapSahibi, DEFAULT_DOCUMENT_SETTINGS.hesapSahibi),
+        iban: text(saved.iban, DEFAULT_DOCUMENT_SETTINGS.iban),
+        teklifGecerlilikGun: Number.isSafeInteger(days) && days >= 1 && days <= 365 ? days : DEFAULT_DOCUMENT_SETTINGS.teklifGecerlilikGun,
+        teslimSuresi: text(saved.teslimSuresi),
+        teslimSekli: text(saved.teslimSekli),
+        odemeSekli: text(saved.odemeSekli),
+        hazirlayan: text(saved.hazirlayan),
+        teklifKosullari: typeof saved.teklifKosullari === 'string'
+            ? saved.teklifKosullari.split(/\r?\n/).map(plainText).filter(Boolean).slice(0, 8).join('\n')
+            : DEFAULT_DOCUMENT_SETTINGS.teklifKosullari
+    };
 }
 
 function formatCurrency(num) {
@@ -1299,95 +1341,234 @@ function getCompanyName() {
 function getPrintMetaHTML(items = []) {
     return items
         .filter(item => Array.isArray(item) && item.length >= 2 && plainText(item[1]))
-        .map(([label, value]) => `
-            <div class="meta-row" aria-label="${escapeHTML(`${label}: ${value}`)}">
+        .map(([label, value, highlight]) => `
+            <div class="meta-cell${highlight ? ' is-highlight' : ''}" aria-label="${escapeHTML(`${label}: ${value}`)}">
                 <span class="meta-label">${escapeHTML(label)}</span>
                 <strong class="meta-value">${escapeHTML(value)}</strong>
             </div>
         `).join('');
 }
 
-function getPrintBrandHTML(title, metaHTML = '', issuer = db.ayarlar) {
+// Placeholder values such as "-" are kept in records for lists but never printed as contact data.
+function printableText(value) {
+    const text = plainText(value);
+    return /^[-–—.]*$/.test(text) ? '' : text;
+}
+
+function getPrintBrandHTML(title, metaHTML = '', issuer = db.ayarlar, kicker = '') {
     const firmaAdi = issuer?.firmaAdi || getCompanyName();
-    const contactItems = [issuer?.telefon, issuer?.adres].map(plainText).filter(Boolean);
+    const contact = [
+        printableText(issuer?.telefon) ? `<b>Tel</b> ${escapeHTML(printableText(issuer.telefon))}` : '',
+        printableText(issuer?.eposta) ? `<b>E-posta</b> ${escapeHTML(printableText(issuer.eposta))}` : '',
+        printableText(issuer?.web) ? `<b>Web</b> ${escapeHTML(printableText(issuer.web))}` : ''
+    ].filter(Boolean);
+    const tax = [
+        printableText(issuer?.vergiDairesi) ? `<b>Vergi Dairesi</b> ${escapeHTML(printableText(issuer.vergiDairesi))}` : '',
+        printableText(issuer?.vergiNo) ? `<b>Vergi No</b> ${escapeHTML(printableText(issuer.vergiNo))}` : ''
+    ].filter(Boolean);
+    const lines = [printableText(issuer?.adres) ? escapeHTML(printableText(issuer.adres)) : '', contact.join(' · '), tax.join(' · ')].filter(Boolean);
     return `
+        <div class="doc-top-rule" aria-hidden="true"></div>
         <header class="brand-header">
             <div class="brand-identity">
                 <img class="brand-logo" src="${APP_LOGO_PATH}" alt="${escapeHTML(firmaAdi)}">
                 <div class="company-name">${escapeHTML(firmaAdi)}</div>
-                ${contactItems.length ? `<div class="company-contact">${contactItems.map(item => `<span>${escapeHTML(item)}</span>`).join('')}</div>` : ''}
+                ${lines.length ? `<div class="company-contact">${lines.map(line => `<span>${line}</span>`).join('')}</div>` : ''}
             </div>
             <div class="brand-document">
+                ${kicker ? `<div class="doc-kicker">${escapeHTML(kicker)}</div>` : ''}
                 <h1>${escapeHTML(title)}</h1>
-                <div class="meta">${metaHTML}</div>
+                ${metaHTML ? `<div class="meta">${metaHTML}</div>` : ''}
             </div>
         </header>
     `;
 }
 
 function getPrintPartyHTML(label, name, cari = {}, extraHTML = '') {
-    const details = [cari?.kodu, cari?.tel || cari?.telefon].map(plainText).filter(Boolean);
-    const taxDetails = [cari?.vergiDairesi, cari?.vergiNo].map(plainText).filter(Boolean);
+    const address = printableText(cari?.adres);
+    const contact = [
+        printableText(cari?.tel || cari?.telefon) ? `Tel ${printableText(cari.tel || cari.telefon)}` : '',
+        printableText(cari?.kodu) ? `Cari Kodu ${printableText(cari.kodu)}` : ''
+    ].filter(Boolean);
+    const taxDetails = [printableText(cari?.vergiDairesi) ? `${printableText(cari.vergiDairesi)} V.D.` : '', printableText(cari?.vergiNo)].filter(Boolean);
     return `<div class="document-intro-grid">
         <div class="document-card">
             <div class="document-card-label">${escapeHTML(label)}</div>
             <div class="document-card-value">${escapeHTML(name || '—')}</div>
-            ${details.length ? `<div class="document-card-detail">${details.map(escapeHTML).join(' · ')}</div>` : ''}
-            ${cari?.adres ? `<div class="document-card-detail">${escapeHTML(cari.adres)}</div>` : ''}
-            ${taxDetails.length ? `<div class="document-card-detail">Vergi: ${taxDetails.map(escapeHTML).join(' / ')}</div>` : ''}
+            ${address ? `<div class="document-card-detail">${escapeHTML(address)}</div>` : ''}
+            ${contact.length ? `<div class="document-card-detail">${contact.map(escapeHTML).join(' · ')}</div>` : ''}
+            ${taxDetails.length ? `<div class="document-card-detail">${taxDetails.map(escapeHTML).join(' · ')}</div>` : ''}
         </div>
         ${extraHTML ? `<div class="document-card document-reference">${extraHTML}</div>` : ''}
     </div>`;
 }
 
-function getPrintTotalsHTML(amounts, label = 'Tutar özeti') {
+// A tinted card of label/value facts; empty values are dropped so no blank rows print.
+function getPrintFactsHTML(label, facts = []) {
+    const rows = facts.filter(([, value]) => plainText(value));
+    if (!rows.length) return '';
+    return `<div class="facts-title">${escapeHTML(label)}</div>
+        <dl class="facts">${rows.map(([key, value]) => `<dt>${escapeHTML(key)}</dt><dd>${escapeHTML(value)}</dd>`).join('')}</dl>`;
+}
+
+// Turkish amount in words, as expected on commercial documents ("Yalnız ... Türk Lirası").
+function numberToTurkishWords(value) {
+    const ones = ['', 'bir', 'iki', 'üç', 'dört', 'beş', 'altı', 'yedi', 'sekiz', 'dokuz'];
+    const tens = ['', 'on', 'yirmi', 'otuz', 'kırk', 'elli', 'altmış', 'yetmiş', 'seksen', 'doksan'];
+    const scales = ['', 'bin', 'milyon', 'milyar', 'trilyon'];
+    let number = Math.floor(Math.abs(Number(value) || 0));
+    if (number === 0) return 'sıfır';
+    const words = [];
+    for (let scale = 0; number > 0; scale++) {
+        const chunk = number % 1000;
+        if (chunk) {
+            const hundreds = Math.floor(chunk / 100), ten = Math.floor((chunk % 100) / 10), one = chunk % 10;
+            const part = [hundreds ? (hundreds === 1 ? 'yüz' : `${ones[hundreds]} yüz`) : '', tens[ten], ones[one]].filter(Boolean).join(' ');
+            words.unshift(scale === 1 && chunk === 1 ? 'bin' : [part, scales[scale]].filter(Boolean).join(' '));
+        }
+        number = Math.floor(number / 1000);
+    }
+    return words.join(' ');
+}
+
+function formatAmountInWords(value) {
+    const amount = roundMoney(Math.abs(Number(value) || 0));
+    const lira = Math.floor(amount);
+    const kurus = Math.round((amount - lira) * 100);
+    const text = `${numberToTurkishWords(lira)} Türk Lirası${kurus ? ` ${numberToTurkishWords(kurus)} Kuruş` : ''}`;
+    return text.charAt(0).toLocaleUpperCase('tr-TR') + text.slice(1);
+}
+
+function getPrintAmountWordsHTML(value) {
+    return `<div class="amount-words"><b>Yalnız</b>${escapeHTML(formatAmountInWords(value))}</div>`;
+}
+
+function getPrintTotalsHTML(amounts, label = 'Tutar özeti', options = {}) {
     const hasDiscount = roundMoney(amounts.discountAmount || 0) !== 0;
     const discountRate = amounts.discountPercent == null ? '' : ` (${formatPercentLabel(amounts.discountPercent)})`;
     const taxRate = amounts.taxRate == null ? '' : ` (${formatPercentLabel(amounts.taxRate)})`;
-    return `<table class="totals-panel" aria-label="${escapeHTML(label)}"><tbody>
-        ${hasDiscount ? `<tr><td>${escapeHTML(`İskonto${discountRate}`)}</td><td>−${escapeHTML(formatCurrency(amounts.discountAmount))}</td></tr>` : ''}
+    return `<div class="totals-block"><table class="totals-panel" aria-label="${escapeHTML(label)}"><tbody>
+        ${hasDiscount ? `<tr class="discount-row"><td>${escapeHTML(`İskonto${discountRate}`)}</td><td>−${escapeHTML(formatCurrency(amounts.discountAmount))}</td></tr>` : ''}
         <tr><td>Ara Toplam</td><td>${escapeHTML(formatCurrency(amounts.subTotal || 0))}</td></tr>
         <tr><td>${escapeHTML(`KDV${taxRate}`)}</td><td>${escapeHTML(formatCurrency(amounts.tax || 0))}</td></tr>
         <tr class="total-row"><td>Genel Toplam</td><td>${escapeHTML(formatCurrency(amounts.total || 0))}</td></tr>
-    </tbody></table>`;
+    </tbody></table>${options.words === false ? '' : getPrintAmountWordsHTML(amounts.total || 0)}</div>`;
 }
 
-function getPrintServiceLineHTML(description, gross) {
-    return `<table class="service-lines" aria-label="İşlem kalemleri">
-        <thead><tr><th scope="col">No</th><th scope="col">Açıklama</th><th scope="col" class="text-right">Tutar <span class="column-unit">(KDV hariç)</span></th></tr></thead>
-        <tbody><tr><td class="line-index">01</td><td>${escapeHTML(description)}</td><td class="number-cell">${escapeHTML(formatCurrency(gross || 0))}</td></tr></tbody>
+function formatPrintQuantity(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number.toLocaleString('tr-TR', { maximumFractionDigits: 3 }) : '';
+}
+
+// Line table shared by quotes, work orders, invoices and sales: # | description | quantity | unit price | amount.
+function getPrintLineItemsHTML(items, className = '') {
+    return `<table class="doc-lines ${className}" aria-label="Belge kalemleri">
+        <thead><tr><th scope="col">#</th><th scope="col">Açıklama</th><th scope="col" class="text-right">Miktar</th><th scope="col" class="text-right">Birim Fiyat</th><th scope="col" class="text-right">Tutar <span class="column-unit">(KDV hariç)</span></th></tr></thead>
+        <tbody>${items.map((item, index) => `<tr>
+            <td class="line-index">${String(index + 1).padStart(2, '0')}</td>
+            <td><div class="line-title">${escapeHTML(item.title)}</div>${item.description ? `<div class="line-desc">${escapeHTML(item.description)}</div>` : ''}${item.chips?.length ? `<div class="chips">${item.chips.filter(Boolean).map(chip => `<span class="chip">${escapeHTML(chip)}</span>`).join('')}</div>` : ''}</td>
+            <td class="number-cell line-qty">${item.quantity !== null && item.quantity !== undefined && formatPrintQuantity(item.quantity) ? `<strong>${escapeHTML(formatPrintQuantity(item.quantity))}</strong>${item.unit ? `<small>${escapeHTML(item.unit)}</small>` : ''}` : '—'}</td>
+            <td class="number-cell">${Number.isFinite(Number(item.unitPrice)) && item.unitPrice !== null ? escapeHTML(formatCurrency(item.unitPrice)) : '—'}</td>
+            <td class="number-cell line-amount">${escapeHTML(formatCurrency(item.amount || 0))}</td>
+        </tr>`).join('')}</tbody>
     </table>`;
 }
 
-const PRINT_PAYMENT_DETAILS = Object.freeze({
-    bank: 'ZİRAAT BANKASI',
-    iban: 'TR04 0001 0090 1065 8664 4050 01',
-    holder: 'MERT ODUNKESEN'
-});
+function getStockPrintChips(stock) {
+    if (!stock) return [];
+    return [printableText(stock.cinsi), Number(stock.mm) > 0 ? `${formatPrintQuantity(stock.mm)} mm` : '', Number(stock.en) > 0 && Number(stock.boy) > 0 ? `${Number(stock.en)} × ${Number(stock.boy)} mm` : ''].filter(Boolean);
+}
+
+// Quote and work-order lines rebuilt from their saved pricing; falls back to one line when they do not add up.
+function getWorkLineItems(record, fallbackDescription = '', database = db) {
+    const meta = getQuoteOperationMeta(record.islemTipi);
+    const stock = record.stokId && String(record.stokId) !== '0' ? (database?.stoklar || []).find(item => String(item.id) === String(record.stokId)) : null;
+    const customerMaterial = record.islemTipi !== 'hammadde' && (!stock || stock.sahibiTipi === 'musteri');
+    const description = printableText(record.description);
+    const operationCost = roundMoney(record.operationCost || 0), materialCost = roundMoney(record.materialCost || 0);
+    const items = [];
+    if (record.islemTipi === 'hammadde') {
+        if (materialCost > 0) items.push({ title: 'Hammadde Satışı', description, chips: getStockPrintChips(stock), quantity: record.kgAmount, unit: 'KG', unitPrice: record.kgPrice, amount: materialCost });
+    } else if (operationCost > 0) {
+        const byMinute = record.islemTipi === 'lazer';
+        items.push({
+            title: meta.label, description,
+            chips: customerMaterial ? [stock ? `Müşteri malzemesi: ${getStockPrintChips(stock).join(' · ')}` : 'Malzeme müşteriden'] : [],
+            quantity: byMinute ? record.minutes : record.kgAmount, unit: byMinute ? 'dk' : 'KG',
+            unitPrice: byMinute ? record.rate : record.kgPrice, amount: operationCost
+        });
+    }
+    if (record.islemTipi !== 'hammadde' && materialCost > 0) {
+        const quantity = Number(record.stokQty) || 0;
+        items.push({ title: 'Sac Malzeme', description: 'İşletme stoğundan temin edilir', chips: getStockPrintChips(stock), quantity: quantity || null, unit: 'plaka', unitPrice: quantity ? roundMoney(materialCost / quantity) : null, amount: materialCost });
+    }
+    const gross = roundMoney(record.subTotalBeforeDiscount ?? (Number(record.subTotal || 0) + Number(record.discountAmount || 0)));
+    const sum = roundMoney(items.reduce((total, item) => total + item.amount, 0));
+    if (!items.length || (gross > 0 && Math.abs(sum - gross) > 0.01)) {
+        return [{ title: description || fallbackDescription || meta.label, description: description && fallbackDescription && description !== fallbackDescription ? fallbackDescription : '', chips: [], quantity: null, unit: '', unitPrice: null, amount: gross || sum }];
+    }
+    return items;
+}
+
+function getPrintPaymentDetails() {
+    const settings = getDocumentSettings();
+    return { bank: settings.bankaAdi, holder: settings.hesapSahibi, iban: settings.iban };
+}
+
+function getPrintPaymentBoxHTML(note = '') {
+    const payment = getPrintPaymentDetails();
+    if (!payment.iban) return '';
+    return `<div class="pay-box" aria-label="Ödeme için banka bilgileri">
+        <div class="facts-title">Ödeme Bilgileri</div>
+        ${[payment.bank, payment.holder].filter(Boolean).length ? `<div class="pay-meta">${escapeHTML([payment.bank, payment.holder].filter(Boolean).join(' · '))}</div>` : ''}
+        <div class="pay-iban">${escapeHTML(payment.iban)}</div>
+        ${note ? `<div class="pay-meta">${escapeHTML(note)}</div>` : ''}
+    </div>`;
+}
+
+function getPrintTermsHTML(title, items = []) {
+    const terms = items.map(printableText).filter(Boolean);
+    if (!terms.length) return '';
+    return `<div class="terms"><div class="facts-title">${escapeHTML(title)}</div><ol>${terms.map(term => `<li>${escapeHTML(term)}</li>`).join('')}</ol></div>`;
+}
+
+function getPrintApprovalHTML(boxes = []) {
+    return `<div class="approval-grid">${boxes.map(box => `<div class="approval-box">
+        <div class="facts-title">${escapeHTML(box.label)}</div>
+        ${box.text ? `<p>${escapeHTML(box.text)}</p>` : ''}
+        <div class="approval-space"></div>
+        <div class="approval-line"><span>${escapeHTML(box.left || 'Kaşe / İmza')}</span><span>${escapeHTML(box.right || 'Tarih')}</span></div>
+    </div>`).join('')}</div>`;
+}
 
 function getPrintPaymentFooterHTML() {
+    const payment = getPrintPaymentDetails();
+    if (!payment.iban) return '';
     return `<footer class="print-payment-footer" aria-label="Ödeme için banka bilgileri">
-        <div>${escapeHTML(PRINT_PAYMENT_DETAILS.bank)} · ${escapeHTML(PRINT_PAYMENT_DETAILS.holder)}</div>
-        <strong>IBAN: ${escapeHTML(PRINT_PAYMENT_DETAILS.iban)}</strong>
+        <div>${escapeHTML([payment.bank, payment.holder].filter(Boolean).join(' · '))}</div>
+        <strong>IBAN: ${escapeHTML(payment.iban)}</strong>
     </footer>`;
 }
 
 function getPrintBaseStyles(options = {}) {
     const isLandscape = options.orientation === 'landscape';
     const pageSize = isLandscape ? 'A4 landscape' : 'A4 portrait';
-    const hasPaymentFooter = options.paymentFooter === true;
-    const pageMargin = isLandscape ? (hasPaymentFooter ? '13mm 14mm 28mm' : '13mm 14mm 17mm') : (hasPaymentFooter ? '15mm 16mm 28mm' : '15mm 16mm 19mm');
+    const payment = getPrintPaymentDetails();
+    const hasPaymentFooter = options.paymentFooter === true && !!payment.iban;
+    const pageMargin = isLandscape ? (hasPaymentFooter ? '12mm 14mm 28mm' : '12mm 14mm 16mm') : (hasPaymentFooter ? '12mm 14mm 28mm' : '12mm 14mm 16mm');
     const screenMinHeight = isLandscape ? '210mm' : '297mm';
     const screenPadding = pageMargin;
-    const paymentFooterText = JSON.stringify(`${PRINT_PAYMENT_DETAILS.bank} · ${PRINT_PAYMENT_DETAILS.holder}\nIBAN: ${PRINT_PAYMENT_DETAILS.iban}`).replace(/\\n/g, '\\A ');
+    const paymentFooterText = JSON.stringify(`${[payment.bank, payment.holder].filter(Boolean).join(' · ')}\nIBAN: ${payment.iban}`).replace(/\\n/g, '\\A ');
+    const footerIssuer = options.issuer || db.ayarlar;
+    const footerLeft = JSON.stringify([footerIssuer?.firmaAdi || getCompanyName(), printableText(footerIssuer?.web)].filter(Boolean).join(' · '));
     return `
         @page {
             size: ${pageSize};
             margin: ${pageMargin};
             @bottom-left {
-                content: ${hasPaymentFooter ? '""' : '"AK LAZER ERP"'};
-                color: #64748b;
-                font: 9px Arial, sans-serif;
+                content: ${hasPaymentFooter ? '""' : footerLeft};
+                color: #7a8699;
+                font: 8px Arial, sans-serif;
             }
             ${hasPaymentFooter ? `@bottom-center {
                 content: ${paymentFooterText};
@@ -1400,53 +1581,69 @@ function getPrintBaseStyles(options = {}) {
             }` : ''}
             @bottom-right {
                 content: "Sayfa " counter(page) " / " counter(pages);
-                color: #64748b;
-                font: 9px Arial, sans-serif;
+                color: #7a8699;
+                font: 8px Arial, sans-serif;
             }
         }
         html { background: #fff; }
         * { box-sizing: border-box; }
         :root {
-            --ink: #14213d;
-            --ink-soft: #475569;
-            --muted: #64748b;
-            --line: #dbe3ec;
-            --line-strong: #aebdce;
-            --surface: #f5f8fc;
-            --surface-blue: #eef4fb;
+            --ink: #142033;
+            --ink-soft: #4a5a70;
+            --muted: #7a8699;
+            --line: #dde4ee;
+            --line-strong: #b8c5d6;
+            --surface: #f3f7fc;
+            --surface-blue: #e8f0fa;
             --primary: #173b67;
+            --primary-dark: #0f2a4a;
             --accent: #1f6fb2;
             --success: #0f766e;
             --danger: #b42318;
         }
-        body { font-family: Arial, Helvetica, sans-serif; color: var(--ink); margin: 0; font-size: 11px; line-height: 1.5; font-variant-numeric: tabular-nums; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        body { font-family: "Helvetica Neue", Arial, Helvetica, sans-serif; color: var(--ink); margin: 0; font-size: 10px; line-height: 1.45; font-variant-numeric: tabular-nums; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         @media screen {
             body { position: relative; min-height: ${screenMinHeight}; padding: ${screenPadding}; }
-            .print-payment-footer { position: absolute; bottom: 7mm; left: ${isLandscape ? '14mm' : '16mm'}; right: ${isLandscape ? '14mm' : '16mm'}; color: var(--primary); font-size: 10px; line-height: 1.8; text-align: center; }
+            .print-payment-footer { position: absolute; bottom: 7mm; left: 14mm; right: 14mm; color: var(--primary); font-size: 10px; line-height: 1.8; text-align: center; }
             .print-payment-footer strong { font-weight: 600; }
         }
         @media print {
             body { padding: 0; }
             .print-payment-footer { display: none; }
         }
-        .brand-header { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, .9fr); gap: 40px; align-items: start; padding: 0 0 24px; margin-bottom: 24px; border-bottom: 2px solid var(--primary); break-inside: avoid; page-break-inside: avoid; }
+        .doc-top-rule { height: 5px; margin-bottom: 16px; border-radius: 3px; background: linear-gradient(90deg, var(--primary) 0 72%, var(--accent) 72% 100%); }
+        .brand-header { display: grid; grid-template-columns: minmax(0, 1fr) 255px; gap: 24px; align-items: start; margin-bottom: 18px; break-inside: avoid; page-break-inside: avoid; }
         .brand-identity, .brand-document { min-width: 0; }
-        .brand-logo { display: block; width: 178px; height: 57px; object-fit: contain; object-position: left center; margin-bottom: 12px; }
-        h1 { margin: 2px 0 16px; font-size: 24px; font-weight: 700; line-height: 1.15; text-align: right; color: var(--primary); letter-spacing: -.025em; overflow-wrap: anywhere; }
-        .company-name { color: var(--ink); font-size: 10px; line-height: 1.4; font-weight: 700; }
-        .company-contact { display: grid; gap: 3px; max-width: 300px; margin-top: 5px; color: var(--ink-soft); font-size: 9px; line-height: 1.5; overflow-wrap: anywhere; }
-        .meta { display: grid; gap: 4px; }
-        .meta-row { display: grid; grid-template-columns: 85px minmax(0, 1fr); gap: 14px; align-items: baseline; }
-        .meta-label { color: var(--muted); font-size: 9px; }
-        .meta-value { color: var(--ink); font-size: 10px; font-weight: 600; text-align: right; overflow-wrap: anywhere; }
-        .section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; margin: 22px 0 9px; padding-bottom: 6px; border-bottom: 1px solid var(--line); break-after: avoid; page-break-after: avoid; }
-        .section-heading h2 { margin: 0; color: var(--primary); font-size: 11px; line-height: 1.2; letter-spacing: .06em; text-transform: uppercase; }
-        .section-heading span { color: var(--muted); font-size: 8.5px; }
-        .document-intro-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 28px; margin: 0 0 18px; break-inside: avoid; page-break-inside: avoid; }
-        .document-card { min-width: 0; padding: 0 0 8px; }
-        .document-card-label { margin-bottom: 5px; color: var(--ink-soft); font-size: 10px; font-weight: 400; letter-spacing: .07em; text-transform: uppercase; }
-        .document-card-value { color: var(--ink); font-size: 15px; line-height: 1.3; font-weight: 700; overflow-wrap: anywhere; }
-        .document-card-detail { margin-top: 4px; color: var(--muted); font-size: 9.5px; line-height: 1.45; }
+        .brand-logo { display: block; width: 190px; height: 50px; object-fit: contain; object-position: left center; margin-bottom: 10px; }
+        .company-name { color: var(--primary-dark); font-size: 11px; line-height: 1.4; font-weight: 700; }
+        .company-contact { display: grid; gap: 1px; margin-top: 3px; color: var(--ink-soft); font-size: 8.6px; line-height: 1.55; overflow-wrap: anywhere; }
+        .company-contact b { color: var(--ink); font-weight: 600; }
+        .brand-document { text-align: right; }
+        .doc-kicker { color: var(--accent); font-size: 8.5px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; }
+        h1 { margin: 2px 0 10px; font-size: 24px; font-weight: 700; line-height: 1.1; text-align: right; color: var(--primary); letter-spacing: -.02em; overflow-wrap: anywhere; }
+        .meta { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; text-align: left; }
+        .meta-cell { padding: 6px 10px; border-bottom: 1px solid var(--line); min-width: 0; }
+        .meta-cell:nth-child(odd) { border-right: 1px solid var(--line); }
+        .meta-cell:nth-last-child(-n+2):nth-child(odd), .meta-cell:last-child { border-bottom: 0; }
+        .meta-cell:last-child:nth-child(odd) { grid-column: 1 / -1; border-right: 0; }
+        .meta-cell.is-highlight { background: var(--surface); }
+        .meta-label { display: block; color: var(--muted); font-size: 7.2px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+        .meta-value { display: block; margin-top: 1px; color: var(--ink); font-size: 10px; font-weight: 700; overflow-wrap: anywhere; }
+        .meta-cell.is-highlight .meta-value { color: var(--primary); }
+        .section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; margin: 16px 0 6px; break-after: avoid; page-break-after: avoid; }
+        .section-heading h2 { margin: 0; color: var(--primary); font-size: 9.5px; line-height: 1.2; letter-spacing: .12em; text-transform: uppercase; }
+        .section-heading span { color: var(--muted); font-size: 8px; }
+        .document-intro-grid { display: grid; grid-template-columns: 1.25fr 1fr; gap: 12px; margin: 0 0 14px; break-inside: avoid; page-break-inside: avoid; }
+        .document-intro-grid:has(> :only-child) { grid-template-columns: 1fr; }
+        .document-card { min-width: 0; padding: 11px 13px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+        .document-card-label, .facts-title { margin-bottom: 5px; color: var(--accent); font-size: 7.6px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+        .document-card-value { color: var(--primary-dark); font-size: 13.5px; line-height: 1.25; font-weight: 700; overflow-wrap: anywhere; }
+        .document-card-detail { margin-top: 3px; color: var(--ink-soft); font-size: 8.8px; line-height: 1.5; overflow-wrap: anywhere; }
+        .document-reference { background: var(--surface); border-color: var(--surface-blue); }
+        .document-reference .document-card-value { font-size: 12px; }
+        .facts { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 0; font-size: 9px; }
+        .facts dt { color: var(--muted); }
+        .facts dd { margin: 0; font-weight: 600; color: var(--ink); text-align: right; overflow-wrap: anywhere; }
         .metric-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin: 0 0 18px; border: 1px solid var(--line); background: var(--line); break-inside: avoid; page-break-inside: avoid; }
         .metric-item { padding: 10px 12px; background: var(--surface); }
         .metric-label { display: block; margin-bottom: 4px; color: var(--muted); font-size: 7.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
@@ -1454,12 +1651,12 @@ function getPrintBaseStyles(options = {}) {
         .metric-item.is-accent { background: var(--primary); }
         .metric-item.is-accent .metric-label { color: #c9d9ec; }
         .metric-item.is-accent .metric-value { color: #fff; }
-        table { width: 100%; border-collapse: collapse; font-size: ${isLandscape ? '10px' : '11px'}; break-inside: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: ${isLandscape ? '9.5px' : '10px'}; break-inside: auto; }
         thead { display: table-header-group; }
         tfoot { display: table-footer-group; }
         tbody tr, tfoot tr { break-inside: avoid; page-break-inside: avoid; }
-        th, td { padding: ${isLandscape ? '7px 8px' : '10px 10px'}; border: 0; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: break-word; }
-        th { padding-top: 7px; padding-bottom: 7px; border-top: 1px solid var(--primary); border-bottom: 1px solid var(--primary); background: var(--surface-blue); color: var(--primary); font-size: 8.5px; line-height: 1.4; font-weight: 700; letter-spacing: .025em; text-transform: uppercase; }
+        th, td { padding: ${isLandscape ? '7px 8px' : '8px 10px'}; border: 0; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: break-word; }
+        th { padding-top: 7px; padding-bottom: 7px; background: var(--primary); color: #fff; font-size: 7.6px; line-height: 1.4; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
         tbody tr:nth-child(even) td { background: #fafbfd; }
         .total-row td { border-top: 1.5px solid var(--primary); border-bottom-color: var(--primary); color: var(--primary); font-size: 11px; font-weight: 700; }
         .text-right { text-align: right; }
@@ -1473,34 +1670,55 @@ function getPrintBaseStyles(options = {}) {
         .print-summary-card.is-negative { border-top-color: var(--danger); }
         .print-summary-card.is-negative strong { color: #b42318; }
         .print-summary-note { margin: -6px 0 16px; color: #64748b; font-size: 9.5px; line-height: 1.4; }
-        .document-footer-grid { display: grid; grid-template-columns: minmax(0, 1fr) 285px; gap: 30px; align-items: start; margin-top: 20px; break-inside: avoid; page-break-inside: avoid; }
-        .document-note { padding: 5px 0; background: #fff; color: var(--ink-soft); font-size: 9.5px; line-height: 1.55; }
+        .doc-lines { border: 1px solid var(--line); border-collapse: separate; border-spacing: 0; border-radius: 8px; overflow: hidden; table-layout: fixed; }
+        .doc-lines th:nth-child(1) { width: 34px; }
+        .doc-lines th:nth-child(3) { width: 74px; }
+        .doc-lines th:nth-child(4) { width: 88px; }
+        .doc-lines th:nth-child(5) { width: 96px; }
+        .doc-lines td { padding: 9px 10px; border-bottom: 0; border-top: 1px solid var(--line); font-size: 9.6px; }
+        .doc-lines tbody tr:first-child td { border-top: 0; }
+        .doc-lines tbody tr:nth-child(even) td { background: #fff; }
+        .line-index { color: var(--accent); font-weight: 700; }
+        .line-title { font-weight: 700; color: var(--ink); font-size: 10.2px; white-space: pre-wrap; overflow-wrap: anywhere; }
+        .line-desc { margin-top: 2px; color: var(--ink-soft); white-space: pre-wrap; overflow-wrap: anywhere; }
+        .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+        .chip { padding: 1px 7px; border-radius: 999px; background: var(--surface-blue); color: var(--primary); font-size: 7.8px; font-weight: 600; }
+        .line-qty strong { font-size: 10.2px; }
+        .line-qty small { margin-left: 2px; color: var(--muted); }
+        .line-amount { font-weight: 700; color: var(--ink); }
+        .column-unit { display: block; font-size: 7px; font-weight: 400; letter-spacing: 0; text-transform: none; opacity: .85; }
+        .document-footer-grid { display: grid; grid-template-columns: minmax(0, 1fr) 255px; gap: 16px; align-items: start; margin-top: 14px; break-inside: avoid; page-break-inside: avoid; }
+        .document-footer-grid > .totals-block, .document-footer-grid > .totals-panel { grid-column: 2; }
+        .document-note { padding: 2px 0; color: var(--ink-soft); font-size: 9px; line-height: 1.55; }
         .document-note-title { display: block; margin-bottom: 4px; color: var(--primary); font-size: 8px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
-        .totals-panel { width: 100%; border-collapse: collapse; }
-        .totals-panel td { padding: 8px 10px; border-bottom: 1px solid var(--line); background: #fff !important; }
-        .totals-panel td:first-child { color: var(--muted); font-size: 8.5px; font-weight: 700; }
-        .totals-panel td:last-child { color: var(--ink); font-size: 11px; font-weight: 600; text-align: right; white-space: nowrap; }
-        .totals-panel .total-row td { padding-top: 9px; padding-bottom: 9px; border: 0; background: var(--primary) !important; color: #fff; }
-        .totals-panel .total-row td:first-child { font-size: 9px; letter-spacing: .04em; text-transform: uppercase; }
-        .totals-panel .total-row td:last-child { font-size: 16px; }
-        .signature-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 34px; margin-top: 30px; break-inside: avoid; page-break-inside: avoid; }
-        .signature-box { min-height: 54px; padding-top: 8px; border-top: 1px solid var(--line-strong); color: var(--ink-soft); font-size: 9px; line-height: 1.45; text-align: center; }
+        .totals-panel { width: 100%; border-collapse: separate; border-spacing: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+        .totals-panel td { padding: 6px 12px; border-bottom: 1px solid var(--line); background: #fff !important; font-size: 9.4px; }
+        .totals-panel td:first-child { color: var(--ink-soft); }
+        .totals-panel td:last-child { color: var(--ink); font-weight: 600; text-align: right; white-space: nowrap; }
+        .totals-panel .discount-row td:last-child { color: var(--danger); }
+        .totals-panel .total-row td { padding-top: 10px; padding-bottom: 10px; border: 0; background: var(--primary) !important; color: #fff; }
+        .totals-panel .total-row td:first-child { color: #c8d7ea; font-size: 8px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+        .totals-panel .total-row td:last-child { color: #fff; font-size: 16px; font-weight: 700; }
+        .amount-words { margin-top: 8px; padding: 7px 10px; border-radius: 6px; background: var(--surface); color: var(--primary-dark); font-size: 8.8px; line-height: 1.45; }
+        .amount-words b { margin-right: 6px; color: var(--accent); font-size: 7.4px; letter-spacing: .1em; text-transform: uppercase; }
+        .terms ol { margin: 0; padding: 2px 0 2px 26px; border-left: 3px solid var(--accent); color: var(--ink-soft); font-size: 8.7px; line-height: 1.6; }
+        .pay-box { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--surface-blue); border-radius: 8px; background: var(--surface); break-inside: avoid; page-break-inside: avoid; }
+        .pay-meta { color: var(--ink-soft); font-size: 8.6px; }
+        .pay-iban { margin: 3px 0; color: var(--primary-dark); font-size: 10.4px; font-weight: 700; letter-spacing: .02em; }
+        .approval-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 18px; break-inside: avoid; page-break-inside: avoid; }
+        .approval-box { display: flex; flex-direction: column; min-height: 92px; padding: 10px 12px; border: 1px dashed var(--line-strong); border-radius: 8px; }
+        .approval-box p { margin: 0; color: var(--ink-soft); font-size: 8.2px; line-height: 1.45; }
+        .approval-space { flex: 1; }
+        .approval-line { display: flex; justify-content: space-between; padding-top: 4px; border-top: 1px solid var(--line-strong); color: var(--muted); font-size: 7.8px; }
+        .doc-thanks { margin-top: 14px; text-align: center; color: var(--muted); font-size: 8.6px; }
+        .doc-thanks strong { color: var(--primary); }
+        .signature-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 24px; break-inside: avoid; page-break-inside: avoid; }
+        .signature-box { min-height: 74px; padding: 46px 12px 8px; border: 1px dashed var(--line-strong); border-radius: 8px; color: var(--ink-soft); font-size: 8.6px; line-height: 1.45; text-align: center; }
         .bank-details { display: grid; grid-template-columns: .8fr 1.7fr; gap: 24px; margin-top: 22px; padding-top: 12px; border-top: 1px solid var(--line); break-inside: avoid; page-break-inside: avoid; }
-        .bank-field { display: grid; grid-template-columns: 48px 1fr; align-items: end; gap: 8px; min-height: 28px; }
-        .bank-field span { color: var(--muted); font-size: 7.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
-        .bank-field strong { display: block; min-height: 18px; border-bottom: 1px solid var(--line-strong); }
         .muted { color: var(--muted); font-size: 9px; line-height: 1.4; }
-        .document-reference { text-align: right; }
-        .document-intro-grid:has(> :only-child) { grid-template-columns: 1fr; }
-        .document-footnote { margin-top: 28px; padding-top: 10px; border-top: 1px solid var(--line); color: var(--muted); font-size: 9px; break-inside: avoid; }
-        .document-footer-grid > .totals-panel { grid-column: 2; }
-        .service-lines { table-layout: fixed; }
-        .service-lines th:first-child { width: 7%; }
-        .service-lines th:last-child { width: 26%; }
-        .service-lines td { padding-top: 16px; padding-bottom: 16px; }
-        .service-lines td:nth-child(2) { white-space: pre-wrap; overflow-wrap: anywhere; }
-        .line-index { color: var(--muted); font-size: 10px; }
-        .column-unit { display: block; font-size: 8px; font-weight: 400; text-transform: none; }
+        .document-footnote { margin-top: 18px; padding-top: 10px; border-top: 1px solid var(--line); color: var(--muted); font-size: 8.6px; break-inside: avoid; }
+        .status-note { margin-top: 10px; padding: 8px 12px; border-left: 3px solid var(--success); border-radius: 4px; background: #effaf7; color: var(--success); font-size: 9px; font-weight: 600; }
+        .status-note.is-cancelled { border-left-color: var(--danger); background: #fdf0ef; color: var(--danger); }
     `;
 }
 
@@ -3705,6 +3923,9 @@ function printAccountStatement(cariId) {
         .reduce((total, line) => total + roundMoney(line.credit || 0), 0));
     const totalDebt = roundMoney(ledgerLines
         .reduce((total, line) => total + roundMoney(line.debit || 0), 0));
+    const statementDate = new Date().toLocaleDateString('tr-TR');
+    // Positive balances are the customer's debt to us; negative ones are our debt to them.
+    const balanceSide = periodClosingBalance > 0 ? 'borç' : periodClosingBalance < 0 ? 'alacak' : '';
     const emptyRow = `
         <tr>
             <td colspan="6" class="statement-empty">Bu cari için yazdırılacak hareket bulunamadı.</td>
@@ -3733,9 +3954,10 @@ function printAccountStatement(cariId) {
 
     const contentHTML = `
         ${getPrintBrandHTML('Cari Hesap Ekstresi', getPrintMetaHTML([
-            ['Düzenleme', new Date().toLocaleDateString('tr-TR')],
-            ['Aralık', formatDateRangeLabel(dateRange)]
-        ]))}
+            ['Düzenleme', statementDate],
+            ['Aralık', formatDateRangeLabel(dateRange)],
+            ['Bakiye', `${formatCurrency(Math.abs(periodClosingBalance))}${balanceSide ? ` ${balanceSide}` : ''}`, true]
+        ]), db.ayarlar, 'Hesap mutabakatı')}
         ${getPrintPartyHTML('Hesap Sahibi', cari.adi, cari)}
         <div class="section-heading">
             <h2>Hesap Hareketleri</h2>
@@ -3748,7 +3970,7 @@ function printAccountStatement(cariId) {
                     <th scope="col">Tarih</th>
                     <th scope="col">Açıklama</th>
                     <th scope="col" class="text-right">Borç (TL)</th>
-                    <th scope="col" class="text-right">TAHSİLAT</th>
+                    <th scope="col" class="text-right">TAHSİLAT (TL)</th>
                     <th scope="col" class="text-right">Bakiye (TL)</th>
                 </tr>
             </thead>
@@ -3762,6 +3984,14 @@ function printAccountStatement(cariId) {
                 </tr>
             </tbody>
         </table>
+        <div class="reconciliation">
+            <div class="facts-title">Mutabakat</div>
+            <p>Kayıtlarımıza göre ${escapeHTML(statementDate)} tarihi itibarıyla ${periodClosingBalance === 0 ? 'hesabınız <strong>kapalıdır (₺0,00)</strong>' : `hesabınız <strong>${escapeHTML(formatCurrency(Math.abs(periodClosingBalance)))} ${escapeHTML(balanceSide)}</strong> bakiyesi vermektedir`}. Mutabık olmadığınız kalemleri 15 gün içinde bildirmenizi rica ederiz; bildirim yapılmazsa bakiye mutabık kabul edilir.</p>
+        </div>
+        ${getPrintApprovalHTML([
+            { label: getCompanyName(), text: 'Ekstreyi düzenleyen', left: 'Kaşe / İmza', right: statementDate },
+            { label: 'Cari Hesap Onayı', text: 'Yukarıdaki bakiye ile mutabıkız.', left: 'Yetkili · Kaşe / İmza', right: 'Tarih' }
+        ])}
     `;
 
     openPrintPreview('Cari Hesap Ekstresi', contentHTML, `
@@ -3778,8 +4008,9 @@ function printAccountStatement(cariId) {
         .statement-table th:nth-child(4),
         .statement-table th:nth-child(5),
         .statement-table th:nth-child(6) { width: 14%; }
-        .statement-table th, .statement-table td { border: 1px solid var(--line-strong); padding: 7px 6px; vertical-align: middle; }
-        .statement-table thead th { background: #edf1f5; color: var(--ink); font-size: 8px; letter-spacing: 0; }
+        .statement-table th, .statement-table td { border: 0; border-bottom: 1px solid var(--line); padding: 7px 6px; vertical-align: middle; }
+        .statement-table { border-collapse: separate; border-spacing: 0; border-radius: 8px; overflow: hidden; border-color: var(--line); }
+        .statement-table thead th { background: var(--primary); color: #fff; font-size: 7.6px; letter-spacing: .06em; border-color: var(--primary); }
         .statement-table .number-cell { font-variant-numeric: tabular-nums; }
         .statement-code { color: var(--ink-soft); font-size: 8px; overflow-wrap: anywhere; }
         .statement-date { white-space: normal; font-size: 8.5px; }
@@ -3792,6 +4023,9 @@ function printAccountStatement(cariId) {
         .statement-totals { break-inside: avoid; page-break-inside: avoid; }
         .statement-totals th, .statement-totals td { background: #e8eef5 !important; color: var(--ink); border-top: 2px solid var(--primary); font-size: 9px; font-weight: 700; }
         .statement-totals th { text-align: right; letter-spacing: 0; }
+        .reconciliation { margin-top: 14px; padding: 10px 12px; border: 1px solid var(--surface-blue); border-radius: 8px; background: var(--surface); break-inside: avoid; page-break-inside: avoid; }
+        .reconciliation p { margin: 0; color: var(--ink-soft); font-size: 8.8px; line-height: 1.55; }
+        .reconciliation strong { color: var(--primary-dark); }
 
     `, {
         orientation: 'portrait',
@@ -3809,22 +4043,43 @@ function printOrderStatement(orderId) {
     if (!order) return alert('Yazdırılacak iş emri bulunamadı.');
 
     const amounts = getOrderStatementAmounts(order);
-    const orderDate = order.faturaTarihi || order.tarih || new Date().toLocaleDateString('tr-TR');
+    const orderDate = order.tarih || new Date().toLocaleDateString('tr-TR');
     const customerCari = findCariByReference(order.customerId, order.customerName);
     const customerName = order.customerName || customerCari?.adi || '-';
     const description = order.description || (order.islemTipi === 'hammadde' ? `${order.kgAmount || 0} KG hammadde satışı` : 'Teslim edilen iş');
+    const stock = order.stokId && String(order.stokId) !== '0' ? getDBArray('stoklar').find(item => String(item.id) === String(order.stokId)) : null;
+    const quote = getDBArray('teklifler').find(item => String(item.id) === String(order.quoteId));
+    const material = stock ? `${getStockPrintChips(stock).join(' · ')}${stock.sahibiTipi === 'musteri' ? ' (müşteri malzemesi)' : ''}` : (order.islemTipi === 'hammadde' ? '' : 'Müşteriden');
+    const usage = getOrderStockUsage(order);
+    const lineItems = getWorkLineItems(order, description).map(item => ({ ...item }));
+    if (lineItems.length === 1 && !lineItems[0].description && lineItems[0].title !== description) lineItems[0].description = description;
+    const deliveredOn = order.teslimTarihi || '';
 
     const contentHTML = `
         ${getPrintBrandHTML('İş Emri Dökümü', getPrintMetaHTML([
-            ['İş Emri No', order.orderNo], ['Tarih', orderDate], ['Durum', order.durum]
+            ['İş Emri No', order.orderNo], ['Tarih', orderDate], ['Durum', order.durum, true], ['Teslim', deliveredOn]
+        ]), db.ayarlar, 'Üretim ve teslim')}
+        ${getPrintPartyHTML('Müşteri', customerName, customerCari, getPrintFactsHTML('İş Bilgileri', [
+            ['İşlem türü', getQuoteOperationMeta(order.islemTipi).label],
+            ['Malzeme', material],
+            ['Kullanım', usage ? `${formatPrintQuantity(usage.quantity)} ${usage.unit}` : ''],
+            ['Kesim süresi', order.islemTipi === 'lazer' && Number(order.minutes) > 0 ? `${formatPrintQuantity(order.minutes)} dk` : ''],
+            ['Teklif', quote?.teklifNo || ''],
+            ['Teslim süresi', printableText(order.teslimSuresi)]
         ]))}
-        ${getPrintPartyHTML('Müşteri', customerName, customerCari)}
-        ${getPrintServiceLineHTML(description, amounts.gross)}
-        <div class="document-footer-grid">${getPrintTotalsHTML(amounts, 'İş emri tutar özeti')}</div>
+        <div class="section-heading"><h2>İş Kalemleri</h2><span>${lineItems.length} kalem</span></div>
+        ${getPrintLineItemsHTML(lineItems, 'service-lines')}
+        <div class="document-footer-grid">
+            <div>${getPrintPaymentBoxHTML(order.orderNo ? `Açıklamaya ${order.orderNo} yazınız.` : '')}</div>
+            ${getPrintTotalsHTML(amounts, 'İş emri tutar özeti')}
+        </div>
+        ${getPrintApprovalHTML([
+            { label: 'Teslim Eden', text: getCompanyName(), left: 'Kaşe / İmza', right: deliveredOn || 'Tarih' },
+            { label: 'Teslim Alan', text: 'İşi eksiksiz ve hasarsız teslim aldım.', left: 'Yetkili · İmza', right: 'Tarih' }
+        ])}
     `;
 
     openPrintPreview('İş Emri Dökümü', contentHTML, '', {
-        paymentFooter: true,
         share: {
             phone: customerCari?.tel || customerCari?.telefon || '',
             customerName,
@@ -3850,12 +4105,17 @@ function getSavedInvoiceAmounts(invoice, linkedOrder = null) {
         gross: roundMoney(subTotal + discountAmount) };
 }
 
-function createInvoiceDocumentSnapshot(invoice, order, cari, issuer) {
+function createInvoiceDocumentSnapshot(invoice, order, cari, issuer, database = db) {
+    const line = { ...getSavedInvoiceAmounts(invoice, order), description: invoice.aciklama || order?.description || 'Fatura kalemi', orderNo: invoice.orderNo || order?.orderNo || '' };
+    // Freeze the work breakdown with the invoice; later order edits must not change a printed invoice.
+    const workItems = order ? getWorkLineItems(order, line.description, database) : [];
+    const itemsMatch = workItems.length > 1 && Math.abs(roundMoney(workItems.reduce((sum, item) => sum + item.amount, 0)) - roundMoney(line.gross)) <= 0.01;
     return {
         version: 1,
-        line: { ...getSavedInvoiceAmounts(invoice, order), description: invoice.aciklama || order?.description || 'Fatura kalemi', orderNo: invoice.orderNo || order?.orderNo || '' },
+        line,
+        ...(itemsMatch ? { items: workItems.map(item => ({ title: item.title, description: item.description || '', chips: [...(item.chips || [])], quantity: item.quantity ?? null, unit: item.unit || '', unitPrice: item.unitPrice ?? null, amount: item.amount })) } : {}),
         customer: { adi: invoice.firma || cari?.adi || '', kodu: cari?.kodu || '', tel: cari?.tel || cari?.telefon || '', adres: cari?.adres || '', vergiDairesi: cari?.vergiDairesi || '', vergiNo: invoice.vergiNo || cari?.vergiNo || '' },
-        issuer: { firmaAdi: issuer?.firmaAdi || 'AK LAZER Fiber Lazer Kesimleri', telefon: issuer?.telefon || '', adres: issuer?.adres || '' }
+        issuer: { firmaAdi: issuer?.firmaAdi || 'AK LAZER Fiber Lazer Kesimleri', telefon: issuer?.telefon || '', adres: issuer?.adres || '', eposta: issuer?.eposta || '', web: issuer?.web || '', vergiDairesi: issuer?.vergiDairesi || '', vergiNo: issuer?.vergiNo || '' }
     };
 }
 
@@ -3864,7 +4124,7 @@ function initializeInvoiceDocuments(database) {
         if (invoice.documentSnapshot?.version === 1) continue;
         const order = (database.isEmirleri || []).find(item => String(item.id) === String(invoice.orderId));
         const cari = (database.cariler || []).find(item => invoice.cariId != null ? String(item.id) === String(invoice.cariId) : item.adi === invoice.firma);
-        invoice.documentSnapshot = createInvoiceDocumentSnapshot(invoice, order, cari, database.ayarlar);
+        invoice.documentSnapshot = createInvoiceDocumentSnapshot(invoice, order, cari, database.ayarlar, database);
     }
 }
 
@@ -4005,30 +4265,44 @@ function getInvoiceDocumentLine(fatura) {
     };
 }
 
+// Invoices print only their frozen breakdown, and only while it still reproduces the invoiced amount.
+function getInvoiceLineItems(fatura, line) {
+    const items = Array.isArray(fatura.documentSnapshot?.items) ? fatura.documentSnapshot.items : [];
+    const sum = roundMoney(items.reduce((total, item) => total + (Number(item.amount) || 0), 0));
+    if (items.length > 1 && Math.abs(sum - roundMoney(line.gross)) <= 0.01) return items;
+    return [{ title: line.description, description: '', chips: [], quantity: null, unit: '', unitPrice: null, amount: line.gross }];
+}
+
 window.printInvoiceDocument = function(faturaId) {
     const fatura = getDBArray('faturalar').find(f => String(f.id) === String(faturaId));
     if (!fatura) return alert('Yazdırılacak fatura bulunamadı.');
 
     const line = getInvoiceDocumentLine(fatura);
     const cari = findCariByReference(fatura.cariId, fatura.firma);
-    const title = fatura.tur === 'kesilen' ? 'Fatura Belgesi' : 'Alınan Fatura Kaydı';
+    const outgoing = fatura.tur === 'kesilen';
+    const title = outgoing ? 'Fatura Belgesi' : 'Alınan Fatura Kaydı';
     const referenceHTML = line.orderNo ? `<div class="document-card-label">İş Emri</div><div class="document-card-value">${escapeHTML(line.orderNo)}</div>` : '';
+    const lineItems = getInvoiceLineItems(fatura, line);
     const contentHTML = `
         ${getPrintBrandHTML(title, getPrintMetaHTML([
             ['Fatura No', fatura.faturaNo],
             ['Tarih', fatura.faturaTarihi || fatura.tarih || new Date().toLocaleDateString('tr-TR')],
-            ['Vade', fatura.vadeTarihi],
+            ['Vade', fatura.vadeTarihi, true],
             ['Ödeme', getInvoicePaymentLabel(fatura)]
-        ]), fatura.documentSnapshot?.issuer)}
-        ${getPrintPartyHTML(fatura.tur === 'kesilen' ? 'Müşteri' : 'Tedarikçi', fatura.documentSnapshot?.customer?.adi || fatura.firma || cari?.adi,
+        ]), fatura.documentSnapshot?.issuer, outgoing ? 'Fatura bilgi dökümü' : 'Alış kaydı')}
+        ${getPrintPartyHTML(outgoing ? 'Müşteri' : 'Tedarikçi', fatura.documentSnapshot?.customer?.adi || fatura.firma || cari?.adi,
             fatura.documentSnapshot?.customer || { ...cari, vergiNo: fatura.vergiNo || cari?.vergiNo }, referenceHTML)}
-        ${getPrintServiceLineHTML(line.description, line.gross)}
-        <div class="document-footer-grid">${getPrintTotalsHTML(line, 'Fatura tutar özeti')}</div>
-        <div class="document-footnote">${fatura.tur === 'kesilen' ? 'Bilgilendirme amaçlıdır. Resmî fatura yerine geçmez.' : 'Uygulamada kayıtlı alış faturasının bilgi dökümüdür.'}</div>
+        <div class="section-heading"><h2>Fatura Kalemleri</h2><span>${lineItems.length} kalem</span></div>
+        ${getPrintLineItemsHTML(lineItems, 'service-lines')}
+        <div class="document-footer-grid">
+            <div>${outgoing ? getPrintPaymentBoxHTML(fatura.faturaNo ? `Açıklamaya ${fatura.faturaNo} yazınız.` : '') : ''}</div>
+            ${getPrintTotalsHTML(line, 'Fatura tutar özeti')}
+        </div>
+        <div class="document-footnote">${outgoing ? 'Bilgilendirme amaçlıdır. Resmî fatura yerine geçmez.' : 'Uygulamada kayıtlı alış faturasının bilgi dökümüdür.'}</div>
     `;
 
     openPrintPreview(title, contentHTML, '', {
-        paymentFooter: fatura.tur === 'kesilen',
+        issuer: fatura.documentSnapshot?.issuer,
         share: {
             phone: cari?.tel || cari?.telefon || '',
             customerName: fatura.firma || cari?.adi || '',
@@ -4866,6 +5140,16 @@ window.openAyarlarModal = function() {
     document.getElementById('input-ayar-firma').value = db.ayarlar.firmaAdi || '';
     document.getElementById('input-ayar-tel').value = db.ayarlar.telefon || '';
     document.getElementById('input-ayar-adres').value = db.ayarlar.adres || '';
+    const documentSettings = getDocumentSettings();
+    [
+        ['input-ayar-eposta', db.ayarlar.eposta], ['input-ayar-web', db.ayarlar.web],
+        ['input-ayar-vergi-dairesi', db.ayarlar.vergiDairesi], ['input-ayar-vergi-no', db.ayarlar.vergiNo],
+        ['input-belge-banka', documentSettings.bankaAdi], ['input-belge-hesap-sahibi', documentSettings.hesapSahibi],
+        ['input-belge-iban', documentSettings.iban], ['input-belge-gecerlilik', documentSettings.teklifGecerlilikGun],
+        ['input-belge-hazirlayan', documentSettings.hazirlayan], ['input-belge-teslim-suresi', documentSettings.teslimSuresi],
+        ['input-belge-odeme', documentSettings.odemeSekli], ['input-belge-teslim-sekli', documentSettings.teslimSekli],
+        ['input-belge-kosullar', documentSettings.teklifKosullari]
+    ].forEach(([id, value]) => { const el = document.getElementById(id); if (el) el.value = value ?? ''; });
     const numbering = mergeNumberingSettings(db.ayarlar.numaralandirma);
     [
         ['input-num-hareket-prefix', 'hareket'],
@@ -4899,7 +5183,7 @@ window.openAyarlarModal = function() {
 }
 
 window.setSettingsTab = function(tab = 'company') {
-    const validTab = ['company', 'numbering', 'backup', 'update'].includes(tab) ? tab : 'company';
+    const validTab = ['company', 'documents', 'numbering', 'backup', 'update'].includes(tab) ? tab : 'company';
     if (validTab === 'backup') refreshBackupStatus();
     document.querySelectorAll('#modal-ayarlar .settings-tab').forEach(button => {
         const active = button.id === `settings-tab-${validTab}`;
@@ -4927,6 +5211,17 @@ window.saveAyarlar = function() {
     }
 
     if ([...document.querySelectorAll('[id^="input-num-"]')].some(el => !/^[A-Z][A-Z0-9]{0,11}$/.test(el.value.trim().toUpperCase()))) return alert('Kod ön ekleri 1–12 harf/rakam olmalı ve harfle başlamalıdır.');
+    const fieldValue = id => plainText(document.getElementById(id)?.value || '');
+    const eposta = fieldValue('input-ayar-eposta');
+    const vergiNo = fieldValue('input-ayar-vergi-no');
+    const iban = fieldValue('input-belge-iban').replace(/\s+/g, '').toLocaleUpperCase('tr-TR');
+    const gecerlilikGun = Number(document.getElementById('input-belge-gecerlilik')?.value || DEFAULT_DOCUMENT_SETTINGS.teklifGecerlilikGun);
+    if (eposta && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(eposta)) { setSettingsTab('company'); return alert('Geçerli bir e-posta adresi girin.'); }
+    if (vergiNo && !/^\d{10,11}$/.test(vergiNo)) { setSettingsTab('company'); return alert('Vergi numarası 10, T.C. kimlik numarası 11 rakam olmalıdır.'); }
+    if (iban && !/^TR\d{24}$/.test(iban)) { setSettingsTab('documents'); return alert('IBAN TR ile başlayan 26 karakter olmalıdır.'); }
+    if (!Number.isSafeInteger(gecerlilikGun) || gecerlilikGun < 1 || gecerlilikGun > 365) { setSettingsTab('documents'); return alert('Teklif geçerlilik süresi 1 ile 365 gün arasında olmalıdır.'); }
+    const kosullar = String(document.getElementById('input-belge-kosullar')?.value || '').split(/\r?\n/).map(plainText).filter(Boolean);
+    if (kosullar.length > 8 || kosullar.some(item => item.length > 220)) { setSettingsTab('documents'); return alert('En fazla 8 teklif koşulu girin; her koşul en fazla 220 karakter olabilir.'); }
     const currentNumbering = mergeNumberingSettings(db.ayarlar?.numaralandirma);
     [
         ['input-num-hareket-prefix', 'hareket'],
@@ -4950,6 +5245,21 @@ window.saveAyarlar = function() {
         firmaAdi,
         telefon: tel,
         adres,
+        eposta,
+        web: fieldValue('input-ayar-web'),
+        vergiDairesi: fieldValue('input-ayar-vergi-dairesi'),
+        vergiNo,
+        belge: {
+            bankaAdi: fieldValue('input-belge-banka'),
+            hesapSahibi: fieldValue('input-belge-hesap-sahibi'),
+            iban: iban ? iban.replace(/(.{4})/g, '$1 ').trim() : '',
+            teklifGecerlilikGun: gecerlilikGun,
+            teslimSuresi: fieldValue('input-belge-teslim-suresi'),
+            teslimSekli: fieldValue('input-belge-teslim-sekli'),
+            odemeSekli: fieldValue('input-belge-odeme'),
+            hazirlayan: fieldValue('input-belge-hazirlayan'),
+            teklifKosullari: kosullar.join('\n')
+        },
         numaralandirma: currentNumbering,
         karlilik: {
             makineDakikaMaliyeti: roundMoney(makineDakikaMaliyeti),
@@ -4957,7 +5267,9 @@ window.saveAyarlar = function() {
         }
     };
     addAuditLog('Güncellendi', 'Kârlılık Ayarları', 'ayarlar', `Makine/dk: ${formatCurrency(makineDakikaMaliyeti)}, İşçilik/saat: ${formatCurrency(iscilikSaatMaliyeti)}`);
+    addAuditLog('Güncellendi', 'Belge Ayarları', 'ayarlar', `${db.ayarlar.belge.bankaAdi || 'Banka yok'} · Teklif geçerliliği ${gecerlilikGun} gün`);
     saveDB();
+    applyQuoteTermDefaults();
     closeModal('modal-ayarlar');
 }
 
@@ -7480,40 +7792,57 @@ function printPayrollStatement(rowId) {
         ? { maas: record.bazUcret, maasTipi: record.maasTipi || personel?.maasTipi }
         : (personel && roundMoney(calculatePayroll(personel, record).net) === roundMoney(calc.net) ? personel : null);
     const wageTypeLabel = savedBasis?.maasTipi === 'gunluk' ? 'Günlük' : (savedBasis?.maasTipi === 'saatlik' ? 'Saatlik' : 'Aylık');
+    const account = record.kasaId ? getDBArray('kasaHesaplari').find(item => String(item.id) === String(record.kasaId)) : null;
+    const identity = [
+        printableText(personel?.tcKimlikNo) ? `T.C. Kimlik No ${printableText(personel.tcKimlikNo)}` : '',
+        printableText(personel?.sgkSicilNo) ? `SGK Sicil No ${printableText(personel.sgkSicilNo)}` : ''
+    ].filter(Boolean);
+    const overtimeAmount = roundMoney(calc.mesai || Math.max(0, (calc.ekOdeme || 0) - (calc.prim || 0)));
+    const overtimeDetail = Number(record.mesaiSaat) > 0 && Number(record.mesaiSaatUcreti) > 0
+        ? `${formatPrintQuantity(record.mesaiSaat)} saat × ${formatCurrency(record.mesaiSaatUcreti)}` : '';
     const contentHTML = `
-        ${getPrintBrandHTML('Personel Maaş Bordrosu', getPrintMetaHTML([
+        ${getPrintBrandHTML('Maaş Bordrosu', getPrintMetaHTML([
             ['Dönem', formatMonthLabel(record.donem)],
             ['Düzenleme', new Date().toLocaleDateString('tr-TR')],
-            ['Durum', record.odendi ? 'Ödendi' : 'Bekliyor']
-        ]))}
+            ['Durum', record.odendi ? 'Ödendi' : 'Bekliyor', true],
+            ['Ödeme Tarihi', record.odendi ? record.odemeTarihi : '']
+        ]), db.ayarlar, 'Personel')}
         <div class="document-intro-grid">
             <div class="document-card">
                 <div class="document-card-label">Personel</div>
                 <div class="document-card-value">${escapeHTML(personel?.ad || '-')}</div>
-                <div class="document-card-detail">${escapeHTML(personel?.gorev || '-')}</div>
+                ${printableText(personel?.gorev) ? `<div class="document-card-detail">${escapeHTML(printableText(personel.gorev))}</div>` : ''}
+                ${identity.length ? `<div class="document-card-detail">${identity.map(escapeHTML).join(' · ')}</div>` : ''}
             </div>
-            <div class="document-card">
+            <div class="document-card document-reference">
                 <div class="document-card-label">Ücret Bilgisi</div>
                 <div class="document-card-value">${escapeHTML(savedBasis ? wageTypeLabel : 'Kayıtlı ücret')}</div>
                 <div class="document-card-detail">${savedBasis ? `Baz ücret: ${escapeHTML(formatCurrency(savedBasis.maas || 0))}` : 'Bu dönemin baz ücreti kayıtta yok; tutarlar kayıttan alınmıştır.'}</div>
             </div>
         </div>
         <div class="section-heading"><h2>Puantaj Bilgileri</h2></div>
-        <table>
+        <table class="payroll-attendance">
             <thead><tr><th>Geldiği Gün</th><th>İzin</th><th>Eksik</th><th>Fazla Mesai</th></tr></thead>
             <tbody><tr><td>${record.geldiGun || 0}</td><td>${record.izinGun || 0}</td><td>${record.eksikGun || 0}</td><td>${record.mesaiSaat || 0} saat</td></tr></tbody>
         </table>
         <div class="document-footer-grid">
-            ${record.not ? `<div class="document-note"><span class="document-note-title">Not</span>${escapeHTML(record.not)}</div>` : ''}
+            <div>
+                <div class="status-note${record.odendi ? '' : ' is-pending'}">${record.odendi ? `Ödendi${record.odemeTarihi ? ` · ${escapeHTML(record.odemeTarihi)}` : ''}${account ? ` · ${escapeHTML(account.ad)}` : ''}` : 'Ödeme bekliyor'}</div>
+                ${record.not ? `<div class="document-note" style="margin-top:10px"><span class="document-note-title">Not</span>${escapeHTML(record.not)}</div>` : ''}
+            </div>
+            <div class="totals-block">
             <table class="totals-panel" aria-label="Bordro tutar özeti">
                 <tbody>
                     <tr><td>Brüt Maaş</td><td>${escapeHTML(formatCurrency(calc.brut))}</td></tr>
-                    ${calc.kesinti ? `<tr><td>Eksik Gün Kesintisi</td><td>-${escapeHTML(formatCurrency(calc.kesinti))}</td></tr>` : ''}
-                    ${calc.avans ? `<tr><td>Avans / Kesinti</td><td>-${escapeHTML(formatCurrency(calc.avans))}</td></tr>` : ''}
-                    ${calc.ekOdeme ? `<tr><td>Fazla Mesai + Prim</td><td>${escapeHTML(formatCurrency(calc.ekOdeme))}</td></tr>` : ''}
+                    ${calc.kesinti ? `<tr class="discount-row"><td>Eksik Gün Kesintisi (${escapeHTML(record.eksikGun || 0)} gün)</td><td>-${escapeHTML(formatCurrency(calc.kesinti))}</td></tr>` : ''}
+                    ${calc.avans ? `<tr class="discount-row"><td>Avans / Kesinti</td><td>-${escapeHTML(formatCurrency(calc.avans))}</td></tr>` : ''}
+                    ${overtimeAmount ? `<tr><td>Fazla Mesai${overtimeDetail ? ` (${escapeHTML(overtimeDetail)})` : ''}</td><td>${escapeHTML(formatCurrency(overtimeAmount))}</td></tr>` : ''}
+                    ${calc.prim ? `<tr><td>Prim</td><td>${escapeHTML(formatCurrency(calc.prim))}</td></tr>` : ''}
                     <tr class="total-row"><td>Net Ödenecek</td><td>${escapeHTML(formatCurrency(calc.net))}</td></tr>
                 </tbody>
             </table>
+            ${getPrintAmountWordsHTML(calc.net)}
+            </div>
         </div>
         <div class="signature-grid" aria-label="Bordro imza alanları">
             <div class="signature-box">Personel<br>Ad Soyad / İmza</div>
@@ -7521,8 +7850,10 @@ function printPayrollStatement(rowId) {
         </div>
     `;
     openPrintPreview('Personel Maaş Bordrosu', contentHTML, `
-        table:not(.totals-panel) { table-layout: fixed; }
-        table:not(.totals-panel) th, table:not(.totals-panel) td { text-align: center; }
+        .payroll-attendance { table-layout: fixed; border-collapse: separate; border-spacing: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+        .payroll-attendance th, .payroll-attendance td { text-align: center; }
+        .payroll-attendance td { border-bottom: 0; font-size: 11px; font-weight: 600; }
+        .status-note.is-pending { border-left-color: #b7791f; background: #fff8eb; color: #8a5a12; }
     `);
 }
 
@@ -7962,6 +8293,13 @@ window.setQuoteStatus = function(id, status) {
     closeModal('modal-quote-detail');
 };
 
+// Fill empty quote term fields from settings; a value the user typed is never overwritten.
+function applyQuoteTermDefaults(force = false) {
+    const defaults = getDocumentSettings();
+    [['quote-teslim-suresi', defaults.teslimSuresi], ['quote-odeme-sekli', defaults.odemeSekli], ['quote-gecerlilik-gun', defaults.teklifGecerlilikGun]]
+        .forEach(([id, value]) => { const el = document.getElementById(id); if (el && (force || !plainText(el.value))) el.value = value ?? ''; });
+}
+
 function getQuoteData() {
     const islemTipi = document.getElementById('quote-type') ? document.getElementById('quote-type').value : 'lazer';
     const customerId = document.getElementById('quote-customer').value;
@@ -7981,6 +8319,10 @@ function getQuoteData() {
     const stokQty = readNumber('quote-material-qty');
     const discountPercent = readNumber('quote-discount');
     const taxRate = readNumber('quote-tax-rate', 20);
+    const termDefaults = getDocumentSettings();
+    const teslimSuresi = plainText(document.getElementById('quote-teslim-suresi')?.value ?? termDefaults.teslimSuresi).slice(0, 80);
+    const odemeSekli = plainText(document.getElementById('quote-odeme-sekli')?.value ?? termDefaults.odemeSekli).slice(0, 80);
+    const gecerlilikGun = readNumber('quote-gecerlilik-gun', termDefaults.teklifGecerlilikGun);
 
     if (!customerId) {
         alert("Lütfen müşteri seçin!");
@@ -8008,6 +8350,10 @@ function getQuoteData() {
     }
     if (taxRate < 0 || taxRate > 100) {
         alert('KDV oranı %0 ile %100 arasında olmalıdır.');
+        return null;
+    }
+    if (!Number.isSafeInteger(gecerlilikGun) || gecerlilikGun < 1 || gecerlilikGun > 365) {
+        alert('Teklif geçerlilik süresi 1 ile 365 gün arasında olmalıdır.');
         return null;
     }
 
@@ -8087,102 +8433,74 @@ function getQuoteData() {
         discountPercent,
         discountAmount,
         taxRate,
-        total
+        total,
+        teslimSuresi,
+        odemeSekli,
+        gecerlilikGun
     };
+}
+
+function addDaysToTRDate(dateText, days) {
+    const date = parseTRDate(dateText);
+    if (!(date instanceof Date) || Number.isNaN(date.getTime()) || date.getTime() === 0) return '';
+    date.setDate(date.getDate() + days);
+    return date.toLocaleDateString('tr-TR');
 }
 
 function printQuoteDocument(quoteData) {
     if (!quoteData) return;
 
     const quoteCari = findCariByReference(quoteData.customerId, quoteData.customerName);
+    const settings = getDocumentSettings();
     const tipLabel = getQuoteOperationMeta(quoteData.islemTipi).label;
     const taxRate = quoteData.taxRate ?? 20;
     const subTotal = quoteData.subTotal ?? Math.max(0, (quoteData.total || 0) - (quoteData.tax || 0));
     const documentDate = quoteData.tarih || new Date().toLocaleDateString('tr-TR');
-    const description = quoteData.description || (quoteData.islemTipi === 'hammadde' ? `${quoteData.kgAmount || 0} KG hammadde satışı` : tipLabel);
-    const operationDetail = quoteData.islemTipi === 'lazer'
-        ? `${quoteData.minutes || 0} dakika × ${formatCurrency(quoteData.rate || 0)}`
-        : `${quoteData.kgAmount || 0} KG × ${formatCurrency(quoteData.kgPrice || 0)}`;
-    const lineItems = [];
-
-    if (roundMoney(quoteData.operationCost || 0) > 0) {
-        lineItems.push({
-            title: tipLabel,
-            description,
-            detail: operationDetail,
-            amount: roundMoney(quoteData.operationCost || 0)
-        });
-    }
-    if (roundMoney(quoteData.materialCost || 0) > 0) {
-        lineItems.push({
-            title: quoteData.islemTipi === 'hammadde' ? 'Hammadde' : 'Malzeme Bedeli',
-            description: quoteData.islemTipi === 'hammadde' ? description : 'İş kapsamında kullanılan malzeme',
-            detail: quoteData.islemTipi === 'hammadde'
-                ? operationDetail
-                : `${quoteData.stokQty || 0} adet / plaka`,
-            amount: roundMoney(quoteData.materialCost || 0)
-        });
-    }
-    if (!lineItems.length) {
-        lineItems.push({ title: tipLabel, description, detail: operationDetail, amount: roundMoney(quoteData.subTotalBeforeDiscount || subTotal || 0) });
-    }
+    const validityDays = Number.isSafeInteger(Number(quoteData.gecerlilikGun)) && Number(quoteData.gecerlilikGun) > 0 ? Number(quoteData.gecerlilikGun) : settings.teklifGecerlilikGun;
+    const validUntil = addDaysToTRDate(documentDate, validityDays);
+    const fallbackDescription = quoteData.islemTipi === 'hammadde' ? `${quoteData.kgAmount || 0} KG hammadde satışı` : tipLabel;
+    const lineItems = getWorkLineItems(quoteData, fallbackDescription);
+    const deliveryTime = printableText(quoteData.teslimSuresi ?? settings.teslimSuresi);
+    const paymentTerms = printableText(quoteData.odemeSekli ?? settings.odemeSekli);
+    const terms = [
+        `Fiyatlar teklif tarihinden itibaren ${validityDays} gün geçerlidir${validUntil ? `; son geçerlilik tarihi ${validUntil}` : ''}.`,
+        ...settings.teklifKosullari.split('\n')
+    ];
+    const phone = printableText(db.ayarlar?.telefon);
 
     const contentHTML = `
         ${getPrintBrandHTML('Fiyat Teklifi', getPrintMetaHTML([
             ...(quoteData.teklifNo ? [['Teklif No', quoteData.teklifNo]] : []),
-            ['Tarih', documentDate]
+            ['Teklif Tarihi', documentDate],
+            ['Geçerlilik', validUntil, true],
+            ['Hazırlayan', settings.hazirlayan]
+        ]), db.ayarlar, 'Müşteri teklifi')}
+        ${getPrintPartyHTML('Teklif Verilen', quoteData.customerName || quoteCari?.adi, quoteCari, getPrintFactsHTML('Teklif Bilgileri', [
+            ['Teslim süresi', deliveryTime],
+            ['Teslim şekli', settings.teslimSekli],
+            ['Ödeme', paymentTerms],
+            ['Birim fiyatlar', 'KDV hariç, TL']
         ]))}
-        ${getPrintPartyHTML('Teklif Verilen', quoteData.customerName || quoteCari?.adi, quoteCari)}
         <div class="section-heading">
             <h2>Teklif Kalemleri</h2>
             <span>${lineItems.length} kalem</span>
         </div>
-        <table class="quote-lines">
-            <thead>
-                <tr>
-                    <th>No</th>
-                    <th>Açıklama</th>
-                    <th>Miktar / Birim Fiyat</th>
-                    <th class="text-right">Tutar</th>
-                </tr>
-            </thead>
-            <tbody>
-                ${lineItems.map((item, index) => `
-                    <tr>
-                        <td class="quote-line-index">${String(index + 1).padStart(2, '0')}</td>
-                        <td><strong>${escapeHTML(item.title)}</strong><div class="quote-line-description">${escapeHTML(item.description)}</div></td>
-                        <td class="quote-line-calculation">${escapeHTML(item.detail)}</td>
-                        <td class="number-cell"><strong>${escapeHTML(formatCurrency(item.amount))}</strong></td>
-                    </tr>
-                `).join('')}
-            </tbody>
-        </table>
+        ${getPrintLineItemsHTML(lineItems, 'quote-lines')}
         <div class="document-footer-grid quote-footer">
-            <div class="document-note">
-                <span class="document-note-title">Teklif Koşulu</span>
-                Verilen fiyatlar teklif tarihinden itibaren 15 gün geçerlidir.
+            <div>
+                ${getPrintTermsHTML('Teklif Koşulları', terms)}
+                ${getPrintPaymentBoxHTML(quoteData.teklifNo ? 'Açıklamaya teklif numarasını yazınız.' : '')}
             </div>
             ${getPrintTotalsHTML({ ...quoteData, subTotal, taxRate }, 'Teklif tutar özeti')}
         </div>
+        ${getPrintApprovalHTML([
+            { label: 'Teklifi Hazırlayan', text: getCompanyName(), left: 'Kaşe / İmza', right: documentDate },
+            { label: 'Müşteri Onayı', text: 'Bu teklifi yukarıdaki koşullarla kabul ediyoruz.', left: 'Yetkili · Kaşe / İmza', right: 'Tarih' }
+        ])}
+        <div class="doc-thanks">Bizi tercih ettiğiniz için teşekkür ederiz.${phone ? ` Sorularınız için <strong>${escapeHTML(phone)}</strong>` : ''}</div>
     `;
 
-    openPrintPreview('Fiyat Teklifi', contentHTML, `
-        .quote-intro { display: block; }
-        .quote-lines { table-layout: fixed; }
-        .quote-lines th:nth-child(1) { width: 7%; }
-        .quote-lines th:nth-child(2) { width: 43%; }
-        .quote-lines th:nth-child(3) { width: 30%; }
-        .quote-lines th:nth-child(4) { width: 20%; }
-        .quote-lines td { padding-top: 11px; padding-bottom: 11px; font-size: 10.5px; }
-        .quote-line-index { color: var(--accent); font-size: 9px !important; font-weight: 700; }
-        .quote-line-description { margin-top: 3px; color: var(--ink-soft); font-size: 9px; line-height: 1.45; }
-        .quote-line-calculation { color: var(--ink-soft); }
-        .quote-footer { margin-top: 24px; }
-        .quote-footer .totals-panel .total-row td { padding-top: 11px; padding-bottom: 11px; }
-        .quote-footer .totals-panel .total-row td:last-child { font-size: 17px; }
-        .bank-details { margin-top: 34px; }
-    `, {
-        paymentFooter: true,
+    openPrintPreview('Fiyat Teklifi', contentHTML, '', {
         share: {
             phone: quoteCari?.tel || quoteCari?.telefon || '',
             customerName: quoteData.customerName || quoteCari?.adi || '',
@@ -8222,6 +8540,10 @@ window.loadQuote = function(id) {
     document.getElementById('quote-material-qty').value = quote.stokQty || 1;
     document.getElementById('quote-discount').value = quote.discountPercent ?? 0;
     document.getElementById('quote-tax-rate').value = quote.taxRate ?? 20;
+    const termDefaults = getDocumentSettings();
+    document.getElementById('quote-teslim-suresi').value = quote.teslimSuresi ?? termDefaults.teslimSuresi;
+    document.getElementById('quote-odeme-sekli').value = quote.odemeSekli ?? termDefaults.odemeSekli;
+    document.getElementById('quote-gecerlilik-gun').value = quote.gecerlilikGun ?? termDefaults.teklifGecerlilikGun;
 
     activeQuoteId = quote.id;
     activeQuoteFingerprint = getQuoteFingerprint(quote);
@@ -11379,6 +11701,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         enhanceContentPageLayouts();
         await renderAppVersion();
         await hydrateDBFromFileIfNeeded();
+        applyQuoteTermDefaults();
         const hash = window.location.hash.substring(1) || 'dashboard';
         switchView(hash);
         scheduleAutomaticUpdateCheck();
@@ -12154,7 +12477,7 @@ function prepareQuickSaleCandidate(input, editId = '', cancel = false) {
         const sale = { id: createRecordId(), satisNo: generateSerialNo('hizliSatis'), submitToken: input.token, status: 'active', tarih: toTRDateFromInput(input.date), date: input.date,
             aciklama: plainText(input.description), customerName: plainText(input.name), cariId: cari.id, kasaId: account.id, kasaAdi: account.ad, kasaTip: account.tip,
             tutar, kdvOrani: tax, matrah: roundMoney(tutar / (1 + tax / 100)), stokId: stok?.id || null, stokAdi: stok?.cinsi || '', stokAlan: field, stokMiktar: quantity,
-            issuer: { firmaAdi: db.ayarlar?.firmaAdi, telefon: db.ayarlar?.telefon, adres: db.ayarlar?.adres }, correctionOf: previous?.id || null, createdAt: new Date().toISOString() };
+            issuer: { firmaAdi: db.ayarlar?.firmaAdi, telefon: db.ayarlar?.telefon, adres: db.ayarlar?.adres, eposta: db.ayarlar?.eposta || '', web: db.ayarlar?.web || '', vergiDairesi: db.ayarlar?.vergiDairesi || '', vergiNo: db.ayarlar?.vergiNo || '' }, correctionOf: previous?.id || null, createdAt: new Date().toISOString() };
         sale.kdvTutari = roundMoney(tutar - sale.matrah);
         const common = { tarih: sale.tarih, quickSaleId: sale.id, quickSaleNo: sale.satisNo, tutar, aciklama: `${sale.satisNo} · ${sale.aciklama}${sale.customerName ? ' · ' + sale.customerName : ''}` };
         sale.debitMovementId = addCariMovement(cari, { ...common, tip: 'Hızlı Satış', bakiyeDegisimi: tutar }).id;
@@ -12306,14 +12629,28 @@ function renderQuickSales() {
     document.getElementById('quick-sales-next').disabled = quickSalesPage === pages;
 }
 function getQuickSalePrintHTML(sale) {
-    return getPrintBrandHTML('Satış Özeti', getPrintMetaHTML([['Satış No',sale.satisNo],['Tarih',sale.tarih],['Durum',quickSaleStatusLabel(sale)]]),sale.issuer) +
-        (sale.customerName ? getPrintPartyHTML('Müşteri',sale.customerName) : '') +
-        `<table><thead><tr><th scope="col">Açıklama</th><th scope="col" class="number-cell">Tutar (TL)</th></tr></thead><tbody><tr><td>${escapeHTML(sale.aciklama)}${sale.stokId ? `<div class="document-card-detail">${escapeHTML(sale.stokMiktar+' '+(sale.stokAlan==='kg'?'KG':'adet')+' · '+sale.stokAdi)}</div>` : ''}</td><td class="number-cell">${formatCurrency(sale.matrah)}</td></tr><tr><td>KDV (%${escapeHTML(sale.kdvOrani)})</td><td class="number-cell">${formatCurrency(sale.kdvTutari)}</td></tr><tr class="total-row"><td>TOPLAM</td><td class="number-cell">${formatCurrency(sale.tutar)}</td></tr></tbody></table>` +
-        `<p>${sale.status === 'active' ? `Tahsil edildi · ${sale.kasaTip === 'nakit' ? 'Nakit' : 'Banka'}` : 'Bu satış kaydı geri alınmıştır.'}</p>`;
+    const quantity = sale.stokId && Number(sale.stokMiktar) > 0 ? Number(sale.stokMiktar) : null;
+    const unit = sale.stokAlan === 'kg' ? 'KG' : (sale.sheetCutId ? 'plaka' : 'adet');
+    const stock = sale.stokId ? getDBArray('stoklar').find(item => String(item.id) === String(sale.stokId)) : null;
+    const chips = sale.stokId ? [printableText(sale.stokAdi), ...getStockPrintChips(stock).slice(1), sale.sheetCutId && sale.cut ? `Kesilen ${sale.cut.en} × ${sale.cut.boy} mm` : ''].filter(Boolean) : [];
+    const items = [{ title: sale.aciklama, description: '', chips, quantity, unit: quantity ? unit : '', unitPrice: quantity ? roundMoney(sale.matrah / quantity) : null, amount: sale.matrah }];
+    const account = printableText(sale.kasaAdi);
+    return getPrintBrandHTML('Satış Özeti', getPrintMetaHTML([['Satış No', sale.satisNo], ['Tarih', sale.tarih], ['Durum', quickSaleStatusLabel(sale), true]]), sale.issuer, 'Tahsilat makbuzu') +
+        (sale.customerName ? getPrintPartyHTML('Müşteri', sale.customerName) : '') +
+        `<div class="section-heading"><h2>Satış Kalemi</h2><span>KDV %${escapeHTML(sale.kdvOrani)}</span></div>` +
+        getPrintLineItemsHTML(items) +
+        `<div class="document-footer-grid"><div>${sale.status === 'active'
+            ? `<div class="status-note">Tahsil edildi · ${sale.kasaTip === 'nakit' ? 'Nakit' : 'Banka'}${account ? ` · ${escapeHTML(account)}` : ''}</div>`
+            : '<div class="status-note is-cancelled">Bu satış kaydı geri alınmıştır.</div>'}</div>` +
+        getPrintTotalsHTML({ subTotal: sale.matrah, tax: sale.kdvTutari, taxRate: sale.kdvOrani, total: sale.tutar }, 'Satış tutar özeti') + `</div>` +
+        getPrintApprovalHTML([
+            { label: 'Teslim Eden', text: sale.issuer?.firmaAdi || getCompanyName(), left: 'Kaşe / İmza', right: sale.tarih },
+            { label: 'Teslim Alan', text: 'Malı / hizmeti eksiksiz teslim aldım.', left: 'İmza', right: 'Tarih' }
+        ]);
 }
 function printQuickSale(id) {
     const sale = getDBArray('hizliSatislar').find(s => s.id == id); if (!sale) return;
-    openPrintPreview('Satış Özeti',getQuickSalePrintHTML(sale),'',{ paymentFooter: true });
+    openPrintPreview('Satış Özeti',getQuickSalePrintHTML(sale),'',{ issuer: sale.issuer });
 }
 
 // Sheet cutting records transfer whole sheets into individually identifiable remnants.

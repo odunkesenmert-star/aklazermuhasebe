@@ -75,7 +75,7 @@ const {JSDOM}=require('jsdom');
  d.getElementById('quick-sale-description').value='Küçük kesim';d.getElementById('quick-sale-total').value='240';d.getElementById('quick-sale-cash').value='1';await w.saveQuickSale();
  assert.equal(current().hizliSatislar.length,1);assert(!d.getElementById('modal-quick-sale').classList.contains('active'));sale=current().hizliSatislar[0];
  const printed=w.getQuickSalePrintHTML(sale);assert(!printed.includes('Perakende Müşteri'));assert(!printed.includes('document-card-label'));assert(printed.includes('₺240,00'));
- w.printQuickSale(sale.id);const frame=d.querySelector('#print-preview-overlay iframe');assert(frame);assert(frame.srcdoc.includes('TR04 0001 0090 1065 8664 4050 01'));d.getElementById('print-preview-overlay').closePreview();
+ w.printQuickSale(sale.id);const frame=d.querySelector('#print-preview-overlay iframe');assert(frame);assert(!frame.srcdoc.includes('TR04 0001 0090 1065 8664 4050 01'),'A collected sale does not ask for bank payment');assert(frame.srcdoc.includes('Tahsil edildi'));assert(frame.srcdoc.includes('Yalnız'));d.getElementById('print-preview-overlay').closePreview();
  assert(w.getQuickSalePrintHTML({...sale,customerName:'<img src=x>',aciklama:'<script>bad</script>'}).includes('&lt;img'));
  assert(!w.getQuickSalePrintHTML({...sale,customerName:'<img src=x>'}).includes('<img src=x>'));
  for(let i=0;i<55;i++)current().hizliSatislar.push({...sale,id:100+i,satisNo:'HZS-TEST-'+i,customerName:'ÖMER'});

@@ -1,6 +1,6 @@
 {
   "name": "prolazer-erp",
-  "version": "1.5.23",
+  "version": "1.5.24",
   "description": "Profesyonel Lazer Kesim Muhasebe ve Yönetim Sistemi",
   "main": "main.js",
   "scripts": {
@@ -20,7 +20,7 @@
     "build:win": "electron-builder --win",
     "build:win:x64": "electron-builder --win --x64",
     "test:workspace": "node test/workspace_design_test.js",
-    "test:print": "node test/print_documents_test.js && node test/account_correction_print_test.js && node test/cari_identity_statement_test.js",
+    "test:print": "node test/print_documents_test.js && node test/account_correction_print_test.js && node test/cari_identity_statement_test.js && node test/print_design_test.js",
     "test:invoices": "node test/invoice_integrity_test.js",
     "test:finance": "node test/finance_followup_test.js && node test/backup_status_test.js && node test/backup_ipc_test.js",
     "test:safety": "node test/desktop_instance_test.js && node test/transaction_replay_test.js",

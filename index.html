@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;">
     <title>AK LAZER ERP - Lazer Kesim Yönetim Sistemi</title>
-    <link rel="stylesheet" href="style.css?v=1.5.23">
-    <link rel="stylesheet" href="node_modules/@fortawesome/fontawesome-free/css/all.min.css?v=1.5.23">
-    <script src="node_modules/chart.js/dist/chart.umd.min.js?v=1.5.23"></script>
-    <script src="app.js?v=1.5.23" defer></script>
+    <link rel="stylesheet" href="style.css?v=1.5.24">
+    <link rel="stylesheet" href="node_modules/@fortawesome/fontawesome-free/css/all.min.css?v=1.5.24">
+    <script src="node_modules/chart.js/dist/chart.umd.min.js?v=1.5.24"></script>
+    <script src="app.js?v=1.5.24" defer></script>
 </head>
 <body>
     <button type="button" class="workspace-menu-backdrop" aria-label="Menüyü kapat" onclick="toggleWorkspaceMenu(false)" hidden></button>
@@ -119,7 +119,7 @@
             </nav>
             <div class="sidebar-version" aria-label="Uygulama sürümü">
                 <span class="sidebar-version-label"><i class="fa-solid fa-desktop" aria-hidden="true"></i> AK LAZER ERP</span>
-                <strong id="app-version">v1.5.23</strong>
+                <strong id="app-version">v1.5.24</strong>
             </div>
         </aside>
 
@@ -459,6 +459,29 @@
                                 </div>
                             </div>
                             <button id="btn-calculate" class="btn btn-primary w-100 quote-calculate-btn" onclick="calculateQuote()"><i class="fa-solid fa-calculator"></i> Teklifi Hesapla</button>
+                            </div>
+                            <div class="quote-form-section">
+                                <div class="quote-section-heading">
+                                    <span class="quote-section-number">3</span>
+                                    <div>
+                                        <strong>Teslim ve Ödeme</strong>
+                                        <span>Teklif belgesinde müşteriye gösterilir; varsayılanlar Ayarlar &gt; Belge Ayarları'ndan gelir.</span>
+                                    </div>
+                                </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="quote-teslim-suresi">Teslim Süresi</label>
+                                    <input type="text" id="quote-teslim-suresi" class="form-control" maxlength="80" placeholder="Örn: Onaydan sonra 3 iş günü">
+                                </div>
+                                <div class="form-group">
+                                    <label for="quote-gecerlilik-gun">Geçerlilik (gün)</label>
+                                    <input type="number" id="quote-gecerlilik-gun" class="form-control" min="1" max="365" step="1">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="quote-odeme-sekli">Ödeme Şekli</label>
+                                <input type="text" id="quote-odeme-sekli" class="form-control" maxlength="80" placeholder="Örn: Teslimatta nakit / havale">
+                            </div>
                             </div>
                         </div>
 
@@ -2395,6 +2418,9 @@
                     <button type="button" class="settings-tab active" id="settings-tab-company" role="tab" aria-selected="true" aria-controls="settings-panel-company" onclick="setSettingsTab('company')">
                         <i class="fa-solid fa-building" aria-hidden="true"></i><span>Firma Bilgileri</span>
                     </button>
+                    <button type="button" class="settings-tab" id="settings-tab-documents" role="tab" aria-selected="false" aria-controls="settings-panel-documents" onclick="setSettingsTab('documents')">
+                        <i class="fa-solid fa-file-invoice" aria-hidden="true"></i><span>Belge Ayarları</span>
+                    </button>
                     <button type="button" class="settings-tab" id="settings-tab-numbering" role="tab" aria-selected="false" aria-controls="settings-panel-numbering" onclick="setSettingsTab('numbering')">
                         <i class="fa-solid fa-hashtag" aria-hidden="true"></i><span>Numara Düzeni</span>
                     </button>
@@ -2426,6 +2452,26 @@
                             <label for="input-ayar-adres">Firma Adresi / Ek Bilgi</label>
                             <textarea id="input-ayar-adres" class="form-control" rows="3" placeholder="Fatura adresi veya notlar..."></textarea>
                         </div>
+                        <div class="form-row settings-company-grid">
+                            <div class="form-group">
+                                <label for="input-ayar-eposta">E-posta</label>
+                                <input type="email" id="input-ayar-eposta" class="form-control" maxlength="120" placeholder="Örn: info@firma.com.tr">
+                            </div>
+                            <div class="form-group">
+                                <label for="input-ayar-web">Web Sitesi</label>
+                                <input type="text" id="input-ayar-web" class="form-control" maxlength="120" placeholder="Örn: firma.com.tr">
+                            </div>
+                        </div>
+                        <div class="form-row settings-company-grid">
+                            <div class="form-group">
+                                <label for="input-ayar-vergi-dairesi">Vergi Dairesi</label>
+                                <input type="text" id="input-ayar-vergi-dairesi" class="form-control" maxlength="80" placeholder="Örn: Aslanbey">
+                            </div>
+                            <div class="form-group">
+                                <label for="input-ayar-vergi-no">Vergi / T.C. Kimlik No</label>
+                                <input type="text" id="input-ayar-vergi-no" class="form-control" maxlength="11" inputmode="numeric" placeholder="10 veya 11 hane">
+                            </div>
+                        </div>
                         <div class="settings-profitability-section">
                             <div class="settings-section-heading compact">
                                 <div class="settings-section-icon"><i class="fa-solid fa-chart-line" aria-hidden="true"></i></div>
@@ -2441,6 +2487,60 @@
                                     <input type="number" id="input-ayar-iscilik-saat-maliyeti" class="form-control" min="0" step="0.01" value="0">
                                 </div>
                             </div>
+                        </div>
+                    </section>
+
+                    <section class="settings-panel" id="settings-panel-documents" role="tabpanel" aria-labelledby="settings-tab-documents" hidden>
+                        <div class="settings-section-heading">
+                            <div class="settings-section-icon"><i class="fa-solid fa-building-columns" aria-hidden="true"></i></div>
+                            <div><h4>Ödeme Bilgileri</h4><p>Teklif, fatura, iş emri ve ekstrelerde müşteriye gösterilen banka hesabı.</p></div>
+                        </div>
+                        <div class="form-row settings-company-grid">
+                            <div class="form-group">
+                                <label for="input-belge-banka">Banka</label>
+                                <input type="text" id="input-belge-banka" class="form-control" maxlength="80">
+                            </div>
+                            <div class="form-group">
+                                <label for="input-belge-hesap-sahibi">Hesap Sahibi</label>
+                                <input type="text" id="input-belge-hesap-sahibi" class="form-control" maxlength="80">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="input-belge-iban">IBAN</label>
+                            <input type="text" id="input-belge-iban" class="form-control" maxlength="40" placeholder="TR00 0000 0000 0000 0000 0000 00">
+                        </div>
+                        <div class="settings-section-heading compact">
+                            <div class="settings-section-icon"><i class="fa-solid fa-file-signature" aria-hidden="true"></i></div>
+                            <div><h4>Teklif Varsayılanları</h4><p>Yeni tekliflere otomatik gelir; teslim süresi, ödeme ve geçerlilik her teklifte ayrıca değiştirilebilir.</p></div>
+                        </div>
+                        <div class="form-row settings-company-grid">
+                            <div class="form-group">
+                                <label for="input-belge-gecerlilik">Geçerlilik Süresi (gün)</label>
+                                <input type="number" id="input-belge-gecerlilik" class="form-control" min="1" max="365" step="1">
+                            </div>
+                            <div class="form-group">
+                                <label for="input-belge-hazirlayan">Hazırlayan</label>
+                                <input type="text" id="input-belge-hazirlayan" class="form-control" maxlength="80" placeholder="Örn: Ad Soyad">
+                            </div>
+                        </div>
+                        <div class="form-row settings-company-grid">
+                            <div class="form-group">
+                                <label for="input-belge-teslim-suresi">Teslim Süresi</label>
+                                <input type="text" id="input-belge-teslim-suresi" class="form-control" maxlength="80" placeholder="Örn: Onaydan sonra 3 iş günü">
+                            </div>
+                            <div class="form-group">
+                                <label for="input-belge-odeme">Ödeme Şekli</label>
+                                <input type="text" id="input-belge-odeme" class="form-control" maxlength="80" placeholder="Örn: Teslimatta nakit / havale">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="input-belge-teslim-sekli">Teslim Şekli</label>
+                            <input type="text" id="input-belge-teslim-sekli" class="form-control" maxlength="80" placeholder="Örn: Atölyeden teslim">
+                        </div>
+                        <div class="form-group">
+                            <label for="input-belge-kosullar">Teklif Koşulları</label>
+                            <textarea id="input-belge-kosullar" class="form-control" rows="4" placeholder="Her satıra bir koşul yazın (en fazla 8)"></textarea>
+                            <span class="field-help">Geçerlilik koşulu tekliften otomatik eklenir; buraya yalnızca ek koşulları yazın.</span>
                         </div>
                     </section>
 
@@ -2503,7 +2603,7 @@
                         <div class="update-status-card" id="update-status-card" data-state="idle" aria-live="polite">
                             <span class="update-status-icon" id="update-status-icon"><i class="fa-solid fa-circle-info" aria-hidden="true"></i></span>
                             <div class="update-status-copy">
-                                <span class="update-version-line">Yüklü sürüm <strong id="update-current-version">v1.5.23</strong><span id="update-latest-version" hidden></span></span>
+                                <span class="update-version-line">Yüklü sürüm <strong id="update-current-version">v1.5.24</strong><span id="update-latest-version" hidden></span></span>
                                 <strong id="update-status-title">Sürüm kontrolü hazır</strong>
                                 <small id="update-status-copy">Kontrol başlatıldığında yalnızca AK LAZER sürüm adresine bağlanılır.</small>
                             </div>

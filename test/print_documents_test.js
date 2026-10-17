@@ -33,7 +33,7 @@ const html = fs.readFileSync('index.html', 'utf8').replace(/<script\b[^>]*>[\s\S
     const before = w.eval('JSON.stringify(db)');
     w.printInvoiceDocument(3);
     let doc = capture('invoice');
-    assert.equal(doc.querySelectorAll('.service-lines thead th').length, 3);
+    assert.equal(doc.querySelectorAll('.service-lines thead th').length, 5, 'Line table: # | description | quantity | unit price | amount');
     assert.equal(doc.querySelectorAll('.totals-panel tr').length, 3, 'No zero-discount or duplicate gross/rate rows');
     assert.equal((doc.body.textContent.match(/EMR-000001/g) || []).length, 1, 'Linked reference appears once');
     assert.equal((doc.body.textContent.match(/5.040,00/g) || []).length, 1, 'Grand total appears once');
