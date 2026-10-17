@@ -1,11 +1,11 @@
 {
   "name": "prolazer-erp",
-  "version": "1.5.24",
+  "version": "1.5.25",
   "description": "Profesyonel Lazer Kesim Muhasebe ve Yönetim Sistemi",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "npm run test:erp && npm run test:accounting && npm run test:operations && npm run test:startup && npm run test:version && npm run test:ui && npm run test:workspace && npm run test:invoices && npm run test:print && npm run test:volume && npm run test:packaging && npm run test:finance && npm run test:safety && npm run test:quick-sales && npm run test:sheet-cut && npm run test:sheet-purchase && npm run test:audit",
+    "test": "npm run test:erp && npm run test:accounting && npm run test:operations && npm run test:startup && npm run test:version && npm run test:ui && npm run test:workspace && npm run test:invoices && npm run test:print && npm run test:volume && npm run test:packaging && npm run test:finance && npm run test:safety && npm run test:quick-sales && npm run test:sheet-cut && npm run test:sheet-purchase && npm run test:audit && npm run test:pricing",
     "test:erp": "node test/sec_test.js",
     "test:accounting": "node test/accounting_end_to_end_test.js",
     "test:operations": "node test/operational_controls_test.js",
@@ -27,7 +27,8 @@
     "test:quick-sales": "node test/quick_sales_test.js && node test/quick_sale_cut_test.js",
     "test:sheet-cut": "node test/sheet_cut_test.js && node test/sheet_weight_test.js && node test/kg_cost_test.js && node test/stock_identity_test.js && node test/readable_codes_test.js && node test/stock_consistency_test.js && node test/stock_ledger_test.js",
     "test:sheet-purchase": "node test/sheet_purchase_test.js",
-    "test:audit": "node test/audit_fixes_test.js && node test/audit_fixes_2_test.js"
+    "test:audit": "node test/audit_fixes_test.js && node test/audit_fixes_2_test.js",
+    "test:pricing": "node test/material_price_test.js"
   },
   "author": "Mert",
   "license": "ISC",

@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;">
     <title>AK LAZER ERP - Lazer Kesim Yönetim Sistemi</title>
-    <link rel="stylesheet" href="style.css?v=1.5.24">
-    <link rel="stylesheet" href="node_modules/@fortawesome/fontawesome-free/css/all.min.css?v=1.5.24">
-    <script src="node_modules/chart.js/dist/chart.umd.min.js?v=1.5.24"></script>
-    <script src="app.js?v=1.5.24" defer></script>
+    <link rel="stylesheet" href="style.css?v=1.5.25">
+    <link rel="stylesheet" href="node_modules/@fortawesome/fontawesome-free/css/all.min.css?v=1.5.25">
+    <script src="node_modules/chart.js/dist/chart.umd.min.js?v=1.5.25"></script>
+    <script src="app.js?v=1.5.25" defer></script>
 </head>
 <body>
     <button type="button" class="workspace-menu-backdrop" aria-label="Menüyü kapat" onclick="toggleWorkspaceMenu(false)" hidden></button>
@@ -119,7 +119,7 @@
             </nav>
             <div class="sidebar-version" aria-label="Uygulama sürümü">
                 <span class="sidebar-version-label"><i class="fa-solid fa-desktop" aria-hidden="true"></i> AK LAZER ERP</span>
-                <strong id="app-version">v1.5.24</strong>
+                <strong id="app-version">v1.5.25</strong>
             </div>
         </aside>
 
@@ -394,22 +394,27 @@
                             </div>
                             <div class="form-group">
                                 <label>Müşteri</label>
-                                <select id="quote-customer" class="form-control" onchange="updateQuoteMaterials()">
+                                <select id="quote-customer" class="form-control" onchange="updateQuoteMaterials(); updateQuoteMaterialPrice(true); calculateQuote()">
                                     <option value="">Seçiniz...</option>
                                 </select>
                             </div>
                             <div class="form-group">
                                 <label>Kullanılacak Malzeme Seçimi</label>
-                                <select id="quote-material" class="form-control">
+                                <select id="quote-material" class="form-control" onchange="updateQuoteMaterialPrice(true); calculateQuote()">
                                     <option value="0">Malzeme Yok / Bilinmiyor</option>
                                 </select>
                             </div>
                             <div class="form-row">
                                 <div class="form-group">
                                     <label>Malzeme Adedi / Miktarı</label>
-                                    <input type="number" id="quote-material-qty" class="form-control" value="1">
+                                    <input type="number" id="quote-material-qty" class="form-control" value="1" oninput="calculateQuote()">
+                                </div>
+                                <div class="form-group" id="quote-material-price-group" hidden>
+                                    <label for="quote-material-price">Malzeme Satış Fiyatı (₺/KG)</label>
+                                    <input type="number" id="quote-material-price" class="form-control" min="0" step="0.01" oninput="markQuoteMaterialPriceManual()">
                                 </div>
                             </div>
+                            <p id="quote-material-price-hint" class="quote-pricing-helper quote-material-price-hint" aria-live="polite" hidden></p>
                             <div class="form-group" id="quote-desc-container">
                                 <label>İş Açıklaması</label>
                                 <input type="text" id="quote-description" class="form-control" placeholder="Örn: 50 adet flanş kesimi">
@@ -440,9 +445,10 @@
                                 </div>
                                 <div class="form-group">
                                     <label id="label-kg-price">KG Ücreti (₺)</label>
-                                    <input type="number" id="quote-kg-price" class="form-control" min="0" step="0.01" value="50">
+                                    <input type="number" id="quote-kg-price" class="form-control" min="0" step="0.01" value="50" oninput="markQuoteMaterialPriceManual()">
                                 </div>
                             </div>
+                            <p id="quote-kg-price-hint" class="quote-pricing-helper quote-material-price-hint" aria-live="polite" hidden></p>
                             <p id="quote-pricing-helper" class="quote-pricing-helper" hidden></p>
                             <div class="form-row">
                                 <div class="form-group">
@@ -2487,6 +2493,11 @@
                                     <input type="number" id="input-ayar-iscilik-saat-maliyeti" class="form-control" min="0" step="0.01" value="0">
                                 </div>
                             </div>
+                            <div class="form-group">
+                                <label for="input-ayar-malzeme-kar">Malzeme Kâr Oranı (%)</label>
+                                <input type="number" id="input-ayar-malzeme-kar" class="form-control" min="0" max="1000" step="0.01" value="0">
+                                <span class="field-help">Teklifte sac için KG satış fiyatı önerisi: alış maliyeti + bu oran. Müşteriye daha önce verilmiş bir fiyat varsa o fiyat önerilir.</span>
+                            </div>
                         </div>
                     </section>
 
@@ -2603,7 +2614,7 @@
                         <div class="update-status-card" id="update-status-card" data-state="idle" aria-live="polite">
                             <span class="update-status-icon" id="update-status-icon"><i class="fa-solid fa-circle-info" aria-hidden="true"></i></span>
                             <div class="update-status-copy">
-                                <span class="update-version-line">Yüklü sürüm <strong id="update-current-version">v1.5.24</strong><span id="update-latest-version" hidden></span></span>
+                                <span class="update-version-line">Yüklü sürüm <strong id="update-current-version">v1.5.25</strong><span id="update-latest-version" hidden></span></span>
                                 <strong id="update-status-title">Sürüm kontrolü hazır</strong>
                                 <small id="update-status-copy">Kontrol başlatıldığında yalnızca AK LAZER sürüm adresine bağlanılır.</small>
                             </div>

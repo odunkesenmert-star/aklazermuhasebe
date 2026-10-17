@@ -235,3 +235,9 @@ ANLAŞILIR KAYIT KODLARI (1.5.18)
 - Teklif formu: "Teslim ve Ödeme" bölümü; teklif belgesinde son geçerlilik tarihi, koşullar, ödeme bilgileri ve müşteri onay alanı.
 - Fatura kalem dökümü fatura anında dondurulur; iş emri dökümü atölye bilgilerini, ekstre mutabakat metnini, bordro T.C. / SGK ve mesai ayrıntısını içerir.
 - Telefonu girilmemiş carilerde "-" basılmaz; açıklama boşsa iş başlığı tekrarlanmaz. Tahsil edilmiş satış özetinde IBAN gösterilmez.
+
+1.5.25 — Müşteriye göre malzeme satış fiyatı
+- Teklifte işletme stoğundan sac seçilince "Malzeme Satış Fiyatı (₺/KG)" alanı açılır; malzeme bedeli alış maliyeti yerine bu fiyattan hesaplanır.
+- Öneri: aynı müşteriye aynı malzeme (cins + kalınlık) için verilen son teklif fiyatı; yoksa alış maliyeti + Ayarlar'daki "Malzeme Kâr Oranı (%)". Firma içi işlerde maliyet önerilir.
+- Alanın altında maliyet, kâr oranı ve önerinin kaynağı gösterilir; maliyetin altındaki fiyat uyarı verir. Hammadde satışında KG fiyatı da aynı şekilde önerilir.
+- İş emri kârlılığı malzemeyi gerçek alış maliyetinden hesaplamaya devam eder. Yazdırılan teklifte malzeme KG'si ve KG fiyatı görünür.

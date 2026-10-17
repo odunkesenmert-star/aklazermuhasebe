@@ -4607,6 +4607,17 @@ body.print-preview-open .toast-region {
     display: none;
 }
 
+.quote-pricing-helper.is-warning {
+    border-color: rgba(230, 57, 70, 0.35);
+    color: var(--alert);
+    background: rgba(230, 57, 70, 0.08);
+}
+
+.quote-pricing-helper.is-warning::before {
+    content: '!';
+    color: var(--alert);
+}
+
 .quote-actions {
     position: sticky;
     bottom: 12px;
