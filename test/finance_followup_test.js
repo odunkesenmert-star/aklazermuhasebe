@@ -1,0 +1,60 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const { JSDOM } = require('jsdom');
+(async () => {
+ const html=fs.readFileSync('index.html','utf8').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'');
+ const dom=new JSDOM(html,{url:'http://finance-followup.local',runScripts:'dangerously',pretendToBeVisual:true});
+ const w=dom.window,d=w.document,alerts=[];w.alert=m=>alerts.push(m);w.confirm=()=>true;w.console.warn=()=>{};
+ const script=d.createElement('script');script.textContent=fs.readFileSync('app.js','utf8');d.body.append(script);
+ await new Promise(r=>setTimeout(r,100));
+ w.eval(`db=createEmptyDatabase();db.cariler=[{id:1,kodu:'C-1',adi:'İŞIK Çelik',bakiye:600,ledgerOpeningBalance:0},{id:2,kodu:'C-2',adi:'İŞIK Çelik',bakiye:0,ledgerOpeningBalance:0}];db.kasaHesaplari=[{id:3,ad:'Banka',tip:'banka',bakiye:400,ledgerOpeningBalance:0}];db.faturalar=[{id:10,tur:'kesilen',cariId:1,firma:'İŞIK Çelik',faturaNo:'FT-10',tutar:1000,matrah:1000,kdvTutari:0,kdvOrani:0,tarih:'01.09.2026',vadeTarihi:'15.09.2026',cariYansitildi:true,cariBakiyeDegisimi:1000,cariIslemId:20,paymentTrackingVersion:1,odemeDurumu:'kismi'}];db.islemler=[{id:20,cariId:1,firma:'İŞIK Çelik',tip:'Kesilen Fatura (FT-10)',faturaId:10,tutar:1000,bakiyeDegisimi:1000},{id:21,cariId:1,firma:'İŞIK Çelik',tip:'Tahsilat (Gelen)',tutar:400,bakiyeDegisimi:-400,paymentInvoiceId:10,kasaHareketId:30,tarih:'10.09.2026 10:00',isGelir:true}];db.kasaHareketleri=[{id:30,kasaId:3,tip:'giris',tutar:400,refId:21}];`);
+ const db=w.eval('db');const now=new Date(2026,8,16,12);
+ const rows=w.getCollectionRows(db,now);assert.equal(rows.length,1);assert.equal(rows[0].days,1);assert.equal(rows[0].status,'overdue');assert.equal(rows[0].payment.remaining,600);
+ assert.equal(w.financeDay('31.02.2026'),null);assert.equal(w.financeDay('2026-09-16'),w.financeDay('16.09.2026'));
+ const clean=JSON.stringify(db);assert.equal(w.buildAccountCheckReport(db).findings.length,0,'Complete balanced ledger must have no false-positive findings');
+ assert.equal(JSON.stringify(db),clean,'Read-only checks never normalize or repair data');
+ const base=db.faturalar[0];
+ for (const [id,due,status] of [[11,'16.09.2026','today'],[12,'2026-09-23','soon'],[13,'24.09.2026','future'],[14,'','undated'],[15,'31.02.2026','undated']]) { const inv={...base,id,faturaNo:'FT-'+id,vadeTarihi:due,cariIslemId:null};db.faturalar.push(inv);assert.equal(w.getCollectionRows(db,now).find(r=>r.invoice.id===id).status,status); }
+ db.faturalar.push({...base,id:16,faturaNo:'LEGACY',paymentTrackingVersion:undefined,odemeDurumu:'kismi'});
+ assert.equal(w.getCollectionRows(db,now).find(r=>r.invoice.id===16).payment.remaining,null);
+ db.faturalar.push({...base,id:17,paymentTrackingVersion:undefined,odemeDurumu:'odendi'});
+ db.faturalar.push({...base,id:18,tur:'alinan'});
+ assert(!w.getCollectionRows(db,now).some(r=>[17,18].includes(r.invoice.id)));
+ w.renderCollections();d.querySelector('#collections-tbody button').click();assert(d.getElementById('modal-fatura-detail').classList.contains('active'));w.closeModal('modal-fatura-detail');d.getElementById('collections-search').value='isik';w.filterCollections();assert(d.getElementById('collections-tbody').textContent.includes('FT-10'));
+ d.getElementById('collections-status').value='unknown';w.filterCollections();assert(d.getElementById('collections-tbody').textContent.includes('LEGACY'));assert(!d.getElementById('collections-tbody').textContent.includes('FT-10'));
+ w.renderCariPaymentOverview(2);assert(d.getElementById('cari-payment-overview').textContent.includes('0 fatura'),'Same-name account IDs stay isolated');
+ w.renderCariPaymentOverview(1);assert(d.getElementById('cari-payment-overview').textContent.includes('₺400,00'));assert(d.getElementById('cari-payment-overview').textContent.includes('1 tutar bilinmiyor'));
+ w.openCollectionReminder(10);const message=d.getElementById('collection-reminder-text').value;assert(message.includes('₺600,00'));assert(message.includes('TR04 0001 0090 1065 8664 4050 01'));assert(!message.includes('undefined'));
+ let copied='';Object.defineProperty(w.navigator,'clipboard',{value:{writeText:async text=>{copied=text;}},configurable:true});await w.copyCollectionReminder();assert.equal(copied,message);
+ db.faturalar=[base];
+ w.openCollectionsForCari(2);assert(d.getElementById('collections-tbody').textContent.includes('açık fatura yok'),'Account navigation must use IDs, not similar names or code prefixes');
+ d.getElementById('collections-cari').value='';
+ const before=JSON.stringify(db);w.buildAccountCheckReport(db);w.renderCariPaymentOverview(1);w.renderCollections();assert.equal(JSON.stringify(db),before);
+ const dirty=JSON.parse(before);dirty.cariler[0].bakiye=650;dirty.kasaHesaplari[0].bakiye=500;dirty.kasaHareketleri[0].tutar=350;dirty.islemler[1].paymentInvoiceId=999;dirty.islemler[0].reversedBy=998;dirty.faturalar[0].matrah=999;
+ const issues=w.buildAccountCheckReport(dirty).findings;
+ assert(issues.some(f=>f.category==='Cari'&&f.severity==='error'));assert(issues.some(f=>f.category==='Kasa / Banka'&&f.severity==='error'));
+ assert(issues.some(f=>f.detail.includes('fatura bağlantısı')));assert(issues.some(f=>f.detail.includes('Matrah')));assert(issues.some(f=>f.detail.includes('ters kayıt')));assert(issues.some(f=>f.detail.includes('kasa/banka kaydı')));
+ delete dirty.cariler[0].ledgerOpeningBalance;
+ assert(w.buildAccountCheckReport(dirty).findings.some(f=>f.title==='İŞIK Çelik'&&f.severity==='review'),'Unknown legacy opening is not mislabeled as a definite accounting error');
+ // Follow-up actions use the existing safe payment flow and refresh the visible view.
+ d.getElementById('collections-status').value='all';d.getElementById('collections-search').value='';w.switchView('collections');await new Promise(r=>setTimeout(r,45));
+ w.renderCariler();w.openInvoicePayment(10);d.getElementById('input-islem-tutar').value='200';d.getElementById('input-islem-kasa').value='3';w.saveIslem();
+ assert.equal(w.getCollectionRows().find(r=>r.invoice.id===10).payment.remaining,400);assert(d.getElementById('collections-tbody').textContent.includes('₺400,00'));
+ assert.equal(w.buildAccountCheckReport(db).findings.length,0,JSON.stringify(w.buildAccountCheckReport(db).findings));
+ const payment=db.islemler.at(-1);w.reverseCariMovement(payment.id);assert.equal(w.getCollectionRows().find(r=>r.invoice.id===10).payment.remaining,600);assert.equal(w.buildAccountCheckReport(db).findings.length,0);
+ // Pagination, empty state and imported text are safe.
+ for(let i=100;i<160;i++)db.faturalar.push({...base,id:i,faturaNo:'PAGE-'+i});
+ w.renderCollections();assert.equal(d.querySelectorAll('#collections-tbody tr').length,25);w.changeCollectionsPage(1);assert(d.getElementById('collections-page-info').textContent.includes('2 / 3'));
+ d.getElementById('collections-search').value='NO MATCH';w.filterCollections();assert(d.getElementById('collections-tbody').textContent.includes('açık fatura yok'));
+ db.cariler[0].adi='<img src=x onerror=alert(1)>';d.getElementById('collections-search').value='';w.filterCollections();assert(!d.querySelector('#collections-tbody img'));assert(d.getElementById('collections-tbody').textContent.includes('<img'));
+ // Backup status: success, failure, restart read, canceled dialog and late responses.
+ w.electronAPI={sendBackup:async()=>({success:true,backupStatus:{success:true,lastSuccessAt:new Date().toISOString(),available:true,kind:'auto'}})};
+ await w.triggerAutoBackup('{}');assert.equal(d.getElementById('dashboard-backup-status').dataset.state,'success');
+ w.electronAPI.sendBackup=async()=>({success:false,error:'Disk dolu'});await w.triggerAutoBackup('{}');assert.equal(d.getElementById('dashboard-backup-status').dataset.state,'error');assert(d.getElementById('dashboard-backup-status').textContent.includes('Son başarılı yedek'));
+ w.electronAPI.getBackupStatus=async()=>({success:true,lastSuccessAt:'2020-01-01T00:00:00Z',available:true});await w.refreshBackupStatus();assert(d.getElementById('dashboard-backup-status').textContent.includes('24 saatten eski'));
+ w.electronAPI.manualBackup=async()=>({success:false,canceled:true});const statusBefore=d.getElementById('dashboard-backup-status').textContent;await w.createManualBackup();assert.equal(d.getElementById('dashboard-backup-status').textContent,statusBefore);
+ let resolve;w.electronAPI.getBackupStatus=()=>new Promise(r=>resolve=r);const pending=w.refreshBackupStatus();w.applyBackupStatus({success:false,error:'Yeni hata'});resolve({success:true,lastSuccessAt:new Date().toISOString(),available:true});await pending;assert(d.getElementById('dashboard-backup-status').textContent.includes('Yeni hata'));
+ const volume={cariler:Array.from({length:1000},(_,i)=>({id:i+1,adi:'Hesap '+i,bakiye:0,ledgerOpeningBalance:0})),islemler:Array.from({length:10000},(_,i)=>({id:i+2000,cariId:(i%1000)+1,tip:'Cari kayıt',bakiyeDegisimi:0,tutar:0}))};
+ assert.equal(w.buildAccountCheckReport(volume).findings.length,0);
+ dom.window.close();console.log('Finance follow-up: due dates, legacy unknowns, account isolation, reminders, real payment/reversal flow, read-only reconciliation, pagination, XSS and backup status passed.');
+})().catch(e=>{console.error(e);process.exitCode=1});

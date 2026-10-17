@@ -1,9 +1,0 @@
-{
-  "version": "1.3.37",
-  "releaseDate": "2026-08-24",
-  "notes": "Cari hesap ekstresi, İşlem Kodu, Tarih, Açıklama, Borç, Tahsilat ve Bakiye sütunlarıyla sadeleştirildi; özet alanı Toplam Borç, Toplam Tahsilat ve Bakiye olarak düzenlendi.",
-  "downloads": {
-    "mac": "https://aklazer.com.tr/downloads/AK_LAZER_ERP_Kurulum.dmg",
-    "windows": "https://aklazer.com.tr/downloads/AK%20LAZER%20ERP%20Setup%201.3.37-x64.exe"
-  }
-}

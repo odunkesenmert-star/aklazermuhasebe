@@ -7,7 +7,9 @@ window.onerror = function(msg, url, line, col, error) {
 
 // --- Database & Local Storage Logic ---
 const DB_KEY = 'AkLazerDB';
-const CURRENT_SCHEMA_VERSION = 4;
+const CURRENT_SCHEMA_VERSION = 9;
+let sheetCutSaving = false;
+let quickSaleSaving = false;
 const APP_LOGO_PATH = 'assets/ak-lazer-logo-wide.png';
 const APP_ICON_PATH = 'assets/ak-lazer-icon-ui.png';
 const SYSTEM_ALERT = window.alert.bind(window);
@@ -201,10 +203,13 @@ if (!IS_AUTOMATED_UI_TEST) {
 }
 
 const defaultNumberingSettings = {
-    cari: { prefix: 'C', next: 1, pad: 3, useYear: false },
-    stok: { prefix: 'STK', next: 1, pad: 4, useYear: false },
+    sacKesim: { prefix: 'KES', next: 1, pad: 4, useYear: true },
+    hizliSatis: { prefix: 'SAT', next: 1, pad: 4, useYear: true },
+    hareket: { prefix: 'HRK', next: 1, pad: 4, useYear: true },
+    cari: { prefix: 'CAR', next: 1, pad: 4, useYear: false },
+    stok: { prefix: 'STK', next: 1, pad: 2, useYear: false },
     teklif: { prefix: 'TEK', next: 1, pad: 4, useYear: true },
-    isEmri: { prefix: 'EMR', next: 1, pad: 6, useYear: false },
+    isEmri: { prefix: 'EMR', next: 1, pad: 4, useYear: true },
     fatura: { prefix: 'FTR', next: 1, pad: 4, useYear: true },
     cekSenet: { prefix: 'CS', next: 1, pad: 4, useYear: true },
     odemePlani: { prefix: 'VP', next: 1, pad: 4, useYear: true },
@@ -213,6 +218,9 @@ const defaultNumberingSettings = {
 
 const defaultDB = {
     schemaVersion: CURRENT_SCHEMA_VERSION,
+    codeMigration: {version:9, mappings:[]},
+    sacKesimleri: [],
+    hizliSatislar: [],
     cariler: [],
     stoklar: [],
     islemler: [],
@@ -241,7 +249,7 @@ const defaultDB = {
     }
 };
 
-const DB_ARRAY_KEYS = ['cariler', 'stoklar', 'islemler', 'teklifler', 'giderler', 'faturalar', 'isEmirleri', 'fireler', 'personeller', 'personelPuantajlari', 'cekSenetler', 'odemePlanlari', 'kasaHesaplari', 'kasaHareketleri', 'stokHareketleri', 'denetimKayitlari'];
+const DB_ARRAY_KEYS = ['sacKesimleri', 'hizliSatislar', 'cariler', 'stoklar', 'islemler', 'teklifler', 'giderler', 'faturalar', 'isEmirleri', 'fireler', 'personeller', 'personelPuantajlari', 'cekSenetler', 'odemePlanlari', 'kasaHesaplari', 'kasaHareketleri', 'stokHareketleri', 'denetimKayitlari'];
 
 function createEmptyDatabase() {
     const fresh = JSON.parse(JSON.stringify(defaultDB));
@@ -252,7 +260,8 @@ function createEmptyDatabase() {
 }
 
 const DB_NUMERIC_FIELDS = {
-    cariler: ['bakiye'],
+    hizliSatislar: ['tutar', 'kdvOrani', 'kdvTutari', 'matrah', 'stokMiktar'],
+    cariler: ['bakiye', 'ledgerOpeningBalance'],
     stoklar: ['miktar', 'kg', 'en', 'boy', 'maliyet', 'kritikSeviye'],
     islemler: ['tutar', 'bakiyeDegisimi'],
     teklifler: ['minutes', 'rate', 'kgAmount', 'kgPrice', 'stokQty', 'operationCost', 'materialCost', 'subTotalBeforeDiscount', 'discountPercent', 'discountAmount', 'subTotal', 'taxRate', 'tax', 'total'],
@@ -270,7 +279,7 @@ const DB_NUMERIC_FIELDS = {
     personelPuantajlari: ['geldiGun', 'izinGun', 'eksikGun', 'mesaiSaat', 'mesaiSaatUcreti', 'avans', 'prim', 'brutMaas', 'kesinti', 'ekOdeme', 'netMaas'],
     cekSenetler: ['tutar', 'cariBakiyeDegisimi'],
     odemePlanlari: ['tutar'],
-    kasaHesaplari: ['bakiye'],
+    kasaHesaplari: ['bakiye', 'ledgerOpeningBalance'],
     kasaHareketleri: ['tutar']
 };
 
@@ -311,12 +320,16 @@ function mergeNumberingSettings(rawSettings = {}) {
         merged[key].next = Math.max(1, parseInt(merged[key].next, 10) || defaultNumberingSettings[key].next);
         merged[key].pad = Math.max(1, parseInt(merged[key].pad, 10) || defaultNumberingSettings[key].pad);
         merged[key].useYear = !!merged[key].useYear;
+        merged[key].series = Object.fromEntries(Object.entries(merged[key].series || {}).filter(([bucket, next]) => typeof bucket === 'string' && Number.isSafeInteger(next) && next > 0));
     });
     return merged;
 }
 
 const NUMBERING_RECORD_SOURCES = Object.freeze({
+    hareket: Object.freeze({ collection: 'islemler', field: 'movementNo' }),
     cari: Object.freeze({ collection: 'cariler', field: 'kodu' }),
+    sacKesim: Object.freeze({ collection: 'sacKesimleri', field: 'kesimNo' }),
+    hizliSatis: Object.freeze({ collection: 'hizliSatislar', field: 'satisNo' }),
     stok: Object.freeze({ collection: 'stoklar', field: 'kodu' }),
     teklif: Object.freeze({ collection: 'teklifler', field: 'teklifNo' }),
     isEmri: Object.freeze({ collection: 'isEmirleri', field: 'orderNo' }),
@@ -343,14 +356,18 @@ function getSerialSequence(value, config) {
 
 function reconcileNumberingSettings(database, settings) {
     const reconciled = mergeNumberingSettings(settings);
-    Object.entries(NUMBERING_RECORD_SOURCES).forEach(([type, source]) => {
-        const config = reconciled[type];
-        const highestSequence = (database[source.collection] || []).reduce((highest, record) => {
-            const sequence = getSerialSequence(record?.[source.field], config);
-            return sequence === null ? highest : Math.max(highest, sequence);
-        }, 0);
-        config.next = Math.max(config.next, highestSequence + 1);
-    });
+    for (const [type, config] of Object.entries(reconciled)) {
+        if (type === 'stok') {
+            const pattern = new RegExp('^(' + escapeRegExp(config.prefix) + '-[0-9.]+MM)-(\\d+)$');
+            for (const stock of database.stoklar || []) for (const code of [stock.kodu, ...getCodeAliases(stock)]) {
+                const match = String(code || '').match(pattern);
+                if (match) config.series[match[1]] = Math.max(config.series[match[1]] || 1, Number(match[2]) + 1);
+            }
+            continue;
+        }
+        const bucket = numberingBucket(config), next = nextDisplaySequence(database, type, config, bucket);
+        config.series[bucket] = next; config.next = next; config.activeSeries = bucket;
+    }
     return reconciled;
 }
 
@@ -408,6 +425,9 @@ function migrateDatabase(rawData) {
         }
     }
 
+    if (version < 7) migrateStockKgCosts(migrated);
+    if (version < 8) migrateStockIdentity(migrated);
+    if (version < 9) migrateReadableCodes(migrated);
     migrated.schemaVersion = CURRENT_SCHEMA_VERSION;
     return migrated;
 }
@@ -427,10 +447,14 @@ function validateAndNormalizeDB(rawData, requireRecords = false) {
                 .map(item => normalizeDBRecord(key, item))
             : [];
     });
+    for (const cut of normalized.sacKesimleri) {
+        if (!Array.isArray(cut.pieces) || !Array.isArray(cut.movements) || !['active','cancelled'].includes(cut.status)) throw new Error('Sac kesimi kaydının parça veya durum bilgisi eksik.');
+    }
     if (!normalized.kasaHesaplari.length) {
         normalized.kasaHesaplari = JSON.parse(JSON.stringify(defaultDB.kasaHesaplari));
     }
 
+    normalized.codeMigration = {version:9, mappings:(Array.isArray(parsed.codeMigration?.mappings) ? parsed.codeMigration.mappings : []).filter(m => m && ['stok','cari'].includes(m.type)).map(m => ({type:m.type,id:m.id,from:plainText(m.from),to:plainText(m.to)}))};
     normalized.ayarlar = parsed.ayarlar && typeof parsed.ayarlar === 'object' && !Array.isArray(parsed.ayarlar)
         ? { ...defaultDB.ayarlar, ...parsed.ayarlar }
         : { ...defaultDB.ayarlar };
@@ -445,6 +469,8 @@ function validateAndNormalizeDB(rawData, requireRecords = false) {
     ['makineDakikaMaliyeti', 'iscilikSaatMaliyeti'].forEach(field => {
         normalized.ayarlar.karlilik[field] = Math.max(0, roundMoney(normalized.ayarlar.karlilik[field]));
     });
+    initializeInvoiceDocuments(normalized);
+    syncInvoicePaymentStates(normalized);
     normalized.schemaVersion = CURRENT_SCHEMA_VERSION;
     assertUniqueRecordIds(normalized);
     normalized.cariler.forEach(updateCariStatus);
@@ -468,6 +494,7 @@ try {
 let db;
 let startupHasValidLocalDB = false;
 let startupPersistenceBlocked = false;
+let startupHydrationPending = !!window.electronAPI?.loadDBFromFile;
 try {
     if (!storedDBAtStartup) throw new Error('Yerel veri bulunamadı.');
     db = validateAndNormalizeDB(storedDBAtStartup);
@@ -486,23 +513,35 @@ function reportPersistenceError(message) {
     setTimeout(() => alert(`DİKKAT: Veriler kalıcı dosyaya yazılamadı.\n\n${message}\n\nUygulamayı kapatmadan önce manuel yedek alın.`), 0);
 }
 
-function triggerAutoBackup(data = '') {
-    if (window.electronAPI && window.electronAPI.sendBackup) {
-        if (data) {
-            return window.electronAPI.sendBackup(data);
-        }
+async function triggerAutoBackup(data = '', options = {}) {
+    if (!data || !window.electronAPI?.sendBackup) return { success: true, skipped: true };
+    try {
+        const result = await window.electronAPI.sendBackup(data, options);
+        if (!result?.skipped) applyBackupStatus(result?.backupStatus || (result?.success
+            ? { success: true, lastSuccessAt: new Date().toISOString(), kind: options.safety === true ? 'safety' : 'auto', available: true }
+            : { ...backupStatusView, success: false, error: result?.error || 'Yedekleme tamamlanamadı.' }));
+        return result;
+    } catch (error) {
+        applyBackupStatus({ ...backupStatusView, success: false, error: error?.message || 'Yedekleme tamamlanamadı.' });
+        throw error;
     }
-    return Promise.resolve({ success: true, skipped: true });
 }
 
 function saveDB(skipRender = false) {
     let data = '';
     let persistencePromise = Promise.resolve({ success: true, localOnly: true });
     try {
+        if (startupHydrationPending) {
+            return Promise.resolve({ success: false, error: 'Kayıtlar henüz yükleniyor. Yükleme tamamlandığında tekrar deneyin.' });
+        }
         if (startupPersistenceBlocked) {
             throw new Error('Diskteki veri okunamadığı için otomatik kayıt güvenlik amacıyla durduruldu. Yedek geri yükleyin veya uygulamayı yeniden başlatın.');
         }
-        data = JSON.stringify(validateAndNormalizeDB(db));
+        initializeInvoiceDocuments(db);
+        syncInvoicePaymentStates(db);
+        const normalized = validateAndNormalizeDB(db);
+        db.ayarlar.numaralandirma = normalized.ayarlar.numaralandirma;
+        data = JSON.stringify(normalized);
         let cacheWarning = '';
         try {
             localStorage.setItem(DB_KEY, data);
@@ -591,7 +630,7 @@ async function replaceDatabaseSafely(candidate) {
 
 async function createSafetyBackup(data) {
     try {
-        const result = await triggerAutoBackup(data);
+        const result = await triggerAutoBackup(data, { safety: true });
         return result?.success === false
             ? { success: false, error: result.error || 'Bilinmeyen yedekleme hatası' }
             : { success: true };
@@ -743,17 +782,10 @@ function calculateMaterialCostForOrder(order) {
     const stok = getDBArray('stoklar').find(item => String(item.id) === String(order.stokId));
     if (!stok || stok.sahibiTipi === 'musteri') return 0;
 
-    const plateCost = Math.max(0, Number(stok.maliyet) || 0);
-    if (order.islemTipi === 'hammadde') {
-        const stockPlateCount = Math.max(0, Number(stok.miktar) || 0);
-        const stockWeight = Math.max(0, Number(stok.kg) || 0);
-        const costPerKg = stockPlateCount > 0 && stockWeight > 0
-            ? (plateCost * stockPlateCount) / stockWeight
-            : 0;
-        return roundMoney(costPerKg * Math.max(0, Number(order.kgAmount) || 0));
-    }
-
-    return roundMoney(plateCost * Math.max(0, Number(order.stokQty) || 0));
+    const price = Math.max(0, Number(stok.maliyet) || 0);
+    if(order.islemTipi === 'hammadde') return roundMoney(price * Math.max(0,Number(order.kgAmount)||0));
+    const usedKg=Number(order.stokDusulenKg)>0 ? Number(order.stokDusulenKg) : getStockPlateWeight(stok)*Math.max(0,Number(order.stokQty)||0);
+    return roundMoney(price*usedKg);
 }
 
 function getOrderCostInputs(order) {
@@ -833,23 +865,10 @@ function getNumberingConfig(type) {
 }
 
 function formatSerialNo(type, increment = false) {
-    const cfg = getNumberingConfig(type);
-    const current = Math.max(1, parseInt(cfg.next, 10) || 1);
-    const number = String(current).padStart(cfg.pad || 3, '0');
-    const parts = [cfg.prefix || defaultNumberingSettings[type]?.prefix || type.toUpperCase()];
-    if (cfg.useYear) parts.push(String(new Date().getFullYear()));
-    parts.push(number);
-    if (increment) cfg.next = current + 1;
-    return parts.join('-');
+    return formatDatabaseSerial(db, type, increment);
 }
-
-function previewSerialNo(type) {
-    return formatSerialNo(type, false);
-}
-
-function generateSerialNo(type) {
-    return formatSerialNo(type, true);
-}
+function previewSerialNo(type) { return formatSerialNo(type, false); }
+function generateSerialNo(type) { return formatSerialNo(type, true); }
 
 function updateCariStatus(cari) {
     if (!cari) return;
@@ -862,15 +881,28 @@ function normalizeLookupText(value) {
     return plainText(value).toLocaleLowerCase('tr-TR');
 }
 
-function findCariByReference(cariId, fallbackName = '') {
-    if (cariId && cariId !== 'internal') {
-        const byId = getDBArray('cariler').find(c => c.id == cariId);
-        if (byId) return byId;
+function findCariByReference(cariId, fallbackName = '', database = db) {
+    const cariler = database?.cariler || [];
+    if (cariId != null && String(cariId).trim() !== '' && cariId !== 'internal') {
+        // An explicit ID must never silently fall back to another account's name.
+        return cariler.find(c => String(c.id) === String(cariId)) || null;
     }
 
     const normalizedName = normalizeLookupText(fallbackName);
     if (!normalizedName) return null;
-    return getDBArray('cariler').find(c => normalizeLookupText(c.adi) === normalizedName) || null;
+    const matches = cariler.filter(c => normalizeLookupText(c.adi) === normalizedName);
+    return matches.length === 1 ? matches[0] : null;
+}
+
+function cariRecordMatches(record, cari) {
+    if (!record || !cari) return false;
+    const referenceId = record.cariId != null && String(record.cariId).trim() !== ''
+        ? record.cariId : record.customerId;
+    if (referenceId != null && String(referenceId).trim() !== '') {
+        return String(referenceId) === String(cari.id);
+    }
+    const referenceName = record.firma || record.customerName || '';
+    return findCariByReference(referenceId, referenceName)?.id === cari.id;
 }
 
 function createAuditLogRecord(action, entityType, entityId, detail = '') {
@@ -1006,15 +1038,21 @@ function addCariMovement(cari, movement) {
 
     const transaction = {
         id: movement.id || createRecordId(),
+        movementNo: generateSerialNo('hareket'),
         tarih: movement.tarih || new Date().toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
         cariId: cari.id,
         firma: cari.adi,
         tip: movement.tip,
         aciklama: movement.aciklama || '',
+        sheetPurchase: movement.sheetPurchase || null,
+        sheetPurchasePaymentFor: movement.sheetPurchasePaymentFor || null,
+        quickSaleId: movement.quickSaleId || null,
+        quickSaleNo: movement.quickSaleNo || '',
         faturaNo: movement.faturaNo || '',
         orderId: movement.orderId || null,
         orderNo: movement.orderNo || '',
         faturaId: movement.faturaId || null,
+        paymentInvoiceId: movement.paymentInvoiceId || null,
         tutar: Math.abs(roundMoney(movement.tutar ?? delta)),
         bakiyeDegisimi: delta,
         isSuccess: !!movement.isSuccess,
@@ -1039,6 +1077,7 @@ function addStokMovement(stok, movement = {}) {
         id: createRecordId(),
         stokId: stok.id,
         stokKodu: stok.kodu || '',
+        stockPartNo: stok.partNo || null,
         stokAdi: stok.cinsi || '',
         tip: movement.tip || 'Hareket',
         alan: movement.alan || 'miktar',
@@ -1247,41 +1286,97 @@ function getPrintMetaHTML(items = []) {
         `).join('');
 }
 
-function getPrintBrandHTML(title, metaHTML = '') {
-    const firmaAdi = getCompanyName();
-    const contactItems = [db.ayarlar?.telefon, db.ayarlar?.adres]
-        .map(item => plainText(item))
-        .filter(Boolean);
+function getPrintBrandHTML(title, metaHTML = '', issuer = db.ayarlar) {
+    const firmaAdi = issuer?.firmaAdi || getCompanyName();
+    const contactItems = [issuer?.telefon, issuer?.adres].map(plainText).filter(Boolean);
     return `
-        <div class="brand-header">
-            <div class="brand-mark">
+        <header class="brand-header">
+            <div class="brand-identity">
                 <img class="brand-logo" src="${APP_LOGO_PATH}" alt="${escapeHTML(firmaAdi)}">
-            </div>
-            <div class="brand-copy">
-                <h1>${escapeHTML(title)}</h1>
                 <div class="company-name">${escapeHTML(firmaAdi)}</div>
                 ${contactItems.length ? `<div class="company-contact">${contactItems.map(item => `<span>${escapeHTML(item)}</span>`).join('')}</div>` : ''}
             </div>
-            <div class="meta">${metaHTML}</div>
-        </div>
+            <div class="brand-document">
+                <h1>${escapeHTML(title)}</h1>
+                <div class="meta">${metaHTML}</div>
+            </div>
+        </header>
     `;
+}
+
+function getPrintPartyHTML(label, name, cari = {}, extraHTML = '') {
+    const details = [cari?.kodu, cari?.tel || cari?.telefon].map(plainText).filter(Boolean);
+    const taxDetails = [cari?.vergiDairesi, cari?.vergiNo].map(plainText).filter(Boolean);
+    return `<div class="document-intro-grid">
+        <div class="document-card">
+            <div class="document-card-label">${escapeHTML(label)}</div>
+            <div class="document-card-value">${escapeHTML(name || '—')}</div>
+            ${details.length ? `<div class="document-card-detail">${details.map(escapeHTML).join(' · ')}</div>` : ''}
+            ${cari?.adres ? `<div class="document-card-detail">${escapeHTML(cari.adres)}</div>` : ''}
+            ${taxDetails.length ? `<div class="document-card-detail">Vergi: ${taxDetails.map(escapeHTML).join(' / ')}</div>` : ''}
+        </div>
+        ${extraHTML ? `<div class="document-card document-reference">${extraHTML}</div>` : ''}
+    </div>`;
+}
+
+function getPrintTotalsHTML(amounts, label = 'Tutar özeti') {
+    const hasDiscount = roundMoney(amounts.discountAmount || 0) !== 0;
+    const discountRate = amounts.discountPercent == null ? '' : ` (${formatPercentLabel(amounts.discountPercent)})`;
+    const taxRate = amounts.taxRate == null ? '' : ` (${formatPercentLabel(amounts.taxRate)})`;
+    return `<table class="totals-panel" aria-label="${escapeHTML(label)}"><tbody>
+        ${hasDiscount ? `<tr><td>${escapeHTML(`İskonto${discountRate}`)}</td><td>−${escapeHTML(formatCurrency(amounts.discountAmount))}</td></tr>` : ''}
+        <tr><td>Ara Toplam</td><td>${escapeHTML(formatCurrency(amounts.subTotal || 0))}</td></tr>
+        <tr><td>${escapeHTML(`KDV${taxRate}`)}</td><td>${escapeHTML(formatCurrency(amounts.tax || 0))}</td></tr>
+        <tr class="total-row"><td>Genel Toplam</td><td>${escapeHTML(formatCurrency(amounts.total || 0))}</td></tr>
+    </tbody></table>`;
+}
+
+function getPrintServiceLineHTML(description, gross) {
+    return `<table class="service-lines" aria-label="İşlem kalemleri">
+        <thead><tr><th scope="col">No</th><th scope="col">Açıklama</th><th scope="col" class="text-right">Tutar <span class="column-unit">(KDV hariç)</span></th></tr></thead>
+        <tbody><tr><td class="line-index">01</td><td>${escapeHTML(description)}</td><td class="number-cell">${escapeHTML(formatCurrency(gross || 0))}</td></tr></tbody>
+    </table>`;
+}
+
+const PRINT_PAYMENT_DETAILS = Object.freeze({
+    bank: 'ZİRAAT BANKASI',
+    iban: 'TR04 0001 0090 1065 8664 4050 01',
+    holder: 'MERT ODUNKESEN'
+});
+
+function getPrintPaymentFooterHTML() {
+    return `<footer class="print-payment-footer" aria-label="Ödeme için banka bilgileri">
+        <div>${escapeHTML(PRINT_PAYMENT_DETAILS.bank)} · ${escapeHTML(PRINT_PAYMENT_DETAILS.holder)}</div>
+        <strong>IBAN: ${escapeHTML(PRINT_PAYMENT_DETAILS.iban)}</strong>
+    </footer>`;
 }
 
 function getPrintBaseStyles(options = {}) {
     const isLandscape = options.orientation === 'landscape';
     const pageSize = isLandscape ? 'A4 landscape' : 'A4 portrait';
-    const pageMargin = isLandscape ? '13mm 14mm 17mm' : '15mm 16mm 19mm';
+    const hasPaymentFooter = options.paymentFooter === true;
+    const pageMargin = isLandscape ? (hasPaymentFooter ? '13mm 14mm 28mm' : '13mm 14mm 17mm') : (hasPaymentFooter ? '15mm 16mm 28mm' : '15mm 16mm 19mm');
     const screenMinHeight = isLandscape ? '210mm' : '297mm';
-    const screenPadding = isLandscape ? '13mm 14mm 17mm' : '15mm 16mm 19mm';
+    const screenPadding = pageMargin;
+    const paymentFooterText = JSON.stringify(`${PRINT_PAYMENT_DETAILS.bank} · ${PRINT_PAYMENT_DETAILS.holder}\nIBAN: ${PRINT_PAYMENT_DETAILS.iban}`).replace(/\\n/g, '\\A ');
     return `
         @page {
             size: ${pageSize};
             margin: ${pageMargin};
             @bottom-left {
-                content: "AK LAZER ERP";
+                content: ${hasPaymentFooter ? '""' : '"AK LAZER ERP"'};
                 color: #64748b;
                 font: 9px Arial, sans-serif;
             }
+            ${hasPaymentFooter ? `@bottom-center {
+                content: ${paymentFooterText};
+                white-space: pre;
+                color: #173b67;
+                font: 10px/1.8 Arial, sans-serif;
+                text-align: center;
+                vertical-align: bottom;
+                padding-bottom: 7mm;
+            }` : ''}
             @bottom-right {
                 content: "Sayfa " counter(page) " / " counter(pages);
                 color: #64748b;
@@ -1303,32 +1398,33 @@ function getPrintBaseStyles(options = {}) {
             --success: #0f766e;
             --danger: #b42318;
         }
-        body { font-family: Arial, Helvetica, sans-serif; color: var(--ink); margin: 0; font-size: 11px; line-height: 1.45; font-variant-numeric: tabular-nums; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        body { font-family: Arial, Helvetica, sans-serif; color: var(--ink); margin: 0; font-size: 11px; line-height: 1.5; font-variant-numeric: tabular-nums; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         @media screen {
-            body { min-height: ${screenMinHeight}; padding: ${screenPadding}; }
+            body { position: relative; min-height: ${screenMinHeight}; padding: ${screenPadding}; }
+            .print-payment-footer { position: absolute; bottom: 7mm; left: ${isLandscape ? '14mm' : '16mm'}; right: ${isLandscape ? '14mm' : '16mm'}; color: var(--primary); font-size: 10px; line-height: 1.8; text-align: center; }
+            .print-payment-footer strong { font-weight: 600; }
         }
         @media print {
             body { padding: 0; }
+            .print-payment-footer { display: none; }
         }
-        .brand-header { position: relative; display: grid; grid-template-columns: 190px minmax(0, 1fr) 175px; align-items: stretch; gap: 16px; margin-bottom: 22px; padding: 10px 0 16px; border-bottom: 1px solid var(--line-strong); break-inside: avoid; page-break-inside: avoid; }
-        .brand-mark { display: flex; align-items: center; padding-right: 12px; border-right: 1px solid var(--line); }
-        .brand-copy { display: flex; min-width: 0; flex-direction: column; justify-content: center; }
-        .brand-logo { display: block; width: 100%; max-height: 78px; object-fit: contain; object-position: left center; }
-        h1 { margin: 0 0 4px; font-size: 22px; line-height: 1.08; color: var(--primary); letter-spacing: -.015em; overflow-wrap: anywhere; }
-        .company-name { color: var(--ink-soft); font-size: 10.5px; line-height: 1.3; font-weight: 700; }
-        .company-contact { display: flex; flex-wrap: wrap; gap: 2px 8px; color: var(--muted); font-size: 8px; line-height: 1.35; margin-top: 3px; }
-        .company-contact span + span::before { content: "/"; margin-right: 8px; color: #94a3b8; }
-        .meta { align-self: stretch; display: flex; flex-direction: column; justify-content: center; padding: 8px 10px; border-left: 3px solid var(--primary); background: var(--surface); min-width: 0; }
-        .meta-row { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 7px; align-items: baseline; padding: 2px 0; }
-        .meta-label { color: var(--muted); font-size: 7.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
-        .meta-value { color: var(--ink); font-size: 9px; line-height: 1.25; text-align: right; overflow-wrap: anywhere; }
+        .brand-header { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, .9fr); gap: 40px; align-items: start; padding: 0 0 24px; margin-bottom: 24px; border-bottom: 2px solid var(--primary); break-inside: avoid; page-break-inside: avoid; }
+        .brand-identity, .brand-document { min-width: 0; }
+        .brand-logo { display: block; width: 178px; height: 57px; object-fit: contain; object-position: left center; margin-bottom: 12px; }
+        h1 { margin: 2px 0 16px; font-size: 24px; font-weight: 700; line-height: 1.15; text-align: right; color: var(--primary); letter-spacing: -.025em; overflow-wrap: anywhere; }
+        .company-name { color: var(--ink); font-size: 10px; line-height: 1.4; font-weight: 700; }
+        .company-contact { display: grid; gap: 3px; max-width: 300px; margin-top: 5px; color: var(--ink-soft); font-size: 9px; line-height: 1.5; overflow-wrap: anywhere; }
+        .meta { display: grid; gap: 4px; }
+        .meta-row { display: grid; grid-template-columns: 85px minmax(0, 1fr); gap: 14px; align-items: baseline; }
+        .meta-label { color: var(--muted); font-size: 9px; }
+        .meta-value { color: var(--ink); font-size: 10px; font-weight: 600; text-align: right; overflow-wrap: anywhere; }
         .section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; margin: 22px 0 9px; padding-bottom: 6px; border-bottom: 1px solid var(--line); break-after: avoid; page-break-after: avoid; }
         .section-heading h2 { margin: 0; color: var(--primary); font-size: 11px; line-height: 1.2; letter-spacing: .06em; text-transform: uppercase; }
         .section-heading span { color: var(--muted); font-size: 8.5px; }
         .document-intro-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 28px; margin: 0 0 18px; break-inside: avoid; page-break-inside: avoid; }
-        .document-card { min-width: 0; padding: 0 0 10px; border-bottom: 1px solid var(--line-strong); }
-        .document-card-label { margin-bottom: 5px; color: var(--accent); font-size: 8px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
-        .document-card-value { color: var(--ink); font-size: 14px; line-height: 1.25; font-weight: 700; overflow-wrap: anywhere; }
+        .document-card { min-width: 0; padding: 0 0 8px; }
+        .document-card-label { margin-bottom: 5px; color: var(--ink-soft); font-size: 10px; font-weight: 400; letter-spacing: .07em; text-transform: uppercase; }
+        .document-card-value { color: var(--ink); font-size: 15px; line-height: 1.3; font-weight: 700; overflow-wrap: anywhere; }
         .document-card-detail { margin-top: 4px; color: var(--muted); font-size: 9.5px; line-height: 1.45; }
         .metric-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin: 0 0 18px; border: 1px solid var(--line); background: var(--line); break-inside: avoid; page-break-inside: avoid; }
         .metric-item { padding: 10px 12px; background: var(--surface); }
@@ -1337,12 +1433,12 @@ function getPrintBaseStyles(options = {}) {
         .metric-item.is-accent { background: var(--primary); }
         .metric-item.is-accent .metric-label { color: #c9d9ec; }
         .metric-item.is-accent .metric-value { color: #fff; }
-        table { width: 100%; border-collapse: collapse; font-size: ${isLandscape ? '9.5px' : '10.25px'}; break-inside: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: ${isLandscape ? '10px' : '11px'}; break-inside: auto; }
         thead { display: table-header-group; }
         tfoot { display: table-footer-group; }
         tbody tr, tfoot tr { break-inside: avoid; page-break-inside: avoid; }
-        th, td { padding: ${isLandscape ? '6px 7px' : '7px 8px'}; border: 0; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: break-word; }
-        th { padding-top: 7px; padding-bottom: 7px; border-top: 1px solid var(--primary); border-bottom: 1px solid var(--primary); background: var(--surface-blue); color: var(--primary); font-size: 7.5px; line-height: 1.25; font-weight: 700; letter-spacing: .045em; text-transform: uppercase; }
+        th, td { padding: ${isLandscape ? '7px 8px' : '10px 10px'}; border: 0; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: break-word; }
+        th { padding-top: 7px; padding-bottom: 7px; border-top: 1px solid var(--primary); border-bottom: 1px solid var(--primary); background: var(--surface-blue); color: var(--primary); font-size: 8.5px; line-height: 1.4; font-weight: 700; letter-spacing: .025em; text-transform: uppercase; }
         tbody tr:nth-child(even) td { background: #fafbfd; }
         .total-row td { border-top: 1.5px solid var(--primary); border-bottom-color: var(--primary); color: var(--primary); font-size: 11px; font-weight: 700; }
         .text-right { text-align: right; }
@@ -1357,15 +1453,15 @@ function getPrintBaseStyles(options = {}) {
         .print-summary-card.is-negative strong { color: #b42318; }
         .print-summary-note { margin: -6px 0 16px; color: #64748b; font-size: 9.5px; line-height: 1.4; }
         .document-footer-grid { display: grid; grid-template-columns: minmax(0, 1fr) 285px; gap: 30px; align-items: start; margin-top: 20px; break-inside: avoid; page-break-inside: avoid; }
-        .document-note { padding: 11px 13px; border-left: 3px solid var(--accent); background: var(--surface); color: var(--ink-soft); font-size: 9.5px; line-height: 1.55; }
+        .document-note { padding: 5px 0; background: #fff; color: var(--ink-soft); font-size: 9.5px; line-height: 1.55; }
         .document-note-title { display: block; margin-bottom: 4px; color: var(--primary); font-size: 8px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
         .totals-panel { width: 100%; border-collapse: collapse; }
-        .totals-panel td { padding: 5px 8px; border-bottom: 1px solid var(--line); background: #fff !important; }
+        .totals-panel td { padding: 8px 10px; border-bottom: 1px solid var(--line); background: #fff !important; }
         .totals-panel td:first-child { color: var(--muted); font-size: 8.5px; font-weight: 700; }
-        .totals-panel td:last-child { color: var(--ink); font-size: 9.5px; font-weight: 700; text-align: right; white-space: nowrap; }
+        .totals-panel td:last-child { color: var(--ink); font-size: 11px; font-weight: 600; text-align: right; white-space: nowrap; }
         .totals-panel .total-row td { padding-top: 9px; padding-bottom: 9px; border: 0; background: var(--primary) !important; color: #fff; }
         .totals-panel .total-row td:first-child { font-size: 9px; letter-spacing: .04em; text-transform: uppercase; }
-        .totals-panel .total-row td:last-child { font-size: 13px; }
+        .totals-panel .total-row td:last-child { font-size: 16px; }
         .signature-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 34px; margin-top: 30px; break-inside: avoid; page-break-inside: avoid; }
         .signature-box { min-height: 54px; padding-top: 8px; border-top: 1px solid var(--line-strong); color: var(--ink-soft); font-size: 9px; line-height: 1.45; text-align: center; }
         .bank-details { display: grid; grid-template-columns: .8fr 1.7fr; gap: 24px; margin-top: 22px; padding-top: 12px; border-top: 1px solid var(--line); break-inside: avoid; page-break-inside: avoid; }
@@ -1373,10 +1469,17 @@ function getPrintBaseStyles(options = {}) {
         .bank-field span { color: var(--muted); font-size: 7.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
         .bank-field strong { display: block; min-height: 18px; border-bottom: 1px solid var(--line-strong); }
         .muted { color: var(--muted); font-size: 9px; line-height: 1.4; }
-        @media print {
-            .brand-header { grid-template-columns: 185px minmax(0, 1fr) 172px; }
-            .brand-logo { max-height: 74px; }
-        }
+        .document-reference { text-align: right; }
+        .document-intro-grid:has(> :only-child) { grid-template-columns: 1fr; }
+        .document-footnote { margin-top: 28px; padding-top: 10px; border-top: 1px solid var(--line); color: var(--muted); font-size: 9px; break-inside: avoid; }
+        .document-footer-grid > .totals-panel { grid-column: 2; }
+        .service-lines { table-layout: fixed; }
+        .service-lines th:first-child { width: 7%; }
+        .service-lines th:last-child { width: 26%; }
+        .service-lines td { padding-top: 16px; padding-bottom: 16px; }
+        .service-lines td:nth-child(2) { white-space: pre-wrap; overflow-wrap: anywhere; }
+        .line-index { color: var(--muted); font-size: 10px; }
+        .column-unit { display: block; font-size: 8px; font-weight: 400; text-transform: none; }
     `;
 }
 
@@ -1463,7 +1566,7 @@ async function savePrintPreviewDocument(title, html) {
         if (window.electronAPI?.savePDF) {
             const result = await window.electronAPI.savePDF({ title, html });
             if (result?.success) {
-                alert(`PDF kaydedildi:\n${result.path}`);
+                showToast({ type: 'success', title: 'PDF kaydedildi', message: title });
             } else if (!result?.canceled) {
                 alert(`PDF kaydedilemedi: ${result?.error || 'Bilinmeyen hata'}`);
             }
@@ -1516,7 +1619,7 @@ async function sharePrintPreviewOnWhatsApp(title, html, shareContext = {}) {
         const chatNote = result.phoneMatched
             ? 'Müşterinin WhatsApp sohbeti açıldı.'
             : 'Kayıtlı geçerli telefon bulunamadığı için WhatsApp kişi seçme ekranı açıldı.';
-        alert(`PDF hazırlandı. ${chatNote}\n\nFinder/Dosya Gezgini'nde seçili PDF'yi sohbete sürükleyip Gönder'e basın.\n${result.path}`);
+        showToast({ type: 'info', title: 'WhatsApp paylaşımı hazır', message: `${chatNote} Seçili PDF’yi sohbete sürükleyerek gönderebilirsiniz.`, duration: 9000 });
     } catch (error) {
         alert(`WhatsApp paylaşımı hazırlanırken hata oluştu: ${error.message}`);
     } finally {
@@ -1552,6 +1655,7 @@ function openPrintPreview(title, contentHTML, extraStyles = '', options = {}) {
         </head>
         <body>
             ${contentHTML}
+            ${options.paymentFooter ? getPrintPaymentFooterHTML() : ''}
         </body>
         </html>
     `;
@@ -1627,7 +1731,7 @@ function getFilteredCarilerForReport() {
     const search = document.getElementById('cari-search')?.value.toLowerCase() || '';
     let cariler = getDBArray('cariler').filter(c =>
         (c.adi || '').toLowerCase().includes(search) ||
-        (c.kodu || '').toLowerCase().includes(search)
+        codeSearchText(c).toLowerCase().includes(search)
     );
 
     if (cariTabFilter === 'alacakli') {
@@ -1641,9 +1745,9 @@ function getFilteredCarilerForReport() {
 
 function getFilteredStoklarForReport() {
     const searchVal = (document.getElementById('stok-search')?.value || '').toLowerCase();
-    const filtered = getDBArray('stoklar').filter(s =>
+    const filtered = getDBArray('stoklar').filter(s => !s.cutVoided && !(Number(s.miktar || 0) === 0 && Number(s.kg || 0) === 0)).filter(s =>
         (s.cinsi || '').toLowerCase().includes(searchVal) ||
-        (s.kodu || '').toLowerCase().includes(searchVal)
+        codeSearchText(s).toLowerCase().includes(searchVal)
     );
     return filterByReportDate('inventory', filtered);
 }
@@ -1771,7 +1875,7 @@ const LIST_SORT_STATE = {};
 const LIST_SORT_TABLES = Object.freeze({
     accounts: { tbodyId: 'accounts-tbody', columns: { 'Firma / Cari': 'name', 'İletişim': 'contact', 'Bakiye': 'balance', 'Durum': 'status' } },
     orders: { tbodyId: 'orders-tbody', columns: { 'İş Emri No': 'number', 'Müşteri': 'customer', 'İş Açıklaması': 'description', 'Tutar': 'amount', 'Durum': 'status' } },
-    inventory: { tbodyId: 'inventory-tbody', columns: { 'Kod': 'code', 'Cinsi / Kalite': 'material', 'Kalınlık (mm)': 'thickness', 'Ebat (EnxBoy)': 'size', 'Miktar (Plaka)': 'quantity', 'Ağırlık (KG)': 'weight', 'Sahibi': 'owner', 'Maliyet': 'cost' } },
+    inventory: { tbodyId: 'inventory-tbody', columns: { 'Kod': 'code', 'Cinsi / Kalite': 'material', 'Kalınlık (mm)': 'thickness', 'Ebat (EnxBoy)': 'size', 'Miktar (Plaka)': 'quantity', 'Ağırlık (KG)': 'weight', 'Sahibi': 'owner', 'KG Birim Fiyatı (₺)': 'cost', 'Toplam Maliyet (₺)': 'totalCost' } },
     scraps: { tbodyId: 'scraps-tbody', columns: { 'Cinsi': 'material', 'Kalınlık (mm)': 'thickness', 'Ebat (EnxBoy)': 'size', 'Sahibi': 'owner', 'Tarih': 'date' } },
     expenses: { tbodyId: 'expenses-tbody', columns: { 'Tarih': 'date', 'Kategori': 'category', 'Açıklama': 'description', 'Tutar': 'amount' } },
     profitability: { tbodyId: 'profitability-tbody', columns: { 'İş Emri': 'number', 'Tarih': 'date', 'Müşteri / İş': 'customer', 'Net Satış': 'revenue', 'Maliyet': 'cost', 'Kâr': 'profit', 'Marj': 'margin', 'Maliyet Durumu': 'status' } },
@@ -1973,7 +2077,7 @@ function createHighVolumeSearch(scope, tbodyId, placeholder) {
             <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
             <input type="search" id="${inputId}" class="form-control" placeholder="${placeholder}" autocomplete="off">
         </div>
-        <span class="high-volume-list-hint"><i class="fa-solid fa-database" aria-hidden="true"></i> 200+ kayıt için hızlı arama</span>
+        <span class="high-volume-list-hint"><i class="fa-solid fa-database" aria-hidden="true"></i> İsim, kod veya açıklamayla bulun</span>
     `;
     toolbar.querySelector('input')?.addEventListener('input', () => handleHighVolumeSearch(scope));
     shell.insertAdjacentElement('beforebegin', toolbar);
@@ -2269,11 +2373,11 @@ function getListReport(type) {
             type: 'inventory',
             title: 'Stok Malzeme Listesi',
             dateRangeLabel: getReportDateRangeLabel('inventory'),
-            headers: ['Kod', 'Tarih', 'Cinsi / Kalite', 'Kalınlık (mm)', 'Ebat', 'Miktar', 'Kritik Seviye', 'Ağırlık (KG)', 'Sahibi', 'Maliyet'],
+            headers: ['Kod', 'Tarih', 'Cinsi / Kalite', 'Kalınlık (mm)', 'Ebat', 'Miktar', 'Kritik Seviye', 'Ağırlık (KG)', 'Sahibi', 'KG Birim Fiyatı (₺)', 'Toplam Maliyet (₺)'],
             rows: getFilteredStoklarForReport().map(s => ({
                 id: String(s.id),
                 values: [
-                    s.kodu || '-',
+                    getStockDisplayCode(s),
                     s.tarih || '-',
                     s.cinsi || '-',
                     s.mm || '-',
@@ -2282,7 +2386,8 @@ function getListReport(type) {
                     s.kritikSeviye || 0,
                     s.kg || 0,
                     s.sahibi || 'Biz',
-                    s.sahibiTipi === 'musteri' ? '-' : formatCurrency(s.maliyet || 0)
+                    s.sahibiTipi === 'musteri' ? '-' : formatCurrency(s.maliyet || 0),
+                    s.sahibiTipi === 'musteri' ? '-' : formatCurrency(getStockTotalCost(s))
                 ]
             }))
         }),
@@ -2339,10 +2444,10 @@ function getListReport(type) {
                         f.faturaTarihi || f.tarih || '-',
                         f.vadeTarihi || '-',
                         f.firma || '-',
-                        formatCurrency(f.matrah ?? ((f.tutar || 0) / (1 + (Number(f.kdvOrani ?? 20) / 100)))),
-                        `%${f.kdvOrani ?? 20} / ${formatCurrency(f.kdvTutari ?? ((f.tutar || 0) - ((f.tutar || 0) / 1.2)))}`,
+                        formatCurrency(getInvoiceDocumentLine(f).subTotal),
+                        `%${getInvoiceDocumentLine(f).taxRate} / ${formatCurrency(getInvoiceDocumentLine(f).tax)}`,
                         `${f.tur === 'kesilen' ? '+' : '-'}${formatCurrency(f.tutar || 0)}`,
-                        f.odemeDurumu === 'odendi' ? 'Ödendi' : (f.odemeDurumu === 'kismi' ? 'Kısmi Ödendi' : 'Ödenmedi'),
+                        getInvoicePaymentLabel(f),
                         f.ek ? (f.ek.name || 'Var') : '-'
                     ]
                 }))
@@ -2696,6 +2801,7 @@ function enhanceInnerPageActions() {
 }
 
 const INNER_PAGE_LAYOUTS = Object.freeze({
+    quicksales: { category: 'Finans', title: 'Hızlı Satış', description: 'Peşin satışları müşteri kartı açmadan kaydedin, tahsilat ve stok hareketlerini birlikte takip edin.', context: 'Satış · Tahsilat · Stok', icon: 'fa-bolt', accent: '37, 99, 235' },
     quotation: {
         category: 'Operasyon',
         title: 'Teklif Merkezi',
@@ -2730,7 +2836,7 @@ const INNER_PAGE_LAYOUTS = Object.freeze({
     },
     scraps: {
         category: 'Operasyon',
-        title: 'Fire ve Artık Parçalar',
+        title: 'Kalan Parça ve Hurda',
         description: 'Yeniden kullanılabilir parçaları ölçü, sahiplik ve tarih bilgisiyle takip edin.',
         context: 'Parça · Sahiplik · Ölçü',
         icon: 'fa-recycle',
@@ -2743,6 +2849,14 @@ const INNER_PAGE_LAYOUTS = Object.freeze({
         context: 'Kategori · Ödeme · Takip',
         icon: 'fa-money-bill-wave',
         accent: '239, 71, 111'
+    },
+    collections: {
+        category: 'Finans', title: 'Tahsilat Takibi', description: 'Açık faturaları vadesine göre izleyin; tahsilat girin veya hatırlatma hazırlayın.',
+        context: 'Açık faturalar · Vade · Tahsilat', icon: 'fa-hand-holding-dollar', accent: '6, 214, 160'
+    },
+    accountcheck: {
+        category: 'Raporlar', title: 'Hesap Kontrolü', description: 'Cari, fatura ve kasa kayıtlarının tutar ve bağlantılarını birlikte kontrol edin.',
+        context: 'Cari · Fatura · Kasa', icon: 'fa-scale-balanced', accent: '76, 201, 240'
     },
     profitability: {
         category: 'Raporlar',
@@ -2795,10 +2909,15 @@ const INNER_PAGE_LAYOUTS = Object.freeze({
 });
 
 function enhanceTableHeaderScopes(root = document) {
-    root.querySelectorAll('table.data-table thead th').forEach(th => th.setAttribute('scope', 'col'));
+    root.querySelectorAll('table.data-table thead th').forEach(th => {
+        th.setAttribute('scope', 'col');
+        th.classList.toggle('numeric-column', /tutar|bakiye|fiyat|maliyet|kâr|marj|miktar|maaş|ücret|ağırlık/i.test(th.textContent));
+    });
 }
 
 const MODAL_PRESENTATION = Object.freeze({
+    'modal-sheet-cut': { icon: 'fa-scissors', accent: '37, 99, 235', width: 860, subtitle: 'Kullanılan sacı ve yeniden kullanılacak parçaları birlikte kaydedin.' },
+    'modal-quick-sale': { icon: 'fa-bolt', accent: '37, 99, 235', width: 700, subtitle: 'Tamamı ödenmiş satışlar için. İsim belirtmek zorunlu değil.' },
     'modal-ceksenet': { icon: 'fa-money-check-dollar', accent: '76, 201, 240', width: 700, subtitle: 'Belge, vade ve tahsilat bilgilerini tek kayıtta yönetin.' },
     'modal-fatura': { icon: 'fa-file-invoice', accent: '255, 51, 102', width: 620, subtitle: 'Faturayı ilgili cari ve varsa teslim edilmiş işle bağlayın.' },
     'modal-cari': { icon: 'fa-user-plus', accent: '6, 214, 160', width: 540, subtitle: 'Yeni müşteri veya tedarikçi hesabını hızlıca oluşturun.' },
@@ -2984,7 +3103,7 @@ function enhanceCurrencyInput(input) {
     preview.className = 'currency-input-preview';
     input.insertAdjacentElement('afterend', preview);
     const update = () => {
-        const value = Number(input.value);
+        const value = input.dataset.turkishMoney==='true'?parseSheetPurchaseDocumentTotal(input.value):Number(input.value);
         preview.textContent = Number.isFinite(value) && input.value !== '' ? `Türkçe gösterim: ${formatCurrency(value)}` : '';
     };
     input.addEventListener('input', update);
@@ -3008,7 +3127,7 @@ function enhanceModalLayout(modal) {
 
     modal.setAttribute('role', modal.getAttribute('role') || 'dialog');
     modal.setAttribute('aria-modal', 'true');
-    content.style.setProperty('--modal-accent-rgb', meta.accent);
+    content.style.setProperty('--modal-accent-rgb', 'var(--primary-rgb)');
 
     if (title) {
         if (!title.id) title.id = `${modal.id || 'modal'}-title`;
@@ -3133,7 +3252,7 @@ function enhanceContentPageLayouts() {
         const view = document.getElementById(`view-${page}`);
         if (!view || view.dataset.pageLayoutEnhanced === 'true') return;
         view.dataset.pageLayoutEnhanced = 'true';
-        view.style.setProperty('--page-accent-rgb', meta.accent);
+        view.style.setProperty('--page-accent-rgb', 'var(--primary-rgb)');
 
         const intro = document.createElement('section');
         intro.className = 'content-page-intro';
@@ -3267,12 +3386,7 @@ function getOrderStatementAmounts(order) {
 }
 
 function getCariStatementLines(cari) {
-    const normalizedCariName = normalizeLookupText(cari.adi);
-    const matchesCari = item =>
-        item.cariId == cari.id ||
-        item.customerId == cari.id ||
-        normalizeLookupText(item.firma) === normalizedCariName ||
-        normalizeLookupText(item.customerName) === normalizedCariName;
+    const matchesCari = item => cariRecordMatches(item, cari);
 
     const orderLines = getDBArray('isEmirleri')
         .filter(order =>
@@ -3341,7 +3455,6 @@ function getCariCollectionTotal(cari) {
 }
 
 function getCariMovementLines(cari, saleLines = []) {
-    const normalizedCariName = normalizeLookupText(cari.adi);
     const saleOrderIds = new Set(saleLines
         .filter(line => line.source === 'order')
         .map(line => String(line.sourceId)));
@@ -3349,11 +3462,33 @@ function getCariMovementLines(cari, saleLines = []) {
         .filter(line => line.source === 'invoice')
         .map(line => String(line.sourceId)));
 
-    return getDBArray('islemler')
-        .filter(islem =>
-            islem.cariId == cari.id ||
-            normalizeLookupText(islem.firma) === normalizedCariName
-        )
+    const cariMovements = getDBArray('islemler')
+        .filter(islem => cariRecordMatches(islem, cari));
+    // Keep cancellation history in the records, but omit verified, fully offset
+    // invoice pairs from the customer statement. Support older unlinked entries.
+    const cancelledIds = new Set();
+    const activeInvoiceIds = new Set(getDBArray('faturalar').map(invoice => String(invoice.id)));
+    for (const cancellation of cariMovements) {
+        if (!normalizeLookupText(cancellation.tip).startsWith('fatura silindi') ||
+            !cancellation.faturaId || activeInvoiceIds.has(String(cancellation.faturaId))) continue;
+        const originals = cariMovements.filter(movement => {
+            const type = normalizeLookupText(movement.tip);
+            const isInvoice = type.startsWith('kesilen fatura') || type.startsWith('alınan fatura') || type.startsWith('fatura kesildi');
+            return isInvoice && (String(movement.id) === String(cancellation.reversalOf) ||
+                (movement.faturaId != null ? String(movement.faturaId) === String(cancellation.faturaId) :
+                    !!cancellation.faturaNo && movement.faturaNo === cancellation.faturaNo));
+        });
+        if (originals.length !== 1) continue;
+        const original = originals[0];
+        if (cancelledIds.has(String(original.id))) continue;
+        if (typeof original.bakiyeDegisimi !== 'number' || typeof cancellation.bakiyeDegisimi !== 'number' ||
+            roundMoney(original.bakiyeDegisimi + cancellation.bakiyeDegisimi) !== 0) continue;
+        cancelledIds.add(String(original.id));
+        cancelledIds.add(String(cancellation.id));
+    }
+
+    return cariMovements
+        .filter(islem => !cancelledIds.has(String(islem.id)))
         .filter(islem => {
             const tip = normalizeLookupText(islem.tip);
             const isCollection = islem.isGelir === true || tip.includes('tahsilat');
@@ -3369,6 +3504,8 @@ function getCariMovementLines(cari, saleLines = []) {
             tarih: islem.tarih || '-',
             tip: islem.tip || 'Cari İşlem',
             aciklama: islem.aciklama || islem.tip || 'Cari işlem',
+            movementNo: islem.movementNo || '',
+            quickSaleNo: islem.quickSaleNo || '',
             faturaNo: islem.faturaNo || '',
             orderNo: islem.orderNo || '',
             tutar: roundMoney(islem.tutar || 0),
@@ -3376,7 +3513,7 @@ function getCariMovementLines(cari, saleLines = []) {
                 ? roundMoney(islem.bakiyeDegisimi)
                 : roundMoney((islem.isGelir === true || normalizeLookupText(islem.tip).includes('tahsilat')) ? -(islem.tutar || 0) : (islem.tutar || 0))
         }))
-        .filter(islem => islem.delta !== 0 || islem.tutar > 0)
+        .filter(islem => islem.delta !== 0)
         .sort((a, b) => {
             const dateDiff = parseTRDate(a.tarih) - parseTRDate(b.tarih);
             if (dateDiff !== 0) return dateDiff;
@@ -3389,7 +3526,7 @@ function getCariLedgerLines(cari, saleLines, currentBalance, dateRange = null) {
     const allLedgerLines = [
         ...saleLines.map(line => ({
             id: line.id,
-            code: line.faturaNo || line.orderNo || `SAT-${String(line.sourceId || '').slice(-6) || 'KAYIT'}`,
+            code: line.quickSaleNo || line.faturaNo || line.orderNo || `SAT-${String(line.sourceId || '').slice(-6) || 'KAYIT'}`,
             date: getCariStatementDate(line),
             type: 'Satış',
             description: line.aciklama || 'Satış',
@@ -3405,7 +3542,7 @@ function getCariLedgerLines(cari, saleLines, currentBalance, dateRange = null) {
             const isCredit = line.delta < 0;
             return {
                 id: `movement-${line.id}`,
-                code: line.faturaNo || line.orderNo || `HRK-${String(line.id || '').slice(-6) || 'KAYIT'}`,
+                code: line.quickSaleNo || line.faturaNo || line.orderNo || line.movementNo || `HRK-${String(line.id || '').slice(-6) || 'KAYIT'}`,
                 date: line.tarih || '-',
                 type: isCredit ? 'Tahsilat / Ödeme' : 'Cari Borç',
                 description: line.aciklama || line.tip || 'Cari işlem',
@@ -3430,7 +3567,66 @@ function getCariLedgerLines(cari, saleLines, currentBalance, dateRange = null) {
         .filter(line => dateRange?.startDate && parseTRDate(line.date) < dateRange.startDate)
         .reduce((sum, line) => sum + roundMoney(line.delta || 0), 0));
     const visibleOpeningBalance = roundMoney(openingBalance + priorDelta);
-    const ledgerLines = allLedgerLines.filter(line => isDateInRange(line.date, dateRange));
+    const selectedLines = allLedgerLines.filter(line => isDateInRange(line.date, dateRange));
+    const allById = new Map(allLedgerLines.map(line => [String(line.id), line]));
+    const movementsById = new Map(getDBArray('islemler').map(item => [String(item.id), item]));
+    const hiddenIds = new Set();
+    const replacements = new Map();
+    const parents = new Map();
+    const rootOf = id => {
+        if (!parents.has(id)) parents.set(id, id);
+        if (parents.get(id) !== id) parents.set(id, rootOf(parents.get(id)));
+        return parents.get(id);
+    };
+    const join = (left, right) => parents.set(rootOf(right), rootOf(left));
+    // Join only reciprocal, amount-offsetting audit links. A later correction
+    // can itself be corrected, so project the whole chain for the print period.
+    for (const original of movementsById.values()) {
+        if (original.reversedBy == null) continue;
+        const reversal = movementsById.get(String(original.reversedBy));
+        if (!reversal || String(reversal.reversalOf) !== String(original.id)) continue;
+        const originalLine = allById.get(`movement-${original.id}`);
+        const reversalLine = allById.get(`movement-${reversal.id}`);
+        if (!originalLine || !reversalLine || roundMoney(originalLine.delta + reversalLine.delta) !== 0) continue;
+        join(String(originalLine.id), String(reversalLine.id));
+        const corrected = movementsById.get(String(original.correctedBy));
+        const correctedLine = corrected && allById.get(`movement-${corrected.id}`);
+        if (correctedLine && corrected.correctionOf != null &&
+            String(corrected.correctionOf) === String(original.id) &&
+            String(reversal.correctedBy) === String(corrected.id)) join(String(originalLine.id), String(correctedLine.id));
+    }
+    const selectedGroups = new Map();
+    for (const line of selectedLines) {
+        if (!parents.has(String(line.id))) continue;
+        const root = rootOf(String(line.id));
+        if (!selectedGroups.has(root)) selectedGroups.set(root, []);
+        selectedGroups.get(root).push(line);
+    }
+    for (const group of selectedGroups.values()) {
+        if (group.length < 2) continue;
+        const delta = roundMoney(group.reduce((sum, line) => sum + line.delta, 0));
+        group.forEach(line => hiddenIds.add(String(line.id)));
+        if (delta === 0) continue;
+        const anchor = [...group].reverse().find(line => !movementsById.get(String(line.id).slice(9))?.reversalOf) || group[group.length - 1];
+        const startsInRange = group.some(line => {
+            const movement = movementsById.get(String(line.id).slice(9));
+            return movement && !movement.reversalOf && !movement.correctionOf;
+        });
+        hiddenIds.delete(String(anchor.id));
+        replacements.set(String(anchor.id), {
+            ...anchor,
+            description: startsInRange ? anchor.description : 'Tahsilat / ödeme düzeltmesi',
+            type: startsInRange ? anchor.type : 'Düzeltme',
+            debit: delta > 0 ? delta : 0,
+            credit: delta < 0 ? Math.abs(delta) : 0,
+            delta
+        });
+    }
+    let ledgerLines = selectedLines.filter(line => !hiddenIds.has(String(line.id)))
+        .map(line => replacements.get(String(line.id)) || line);
+    const selectedDelta = roundMoney(selectedLines.reduce((sum, line) => sum + line.delta, 0));
+    const projectedDelta = roundMoney(ledgerLines.reduce((sum, line) => sum + line.delta, 0));
+    if (selectedDelta !== projectedDelta) ledgerLines = selectedLines;
 
     if (Math.abs(visibleOpeningBalance) >= 0.01) {
         ledgerLines.unshift({
@@ -3438,7 +3634,7 @@ function getCariLedgerLines(cari, saleLines, currentBalance, dateRange = null) {
             code: 'DEVİR',
             date: '-',
             type: 'Devir',
-            description: dateRange?.startValue ? 'Seçilen tarih öncesi bakiye' : 'Önceki bakiye / kayıt dışı devir',
+            description: dateRange?.startValue ? 'Seçilen tarih öncesi bakiye' : 'Devir Bakiyesi',
             debit: visibleOpeningBalance > 0 ? visibleOpeningBalance : 0,
             credit: visibleOpeningBalance < 0 ? Math.abs(visibleOpeningBalance) : 0,
             delta: visibleOpeningBalance,
@@ -3484,7 +3680,7 @@ function printAccountStatement(cariId) {
             line.discountAmount ? `İskonto ${formatPercentLabel(line.discountPercent)} (-${formatCurrency(line.discountAmount)})` : ''
         ].filter(Boolean);
         return `
-        <tr>
+        <tr class="${line.id === 'opening-balance' ? 'statement-opening' : ''}">
             <td class="statement-code"><strong>${escapeHTML(line.code || '-')}</strong></td>
             <td class="statement-date">${escapeHTML(line.date || '-')}</td>
             <td>
@@ -3501,30 +3697,12 @@ function printAccountStatement(cariId) {
     const contentHTML = `
         ${getPrintBrandHTML('Cari Hesap Ekstresi', getPrintMetaHTML([
             ['Düzenleme', new Date().toLocaleDateString('tr-TR')],
-            ['Kapsam', 'Seçilen kayıtlar'],
-            ['Aralık', formatDateRangeLabel(dateRange)],
-            ['Cari Kodu', cari.kodu || '-']
+            ['Aralık', formatDateRangeLabel(dateRange)]
         ]))}
-        <div class="document-intro-grid">
-            <div class="document-card">
-                <div class="document-card-label">Hesap Sahibi</div>
-                <div class="document-card-value">${escapeHTML(cari.adi || '-')}</div>
-                <div class="document-card-detail">Cari Kodu: ${escapeHTML(cari.kodu || '-')}</div>
-            </div>
-            <div class="document-card">
-                <div class="document-card-label">İletişim</div>
-                <div class="document-card-value">${escapeHTML(cari.tel || cari.telefon || '-')}</div>
-                <div class="document-card-detail">Seçilen tarih aralığındaki hesap hareketleri</div>
-            </div>
-        </div>
-        <div class="metric-strip" aria-label="Cari hesap özeti">
-            <div class="metric-item"><span class="metric-label">Toplam Borç</span><strong class="metric-value">${escapeHTML(formatCurrency(totalDebt))}</strong></div>
-            <div class="metric-item"><span class="metric-label">Toplam Tahsilat</span><strong class="metric-value">${escapeHTML(formatCurrency(totalCollection))}</strong></div>
-            <div class="metric-item is-accent"><span class="metric-label">Bakiye</span><strong class="metric-value">${escapeHTML(formatCurrency(periodClosingBalance))}</strong></div>
-        </div>
+        ${getPrintPartyHTML('Hesap Sahibi', cari.adi, cari)}
         <div class="section-heading">
             <h2>Hesap Hareketleri</h2>
-            <span>${ledgerLines.length} hareket · ${escapeHTML(formatDateRangeLabel(dateRange))}</span>
+            <span>${ledgerLines.length} hareket · TL</span>
         </div>
         <table class="statement-table" aria-label="Cari hesap hareketleri">
             <thead>
@@ -3532,51 +3710,55 @@ function printAccountStatement(cariId) {
                     <th scope="col">İşlem Kodu</th>
                     <th scope="col">Tarih</th>
                     <th scope="col">Açıklama</th>
-                    <th scope="col" class="text-right">Borç</th>
-                    <th scope="col" class="text-right">Tahsilat</th>
-                    <th scope="col" class="text-right">Bakiye</th>
+                    <th scope="col" class="text-right">Borç (TL)</th>
+                    <th scope="col" class="text-right">TAHSİLAT</th>
+                    <th scope="col" class="text-right">Bakiye (TL)</th>
                 </tr>
             </thead>
             <tbody>${ledgerLines.length ? ledgerRows : emptyRow}</tbody>
+            <tbody class="statement-totals">
+                <tr>
+                    <th scope="row" colspan="3">GENEL TOPLAM (DEVİR DAHİL)</th>
+                    <td class="number-cell">${escapeHTML(formatCurrency(totalDebt))}</td>
+                    <td class="number-cell">${escapeHTML(formatCurrency(totalCollection))}</td>
+                    <td class="number-cell">${escapeHTML(formatCurrency(periodClosingBalance))}</td>
+                </tr>
+            </tbody>
         </table>
-        <div class="statement-summary-wrap">
-            <table class="statement-summary-table" aria-label="Cari hesap toplamları">
-                <thead>
-                    <tr><th scope="col">Toplam Borç</th><th scope="col">Toplam Tahsilat</th><th scope="col">Bakiye</th></tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>${escapeHTML(formatCurrency(totalDebt))}</td>
-                        <td>${escapeHTML(formatCurrency(totalCollection))}</td>
-                        <td>${escapeHTML(formatCurrency(periodClosingBalance))}</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
     `;
 
     openPrintPreview('Cari Hesap Ekstresi', contentHTML, `
-        .statement-table { table-layout: fixed; }
-        .statement-table th:nth-child(1) { width: 15%; }
-        .statement-table th:nth-child(2) { width: 15%; }
-        .statement-table th:nth-child(3) { width: 34%; }
+        .brand-header { margin-bottom: 16px; }
+        .document-intro-grid { gap: 18px; margin-bottom: 14px; }
+        .metric-item { background: #fff; padding: 8px 10px; }
+        .metric-item.is-accent { background: var(--surface-blue); }
+        .metric-item.is-accent .metric-label { color: var(--ink-soft); }
+        .metric-item.is-accent .metric-value { color: var(--primary); }
+        .statement-table { table-layout: fixed; border: 1px solid var(--line-strong); font-size: 9px; }
+        .statement-table th:nth-child(1) { width: 14%; }
+        .statement-table th:nth-child(2) { width: 17%; }
+        .statement-table th:nth-child(3) { width: 27%; }
         .statement-table th:nth-child(4),
         .statement-table th:nth-child(5),
-        .statement-table th:nth-child(6) { width: 12%; }
-        .statement-code { color: var(--primary); font-size: 8.5px; letter-spacing: .015em; }
-        .statement-date { white-space: nowrap; }
-        .statement-description-title { display: block; color: var(--ink); font-size: 9.5px; line-height: 1.35; }
-        .statement-description-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 5px; margin-top: 2px; color: var(--muted); font-size: 7.75px; line-height: 1.35; }
-        .statement-description-meta i { color: var(--line-strong); font-style: normal; }
-        .statement-balance { color: var(--primary); }
+        .statement-table th:nth-child(6) { width: 14%; }
+        .statement-table th, .statement-table td { border: 1px solid var(--line-strong); padding: 7px 6px; vertical-align: middle; }
+        .statement-table thead th { background: #edf1f5; color: var(--ink); font-size: 8px; letter-spacing: 0; }
+        .statement-table .number-cell { font-variant-numeric: tabular-nums; }
+        .statement-code { color: var(--ink-soft); font-size: 8px; overflow-wrap: anywhere; }
+        .statement-date { white-space: normal; font-size: 8.5px; }
+        .statement-description-title { display: block; color: var(--ink); font-size: 9px; font-weight: 400; line-height: 1.4; overflow-wrap: anywhere; }
+        .statement-description-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 5px; margin-top: 3px; color: var(--ink-soft); font-size: 7.5px; line-height: 1.4; }
+        .statement-description-meta i { font-style: normal; }
+        .statement-balance { color: var(--ink); background: #f3f6fa; }
+        .statement-opening td { background: #edf1f5 !important; font-weight: 700; }
         .statement-empty { text-align: center; color: var(--muted); padding: 24px; }
-        .statement-summary-wrap { width: 390px; max-width: 64%; margin: 16px 0 0 auto; break-inside: avoid; page-break-inside: avoid; }
-        .statement-summary-table { table-layout: fixed; border: 1px solid var(--line-strong); }
-        .statement-summary-table th { width: 33.333%; padding: 6px 8px; text-align: center; }
-        .statement-summary-table td { padding: 7px 8px; border-right: 1px solid var(--line-strong); background: #fff !important; color: var(--ink); font-size: 10px; font-weight: 700; text-align: right; white-space: nowrap; }
-        .statement-summary-table td:last-child { border-right: 0; background: var(--surface-blue) !important; color: var(--primary); }
+        .statement-totals { break-inside: avoid; page-break-inside: avoid; }
+        .statement-totals th, .statement-totals td { background: #e8eef5 !important; color: var(--ink); border-top: 2px solid var(--primary); font-size: 9px; font-weight: 700; }
+        .statement-totals th { text-align: right; letter-spacing: 0; }
+
     `, {
         orientation: 'portrait',
+        paymentFooter: true,
         share: {
             phone: cari.tel || cari.telefon || '',
             customerName: cari.adi || '',
@@ -3597,79 +3779,15 @@ function printOrderStatement(orderId) {
 
     const contentHTML = `
         ${getPrintBrandHTML('İş Emri Dökümü', getPrintMetaHTML([
-            ['İş Emri No', order.orderNo || '-'],
-            ['İş Emri Tarihi', orderDate],
-            ['Düzenleme', new Date().toLocaleDateString('tr-TR')]
+            ['İş Emri No', order.orderNo], ['Tarih', orderDate], ['Durum', order.durum]
         ]))}
-        <div class="document-intro-grid">
-            <div class="document-card">
-                <div class="document-card-label">Müşteri</div>
-                <div class="document-card-value">${escapeHTML(customerName)}</div>
-                <div class="document-card-detail">${escapeHTML(order.orderNo || 'Numarasız iş emri')}</div>
-            </div>
-            <div class="document-card">
-                <div class="document-card-label">İş Emri Durumu</div>
-                <div class="document-card-value">${escapeHTML(order.durum || 'Planlandı')}</div>
-                <div class="document-card-detail">İş Emri Tarihi: ${escapeHTML(orderDate)}</div>
-            </div>
-        </div>
-        <div class="section-heading">
-            <h2>İş ve Tutar Bilgileri</h2>
-            <span>Seçilen iş emri dökümü</span>
-        </div>
-        <table class="statement-table">
-            <thead>
-                <tr>
-                    <th>İş Açıklaması</th>
-                    <th class="text-right">Satış</th>
-                    <th class="text-right">İskonto / İsk. Oranı</th>
-                    <th class="text-right">KDV</th>
-                    <th class="text-right">Toplam</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td>${escapeHTML(description)}</td>
-                    <td class="number-cell">${escapeHTML(formatCurrency(amounts.gross || 0))}</td>
-                    <td class="number-cell">
-                        ${escapeHTML(amounts.discountAmount ? `-${formatCurrency(amounts.discountAmount)}` : formatCurrency(0))}
-                        <div class="muted">${escapeHTML(formatPercentLabel(amounts.discountPercent))}</div>
-                    </td>
-                    <td class="number-cell">
-                        ${escapeHTML(formatCurrency(amounts.tax || 0))}
-                        <div class="muted">${escapeHTML(formatPercentLabel(amounts.taxRate))}</div>
-                    </td>
-                    <td class="number-cell"><strong>${escapeHTML(formatCurrency(amounts.total || 0))}</strong></td>
-                </tr>
-            </tbody>
-        </table>
-        <div class="document-footer-grid">
-            <div class="document-note">
-                <span class="document-note-title">Belge Açıklaması</span>
-                Bu çıktı seçilen iş emrinin müşteri, iş tanımı ve satış tutarlarını gösterir.
-            </div>
-            <table class="totals-panel" aria-label="İş emri tutar özeti">
-                <tbody>
-                    <tr><td>Satış Tutarı</td><td>${escapeHTML(formatCurrency(amounts.gross || 0))}</td></tr>
-                    <tr><td>İskonto Oranı</td><td>${escapeHTML(formatPercentLabel(amounts.discountPercent))}</td></tr>
-                    <tr><td>İskonto Toplamı</td><td>-${escapeHTML(formatCurrency(amounts.discountAmount || 0))}</td></tr>
-                    <tr><td>Ara Toplam</td><td>${escapeHTML(formatCurrency(amounts.subTotal || 0))}</td></tr>
-                    <tr><td>KDV Oranı</td><td>${escapeHTML(formatPercentLabel(amounts.taxRate))}</td></tr>
-                    <tr><td>KDV Toplamı</td><td>${escapeHTML(formatCurrency(amounts.tax || 0))}</td></tr>
-                    <tr class="total-row"><td>Genel Toplam</td><td>${escapeHTML(formatCurrency(amounts.total || 0))}</td></tr>
-                </tbody>
-            </table>
-        </div>
+        ${getPrintPartyHTML('Müşteri', customerName, customerCari)}
+        ${getPrintServiceLineHTML(description, amounts.gross)}
+        <div class="document-footer-grid">${getPrintTotalsHTML(amounts, 'İş emri tutar özeti')}</div>
     `;
 
-    openPrintPreview('İş Emri Dökümü', contentHTML, `
-        .statement-table { table-layout: fixed; }
-        .statement-table th:nth-child(1) { width: 43%; }
-        .statement-table th:nth-child(2) { width: 14%; }
-        .statement-table th:nth-child(3) { width: 14%; }
-        .statement-table th:nth-child(4) { width: 14%; }
-        .statement-table th:nth-child(5) { width: 15%; }
-    `, {
+    openPrintPreview('İş Emri Dökümü', contentHTML, '', {
+        paymentFooter: true,
         share: {
             phone: customerCari?.tel || customerCari?.telefon || '',
             customerName,
@@ -3678,34 +3796,175 @@ function printOrderStatement(orderId) {
     });
 }
 
-function getInvoiceDocumentLine(fatura) {
-    const linkedOrder = fatura.orderId
-        ? getDBArray('isEmirleri').find(order => order.id == fatura.orderId)
-        : null;
+// Read saved invoice amounts consistently, including zero-rate and older records.
+function getSavedInvoiceAmounts(invoice, linkedOrder = null) {
+    const number = value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)) ? Number(value) : null;
+    const total = roundMoney(number(invoice.tutar) ?? 0);
+    const compatibleOrder = linkedOrder && roundMoney(linkedOrder.total) === total ? linkedOrder : null;
+    const storedTax = number(invoice.kdvTutari) ?? number(compatibleOrder?.tax);
+    const storedBase = number(invoice.matrah) ?? number(compatibleOrder?.subTotal) ?? (storedTax !== null ? total - storedTax : null);
+    const inferredRate = storedBase > 0 ? roundMoney(((storedTax ?? (total - storedBase)) / storedBase) * 100) : null;
+    const rate = number(invoice.kdvOrani) ?? number(compatibleOrder?.taxRate) ?? inferredRate ?? 20;
+    const subTotal = roundMoney(number(invoice.matrah) ?? number(compatibleOrder?.subTotal) ?? (storedTax !== null ? total - storedTax : total / (1 + rate / 100)));
+    const tax = roundMoney(storedTax ?? (total - subTotal));
+    const discountAmount = roundMoney(number(invoice.discountAmount) ?? number(compatibleOrder?.discountAmount) ?? 0);
+    return { total, subTotal, tax, taxRate: rate, discountAmount,
+        discountPercent: number(invoice.discountPercent) ?? number(compatibleOrder?.discountPercent),
+        gross: roundMoney(subTotal + discountAmount) };
+}
 
-    if (linkedOrder) {
-        const amounts = getOrderStatementAmounts(linkedOrder);
-        return {
-            description: linkedOrder.description || (linkedOrder.islemTipi === 'hammadde' ? `${linkedOrder.kgAmount || 0} KG hammadde satışı` : 'Teslim edilen iş'),
-            orderNo: linkedOrder.orderNo || fatura.orderNo || '',
-            ...amounts
-        };
-    }
-
-    const total = roundMoney(fatura.tutar || 0);
-    const taxRate = Number(fatura.kdvOrani ?? 20);
-    const subTotal = roundMoney(fatura.matrah ?? (total / (1 + taxRate / 100)));
-    const tax = roundMoney(fatura.kdvTutari ?? (total - subTotal));
+function createInvoiceDocumentSnapshot(invoice, order, cari, issuer) {
     return {
-        description: fatura.aciklama || 'Fatura kalemi',
-        orderNo: fatura.orderNo || '',
-        gross: subTotal,
-        discountPercent: null,
-        discountAmount: 0,
-        subTotal,
-        taxRate,
-        tax,
-        total
+        version: 1,
+        line: { ...getSavedInvoiceAmounts(invoice, order), description: invoice.aciklama || order?.description || 'Fatura kalemi', orderNo: invoice.orderNo || order?.orderNo || '' },
+        customer: { adi: invoice.firma || cari?.adi || '', kodu: cari?.kodu || '', tel: cari?.tel || cari?.telefon || '', adres: cari?.adres || '', vergiDairesi: cari?.vergiDairesi || '', vergiNo: invoice.vergiNo || cari?.vergiNo || '' },
+        issuer: { firmaAdi: issuer?.firmaAdi || 'AK LAZER Fiber Lazer Kesimleri', telefon: issuer?.telefon || '', adres: issuer?.adres || '' }
+    };
+}
+
+function initializeInvoiceDocuments(database) {
+    for (const invoice of database.faturalar || []) {
+        if (invoice.documentSnapshot?.version === 1) continue;
+        const order = (database.isEmirleri || []).find(item => String(item.id) === String(invoice.orderId));
+        const cari = (database.cariler || []).find(item => invoice.cariId != null ? String(item.id) === String(invoice.cariId) : item.adi === invoice.firma);
+        invoice.documentSnapshot = createInvoiceDocumentSnapshot(invoice, order, cari, database.ayarlar);
+    }
+}
+
+function invoiceMatchesCari(invoice, cariId, name = '', database = db) {
+    if (invoice?.cariId != null && String(invoice.cariId).trim() !== '' &&
+        cariId != null && String(cariId).trim() !== '') {
+        return String(invoice.cariId) === String(cariId);
+    }
+    const invoiceCari = findCariByReference(invoice?.cariId, invoice?.firma, database);
+    const candidateCari = findCariByReference(cariId, name, database);
+    return !!invoiceCari && !!candidateCari && String(invoiceCari.id) === String(candidateCari.id);
+}
+
+function getInvoicePaymentMovements(invoice, database = db) {
+    const invoicesForOrder = invoice.orderId == null ? [] : (database.faturalar || []).filter(item => item.tur === invoice.tur && String(item.orderId) === String(invoice.orderId) && invoiceMatchesCari(item, invoice.cariId, invoice.firma, database));
+    return (database.islemler || []).filter(movement => {
+        if (movement.reversalOf || !invoiceMatchesCari(invoice, movement.cariId, movement.firma, database)) return false;
+        const type = getCariMovementFormType(movement);
+        if (invoice.tur === 'kesilen' ? type !== 'tahsilat' : type !== 'odeme_yaptik') return false;
+        if (movement.paymentInvoiceId != null) return String(movement.paymentInvoiceId) === String(invoice.id);
+        return invoicesForOrder.length === 1 && movement.orderId != null && String(movement.orderId) === String(invoice.orderId);
+    });
+}
+
+function getInvoicePaymentSummary(invoice, excludeMovementId = '', database = db) {
+    const total = roundMoney(invoice.tutar || 0);
+    const movements = getInvoicePaymentMovements(invoice, database);
+    const active = movements.filter(item => !item.reversedBy && String(item.id) !== String(excludeMovementId));
+    const linkedPaid = roundMoney(active.reduce((sum, item) => sum + (Number(item.tutar) || 0), 0));
+    const legacy = invoice.paymentTrackingVersion !== 1 && ['odendi', 'kismi'].includes(invoice.odemeDurumu);
+    if (legacy) {
+        return { status: invoice.odemeDurumu, paid: invoice.odemeDurumu === 'odendi' ? total : null,
+            remaining: invoice.odemeDurumu === 'odendi' ? 0 : null, linkedPaid, legacy: true, movements: active };
+    }
+    const paid = roundMoney((Number(invoice.paymentOpeningAmount) || 0) + linkedPaid);
+    const remaining = roundMoney(Math.max(total - paid, 0));
+    return { status: remaining === 0 ? 'odendi' : paid > 0 ? 'kismi' : 'odenmedi', paid, remaining, linkedPaid, legacy: false, movements: active };
+}
+
+function getInvoicePaymentLabel(invoice) {
+    const summary = getInvoicePaymentSummary(invoice);
+    return summary.status === 'odendi' ? 'Ödendi' : summary.status === 'kismi' ? 'Kısmi Ödendi' : 'Ödenmedi';
+}
+
+function syncInvoicePaymentStates(database) {
+    for (const invoice of database.faturalar || []) {
+        if (invoice.paymentTrackingVersion !== 1 && !['odendi', 'kismi'].includes(invoice.odemeDurumu) && getInvoicePaymentMovements(invoice, database).length) invoice.paymentTrackingVersion = 1;
+        if (invoice.paymentTrackingVersion === 1) invoice.odemeDurumu = getInvoicePaymentSummary(invoice, '', database).status;
+    }
+}
+
+function getSelectedPaymentInvoice() {
+    const id = document.getElementById('input-islem-payment-invoice-id')?.value;
+    return id ? getDBArray('faturalar').find(invoice => String(invoice.id) === String(id)) || null : null;
+}
+
+function renderPaymentInvoiceOptions() {
+    const select = document.getElementById('input-islem-payment-invoice-id');
+    const container = document.getElementById('payment-invoice-container');
+    if (!select || !container) return;
+    const type = document.getElementById('input-islem-tipi')?.value;
+    const isPayment = type === 'tahsilat' || type === 'odeme_yaptik';
+    container.hidden = !isPayment;
+    if (!isPayment) { select.value = ''; return; }
+    const cari = getCurrentIslemCari();
+    const previous = select.value;
+    const editId = document.getElementById('input-islem-edit-id')?.value || '';
+    const orderId = document.getElementById('input-islem-payment-order-id')?.value;
+    const invoices = getDBArray('faturalar').filter(invoice => invoiceMatchesCari(invoice, cari?.id, cari?.adi) && invoice.tur === (type === 'tahsilat' ? 'kesilen' : 'alinan'));
+    select.innerHTML = '<option value="">Cari hesabına işle — fatura seçilmedi</option>' + invoices.map(invoice => {
+        const summary = getInvoicePaymentSummary(invoice, editId);
+        const suffix = summary.remaining === null ? 'Ödeme geçmişi tamamlanmalı' : `Kalan ${formatCurrency(summary.remaining)}`;
+        const disabled = summary.legacy || summary.remaining === 0;
+        return `<option value="${escapeHTML(invoice.id)}"${disabled ? ' disabled' : ''}>${escapeHTML(invoice.faturaNo)} · ${escapeHTML(suffix)}</option>`;
+    }).join('');
+    if (invoices.some(invoice => String(invoice.id) === previous)) select.value = previous;
+    else if (orderId) {
+        const linked = invoices.filter(invoice => String(invoice.orderId) === String(orderId));
+        if (linked.length === 1) select.value = String(linked[0].id);
+    }
+    updatePaymentInvoiceSummary();
+}
+
+window.selectPaymentInvoice = function() {
+    const invoice = getSelectedPaymentInvoice();
+    document.getElementById('input-islem-payment-order-id').value = invoice?.orderId || '';
+    updatePaymentInvoiceSummary();
+};
+
+window.updatePaymentInvoiceSummary = function() {
+    const invoice = getSelectedPaymentInvoice();
+    const hint = document.getElementById('payment-invoice-summary');
+    if (hint) {
+        const remaining = invoice ? getInvoicePaymentSummary(invoice, document.getElementById('input-islem-edit-id')?.value).remaining : null;
+        hint.textContent = invoice ? `${invoice.faturaNo} · Kalan: ${remaining === null ? 'Ödeme geçmişi tamamlanmalı' : formatCurrency(remaining)}` : 'Fatura seçerseniz ödeme durumu ve kalan tutar birlikte güncellenir.';
+    }
+    updateTahsilatSummary();
+};
+
+window.openInvoicePayment = function(id) {
+    const invoice = getDBArray('faturalar').find(item => String(item.id) === String(id));
+    const cari = invoice ? findCariByReference(invoice.cariId, invoice.firma) : null;
+    if (!invoice || !cari) return alert('Fatura veya cari bulunamadı.');
+    const summary = getInvoicePaymentSummary(invoice);
+    if (summary.legacy) return showToast({ type: 'info', message: 'Önce fatura detayındaki ödeme geçmişini tamamlayın.' });
+    if (summary.remaining <= 0) return showToast({ type: 'info', message: 'Bu faturanın ödemesi tamamlanmış.' });
+    closeModal('modal-fatura-detail');
+    openIslemModal(cari.id, cari.adi);
+    document.getElementById('input-islem-tipi').value = invoice.tur === 'kesilen' ? 'tahsilat' : 'odeme_yaptik';
+    updateIslemTipiInfo();
+    document.getElementById('input-islem-payment-invoice-id').value = String(invoice.id);
+    document.getElementById('input-islem-tutar').value = summary.remaining;
+    document.getElementById('input-islem-aciklama').value = `${invoice.faturaNo} ${invoice.tur === 'kesilen' ? 'tahsilatı' : 'ödemesi'}`;
+    updatePaymentInvoiceSummary();
+    markModalFormClean('modal-islem');
+};
+
+window.saveInvoicePaymentHistory = function(id) {
+    const invoice = getDBArray('faturalar').find(item => String(item.id) === String(id));
+    if (!invoice || (!getInvoicePaymentSummary(invoice).legacy && invoice.paymentOpeningAmount === undefined)) return;
+    const input = document.getElementById('invoice-history-paid');
+    const value = input?.value;
+    const paid = roundMoney(Number(value));
+    const linkedPaid = getInvoicePaymentSummary(invoice).linkedPaid;
+    if (value === '' || !Number.isFinite(Number(value)) || paid < linkedPaid || paid > roundMoney(invoice.tutar)) return alert(`Ödenen toplam ${formatCurrency(linkedPaid)} ile ${formatCurrency(invoice.tutar)} arasında olmalı.`);
+    invoice.paymentOpeningAmount = roundMoney(paid - linkedPaid);
+    invoice.paymentTrackingVersion = 1;
+    addAuditLog('Güncellendi', 'Fatura', invoice.id, `${invoice.faturaNo} ödeme geçmişi: ${formatCurrency(paid)}. Cari ve kasa bakiyeleri değiştirilmedi.`);
+    saveDB();
+    showFaturaDetail(invoice.id);
+    showToast({ type: 'success', title: 'Ödeme geçmişi tamamlandı', message: 'Faturanın kalan tutarı güncellendi. Yeni para hareketi oluşturulmadı.' });
+};
+
+function getInvoiceDocumentLine(fatura) {
+    return fatura.documentSnapshot?.line || {
+        ...getSavedInvoiceAmounts(fatura, getDBArray('isEmirleri').find(order => String(order.id) === String(fatura.orderId))),
+        description: fatura.aciklama || 'Fatura kalemi', orderNo: fatura.orderNo || ''
     };
 }
 
@@ -3716,91 +3975,23 @@ window.printInvoiceDocument = function(faturaId) {
     const line = getInvoiceDocumentLine(fatura);
     const cari = findCariByReference(fatura.cariId, fatura.firma);
     const title = fatura.tur === 'kesilen' ? 'Fatura Belgesi' : 'Alınan Fatura Kaydı';
-    const directionLabel = fatura.tur === 'kesilen' ? 'Müşteriye Kesilen' : 'Tedarikçiden Alınan';
-
+    const referenceHTML = line.orderNo ? `<div class="document-card-label">İş Emri</div><div class="document-card-value">${escapeHTML(line.orderNo)}</div>` : '';
     const contentHTML = `
         ${getPrintBrandHTML(title, getPrintMetaHTML([
-            ['Fatura No', fatura.faturaNo || '-'],
+            ['Fatura No', fatura.faturaNo],
             ['Tarih', fatura.faturaTarihi || fatura.tarih || new Date().toLocaleDateString('tr-TR')],
-            ['Vade', fatura.vadeTarihi || '-'],
-            ['Ödeme', fatura.odemeDurumu === 'odendi' ? 'Ödendi' : (fatura.odemeDurumu === 'kismi' ? 'Kısmi Ödendi' : 'Ödenmedi')],
-            ['Belge Tipi', directionLabel]
-        ]))}
-        <div class="document-intro-grid">
-            <div class="document-card">
-                <div class="document-card-label">${fatura.tur === 'kesilen' ? 'Fatura Kesilen' : 'Faturayı Düzenleyen'}</div>
-                <div class="document-card-value">${escapeHTML(fatura.firma || cari?.adi || '-')}</div>
-                <div class="document-card-detail">
-                    ${cari?.kodu ? `Cari Kodu: ${escapeHTML(cari.kodu)}` : 'Cari kodu bulunmuyor'}
-                    ${cari?.tel || cari?.telefon ? ` · ${escapeHTML(cari.tel || cari.telefon)}` : ''}
-                </div>
-            </div>
-            <div class="document-card">
-                <div class="document-card-label">Belge Referansı</div>
-                <div class="document-card-value">${escapeHTML(line.orderNo || directionLabel)}</div>
-                <div class="document-card-detail">
-                    ${line.orderNo ? `Bağlı İş Emri: ${escapeHTML(line.orderNo)}` : 'Bağlı iş emri bulunmuyor'}
-                </div>
-                ${renderAttachmentPrintLine(fatura)}
-            </div>
-        </div>
-        <div class="section-heading">
-            <h2>Fatura Kalemleri</h2>
-            <span>${escapeHTML(directionLabel)}</span>
-        </div>
-        <table class="invoice-lines">
-            <thead>
-                <tr>
-                    <th>Açıklama</th>
-                    <th class="text-right">Satış Tutarı</th>
-                    <th class="text-right">İskonto</th>
-                    <th class="text-right">KDV</th>
-                    <th class="text-right">Toplam</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td>${escapeHTML(line.description || '-')}</td>
-                    <td class="number-cell">${escapeHTML(formatCurrency(line.gross || 0))}</td>
-                    <td class="number-cell">
-                        ${line.discountAmount ? escapeHTML(`-${formatCurrency(line.discountAmount)}`) : escapeHTML(formatCurrency(0))}
-                        <div class="muted">${escapeHTML(formatPercentLabel(line.discountPercent))}</div>
-                    </td>
-                    <td class="number-cell">
-                        ${escapeHTML(formatCurrency(line.tax || 0))}
-                        <div class="muted">${escapeHTML(formatPercentLabel(line.taxRate))}</div>
-                    </td>
-                    <td class="number-cell"><strong>${escapeHTML(formatCurrency(line.total || 0))}</strong></td>
-                </tr>
-            </tbody>
-        </table>
-        <div class="document-footer-grid">
-            <div class="document-note">
-                <span class="document-note-title">Belge Niteliği</span>
-                Bu çıktı uygulama içi fatura/proforma belgesidir. Resmi e-Fatura/e-Arşiv işlemleri için GİB veya özel entegratör sistemi kullanılmalıdır.
-            </div>
-            <table class="totals-panel" aria-label="Fatura tutar özeti">
-                <tbody>
-                    <tr><td>Satış Tutarı</td><td>${escapeHTML(formatCurrency(line.gross || 0))}</td></tr>
-                    <tr><td>İskonto Oranı</td><td>${escapeHTML(formatPercentLabel(line.discountPercent))}</td></tr>
-                    <tr><td>İskonto Toplamı</td><td>-${escapeHTML(formatCurrency(line.discountAmount || 0))}</td></tr>
-                    <tr><td>Ara Toplam</td><td>${escapeHTML(formatCurrency(line.subTotal || 0))}</td></tr>
-                    <tr><td>KDV Oranı</td><td>${escapeHTML(formatPercentLabel(line.taxRate))}</td></tr>
-                    <tr><td>KDV Toplamı</td><td>${escapeHTML(formatCurrency(line.tax || 0))}</td></tr>
-                    <tr class="total-row"><td>Genel Toplam</td><td>${escapeHTML(formatCurrency(line.total || 0))}</td></tr>
-                </tbody>
-            </table>
-        </div>
+            ['Vade', fatura.vadeTarihi],
+            ['Ödeme', getInvoicePaymentLabel(fatura)]
+        ]), fatura.documentSnapshot?.issuer)}
+        ${getPrintPartyHTML(fatura.tur === 'kesilen' ? 'Müşteri' : 'Tedarikçi', fatura.documentSnapshot?.customer?.adi || fatura.firma || cari?.adi,
+            fatura.documentSnapshot?.customer || { ...cari, vergiNo: fatura.vergiNo || cari?.vergiNo }, referenceHTML)}
+        ${getPrintServiceLineHTML(line.description, line.gross)}
+        <div class="document-footer-grid">${getPrintTotalsHTML(line, 'Fatura tutar özeti')}</div>
+        <div class="document-footnote">${fatura.tur === 'kesilen' ? 'Bilgilendirme amaçlıdır. Resmî fatura yerine geçmez.' : 'Uygulamada kayıtlı alış faturasının bilgi dökümüdür.'}</div>
     `;
 
-    openPrintPreview(title, contentHTML, `
-        .invoice-lines { table-layout: fixed; }
-        .invoice-lines th:nth-child(1) { width: 43%; }
-        .invoice-lines th:nth-child(2) { width: 14%; }
-        .invoice-lines th:nth-child(3) { width: 14%; }
-        .invoice-lines th:nth-child(4) { width: 14%; }
-        .invoice-lines th:nth-child(5) { width: 15%; }
-    `, {
+    openPrintPreview(title, contentHTML, '', {
+        paymentFooter: fatura.tur === 'kesilen',
         share: {
             phone: cari?.tel || cari?.telefon || '',
             customerName: fatura.firma || cari?.adi || '',
@@ -3846,13 +4037,15 @@ window.printList = function(type, selectedOnly = false) {
         });
     }
 
-    const tableHead = report.headers.map(h => `<th>${escapeHTML(h)}</th>`).join('');
+    const numericColumns = new Set(report.headers.flatMap((header, index) =>
+        /tutar|bakiye|fiyat|maliyet|kâr|marj|miktar|maaş|ücret|ağırlık|matrah|kdv|toplam|net satış/i.test(header) && !/durumu/i.test(header) ? [index] : []));
+    const tableHead = report.headers.map((h, index) => `<th scope="col"${numericColumns.has(index) ? ' class="text-right"' : ''}>${escapeHTML(h)}</th>`).join('');
     const tableBody = rows.map(row => {
         const result = profitabilityResults.get(String(row.id));
         const values = reportRowValues(row);
         const cells = values.map((cell, index) => {
             const classes = [];
-            if (isProfitabilityReport && index >= 4 && index <= 7) classes.push('number-cell');
+            if (numericColumns.has(index)) classes.push('number-cell');
             if (result && (index === 6 || index === 7)) {
                 classes.push(result.grossProfit < 0 ? 'print-profit-negative' : 'print-profit-positive');
             }
@@ -3893,13 +4086,12 @@ window.printList = function(type, selectedOnly = false) {
         ${getPrintBrandHTML(report.title, getPrintMetaHTML([
             ['Düzenleme', new Date().toLocaleDateString('tr-TR')],
             ['Kapsam', scopeLabel],
-            ...(report.dateRangeLabel ? [['Aralık', report.dateRangeLabel]] : []),
-            ['Kayıt Sayısı', String(rows.length)]
+            ...(report.dateRangeLabel ? [['Aralık', report.dateRangeLabel]] : [])
         ]))}
         ${profitabilitySummaryHTML}
         <div class="section-heading report-section-heading">
             <h2>Rapor Detayı</h2>
-            <span>${rows.length} kayıt · ${escapeHTML(scopeLabel)}</span>
+            <span>${rows.length} kayıt</span>
         </div>
         <table class="report-list-table report-list-${escapeHTML(type)}">
             <thead><tr>${tableHead}</tr></thead>
@@ -4053,6 +4245,7 @@ window.saveCari = function() {
             kodu: generateSerialNo('cari'),
             ...payload,
             bakiye: 0,
+            ledgerOpeningBalance: 0,
             durum: 'Temiz'
         };
         db.cariler.push(cari);
@@ -4071,6 +4264,7 @@ window.saveCari = function() {
 }
 
 window.editCari = function(id) {
+    if (getDBArray('cariler').some(c => c.id == id && c.systemRole === 'retail')) return alert('Perakende Müşteri sistem hesabıdır. Satışları Hızlı Satış bölümünden yönetin.');
     const cari = db.cariler.find(c => c.id == id);
     if (!cari) return;
 
@@ -4189,6 +4383,7 @@ window.saveStok = function() {
         const cinsi = plainText(document.getElementById('input-stok-cinsi').value);
         const mm = document.getElementById('input-stok-mm').value;
         const miktar = Number(document.getElementById('input-stok-miktar').value || 0);
+        if(document.getElementById('input-stok-kg').dataset.basis==='estimate' && !calculateNewSheetWeight(true)) return;
         const kgRaw = document.getElementById('input-stok-kg').value;
         const kg = Number(kgRaw);
         const en = Number(document.getElementById('input-stok-en').value || 0);
@@ -4198,6 +4393,7 @@ window.saveStok = function() {
         const kritikSeviye = Number(document.getElementById('input-stok-kritik')?.value || 0);
 
         if (!validateModalFields('modal-stok', [
+            { id: 'input-stok-mm', test: value => !!thicknessCodeKey(value), message: 'Geçerli bir sac kalınlığı girin.' },
             { id: 'input-stok-cinsi', test: value => !!plainText(value), message: 'Malzeme cinsi zorunludur.' },
             { id: 'input-stok-miktar', test: value => Number(value || 0) >= 0, message: 'Miktar negatif olamaz.' },
             { id: 'input-stok-kg', test: value => plainText(value) !== '' && Number(value) >= 0, message: 'Geçerli bir ağırlık girin.' },
@@ -4217,7 +4413,7 @@ window.saveStok = function() {
 
         const stok = {
             id: createRecordId(),
-            kodu: generateSerialNo('stok'),
+            kodu: stockCodeForThickness(mm, true),
             cinsi: cinsi,
             mm: mm,
             en,
@@ -4225,7 +4421,9 @@ window.saveStok = function() {
             ebat: `${en || ''}x${boy || ''}`,
             miktar: miktar,
             kg: kg,
+            weightBasis: document.getElementById('input-stok-kg').dataset.basis === 'estimate' ? 'estimate' : 'manual',
             maliyet: maliyet,
+            costUnit: 'kg',
             kritikSeviye: kritikSeviye,
             sahibi: sahibiText,
             sahibiTipi: sahibi,
@@ -4242,7 +4440,8 @@ window.saveStok = function() {
             aciklama: sahibi === 'musteri' ? `${sahibiText} emanet malzeme girişi` : 'Yeni malzeme girişi',
             ref: stok.kodu
         });
-        addAuditLog('Oluşturuldu', 'Stok', stok.id, `${stok.kodu} / ${stok.cinsi} / ${stok.miktar} adet`);
+        if (kg > 0) addStokMovement(stok, { tip: 'Stok Girişi', alan: 'kg', miktar: kg, onceki: 0, sonraki: kg, aciklama: 'Yeni malzeme ağırlığı', ref: stok.kodu });
+        addAuditLog('Oluşturuldu', 'Stok', stok.id, `${stok.kodu} / ${stok.cinsi} / ${stok.miktar} adet / ${kg} KG`);
         
         saveDB();
         closeModal('modal-stok');
@@ -4253,6 +4452,7 @@ window.saveStok = function() {
         document.getElementById('input-stok-mm').value = '';
         document.getElementById('input-stok-miktar').value = '';
         document.getElementById('input-stok-kg').value = '';
+        document.getElementById('input-stok-kg').dataset.basis='';
         document.getElementById('input-stok-en').value = '';
         document.getElementById('input-stok-boy').value = '';
         document.getElementById('input-stok-maliyet').value = '0';
@@ -4266,6 +4466,7 @@ window.saveStok = function() {
 }
 
 window.openStokDuzenleModal = function(id) {
+    if (getDBArray('stoklar').some(s => s.id == id && s.originCutId)) return alert('Kalan parçanın miktarı kesim veya satışla değişir. Hatalı kayıt için Kesim Geçmişi bölümündeki Geri Al işlemini kullanın.');
     const stok = db.stoklar.find(s => s.id === id);
     if (!stok) return;
 
@@ -4285,6 +4486,7 @@ window.openStokDuzenleModal = function(id) {
 
     toggleDuzenleStokCariSelect();
 
+    renderStockCodeHint(true);
     openModal('modal-stok-duzenle');
 };
 
@@ -4305,6 +4507,7 @@ window.updateStok = function() {
         const kritikSeviye = Number(document.getElementById('input-duzenle-stok-kritik')?.value || 0);
 
         if (!validateModalFields('modal-stok-duzenle', [
+            { id: 'input-duzenle-stok-mm', test: value => !!thicknessCodeKey(value), message: 'Geçerli bir sac kalınlığı girin.' },
             { id: 'input-duzenle-stok-cinsi', test: value => !!plainText(value), message: 'Malzeme cinsi zorunludur.' },
             { id: 'input-duzenle-stok-miktar', test: value => Number(value || 0) >= 0, message: 'Miktar negatif olamaz.' },
             { id: 'input-duzenle-stok-kg', test: value => plainText(value) !== '' && Number(value) >= 0, message: 'Geçerli bir ağırlık girin.' },
@@ -4318,15 +4521,29 @@ window.updateStok = function() {
 
         const stok = db.stoklar.find(s => s.id === id);
         if (!stok) return;
+        if(stok.purchaseMovementId)return alert('Alıma bağlı stok doğrudan değiştirilemez. Cari geçmişinden sac alımını düzeltin.');
+        if (stok.originCutId) return alert('Kesimden oluşan parça doğrudan değiştirilemez. Kesim Geçmişi bölümünü kullanın.');
+        if (getDBArray('sacKesimleri').some(c => c.status === 'active' && c.stokId === id) && (Number(stok.en) !== en || Number(stok.boy) !== boy || Number(stok.mm) !== Number(mm) || stok.cinsi !== cinsi || (stok.sahibiTipi || 'biz') !== sahibiTipi || String(stok.cariId || '') !== String(cariId))) return alert('Bu malzeme kesim geçmişine bağlı. Cinsi, ölçüsü ve sahibi değiştirilemez.');
+        if (sahibiTipi === 'musteri' && getDBArray('hizliSatislar').some(s => s.stokId === id && s.status === 'active')) return alert('Bu stokta geçerli hızlı satış var. Sahiplik değişmeden önce ilgili satışları kontrol edin.');
         const reservedQuantity = getReservedStockQuantity(stok.id, 'miktar');
         if (miktar < reservedQuantity) {
             return alert(`Bu malzemeden ${reservedQuantity} adet/plaka aktif iş emirlerine rezerve edildi. Fiziki miktar rezervasyonun altına düşürülemez.`);
         }
+        const reservedKg = getReservedStockQuantity(stok.id, 'kg');
+        if (kg < reservedKg) return alert(`Bu malzemeden ${reservedKg} KG aktif iş emirlerine rezerve edildi. Ağırlık rezervasyonun altına düşürülemez.`);
         const eskiMiktar = Number(stok.miktar) || 0;
+        const eskiKg = Number(stok.kg) || 0;
 
+        if (thicknessCodeKey(stok.mm) !== thicknessCodeKey(mm)) {
+            const oldCode = stok.kodu;
+            stok.kodu = stockCodeForThickness(mm, true);
+            rememberDisplayCode(stok, oldCode);
+            addAuditLog('Güncellendi', 'Stok Kodu', stok.id, `${oldCode} → ${stok.kodu} · Kalınlık düzeltmesi`);
+        }
         stok.cinsi = cinsi;
         stok.mm = mm;
         stok.miktar = miktar;
+        if(Number(stok.kg)!==kg) stok.weightBasis='manual';
         stok.kg = kg;
         stok.en = en;
         stok.boy = boy;
@@ -4336,6 +4553,7 @@ window.updateStok = function() {
         stok.sahibi = sahibiTipi === 'musteri' ? (findCariByReference(cariId)?.adi || 'Müşteri') : 'Biz';
         stok.kritikSeviye = kritikSeviye;
         stok.maliyet = sahibiTipi === 'musteri' ? 0 : maliyet;
+        stok.costUnit='kg';stok.costReviewRequired=false;
         if (roundMoney(eskiMiktar) !== roundMoney(miktar)) {
             addStokMovement(stok, {
                 tip: 'Stok Düzeltme',
@@ -4347,7 +4565,10 @@ window.updateStok = function() {
                 ref: stok.kodu
             });
         }
-        addAuditLog('Güncellendi', 'Stok', stok.id, `${stok.kodu || '-'} / ${stok.cinsi} / ${eskiMiktar} -> ${miktar} adet`);
+        if (roundMoney(eskiKg) !== roundMoney(kg)) {
+            addStokMovement(stok, { tip: 'Stok Düzeltme', alan: 'kg', miktar: roundMoney(kg - eskiKg), onceki: eskiKg, sonraki: kg, aciklama: 'Malzeme düzenleme ekranından ağırlık değiştirildi', ref: stok.kodu });
+        }
+        addAuditLog('Güncellendi', 'Stok', stok.id, `${stok.kodu || '-'} / ${stok.cinsi} / ${eskiMiktar} -> ${miktar} adet / ${eskiKg} -> ${kg} KG`);
 
         saveDB();
         closeModal('modal-stok-duzenle');
@@ -4360,9 +4581,12 @@ window.updateStok = function() {
 };
 
 window.deleteStok = function(id) {
+    if(getDBArray('stoklar').some(s=>s.id===id&&s.purchaseMovementId))return alert('Bu stok sac alımına bağlı. Cari geçmişinden alımı geri alın.');
+    if (isSheetCutStockLinked(id)) return alert('Bu malzeme kesim geçmişine bağlı olduğu için silinemez.');
     const stok = db.stoklar.find(s => s.id === id);
     if (!stok) return alert('Stok kaydı bulunamadı.');
 
+    if (getDBArray('hizliSatislar').some(item => item.stokId == id)) return alert('Bu stok hızlı satış geçmişine bağlı olduğu için silinemez.');
     const linkedOrders = getDBArray('isEmirleri').filter(item => item.stokId == id).length;
     const linkedQuotes = getDBArray('teklifler').filter(item => item.stokId == id).length;
     if (linkedOrders || linkedQuotes) {
@@ -4374,6 +4598,8 @@ window.deleteStok = function(id) {
     }
 
     confirmAction('Bu malzeme kaydı ve mevcut stok miktarı silinsin mi?', () => {
+        if (isSheetCutStockLinked(id)) return alert('Bu malzeme kesim geçmişine bağlı olduğu için silinemez.');
+        if (getDBArray('hizliSatislar').some(item => item.stokId == id)) return alert('Bu stok hızlı satış geçmişine bağlı olduğu için silinemez.');
         addStokMovement(stok, {
             tip: 'Stok Silindi',
             alan: 'miktar',
@@ -4383,6 +4609,7 @@ window.deleteStok = function(id) {
             aciklama: 'Malzeme kaydı silindi',
             ref: stok.kodu || ''
         });
+        if (Number(stok.kg) > 0) addStokMovement(stok, { tip: 'Stok Silindi', alan: 'kg', miktar: -Number(stok.kg), onceki: Number(stok.kg), sonraki: 0, aciklama: 'Malzeme kaydı silindi', ref: stok.kodu || '' });
         db.stoklar = db.stoklar.filter(s => s.id !== id);
         addAuditLog('Silindi', 'Stok', stok.id, `${stok.kodu || '-'} / ${stok.cinsi || 'Malzeme'}`);
         saveDB();
@@ -4398,6 +4625,7 @@ window.toggleFireCariSelect = function() {
 };
 
 window.openFireModal = function(id = '') {
+    if (getDBArray('fireler').some(f => f.id == id && f.cutId)) return alert('Bu hurda kesim kaydına bağlı. Kesim Geçmişi bölümünden işlem yapın.');
     const record = id ? getDBArray('fireler').find(item => String(item.id) === String(id)) : null;
     const orderSelect = document.getElementById('input-fire-is-emri');
     if (orderSelect) {
@@ -4438,6 +4666,7 @@ window.saveFire = function() {
     try {
         const id = document.getElementById('input-fire-id')?.value || '';
         const existing = id ? getDBArray('fireler').find(item => String(item.id) === String(id)) : null;
+        if (existing?.cutId) return alert('Kesime bağlı hurda doğrudan değiştirilemez.');
         const sahibi = document.getElementById('input-fire-sahibi').value;
         const cariId = document.getElementById('input-fire-cari').value;
         const cinsi = plainText(document.getElementById('input-fire-cinsi').value);
@@ -4515,6 +4744,7 @@ window.saveFire = function() {
 }
 
 window.deleteFire = function(id) {
+    if (getDBArray('fireler').some(f => f.id == id && f.cutId)) return alert('Kesime bağlı hurda doğrudan silinemez. Kesim Geçmişi bölümünü kullanın.');
     const fire = db.fireler.find(f => f.id === id);
     if (!fire) return alert('Fire kaydı bulunamadı.');
     confirmAction('Bu fire/parça kaydı silinsin mi?', () => {
@@ -4599,6 +4829,9 @@ window.openAyarlarModal = function() {
     document.getElementById('input-ayar-adres').value = db.ayarlar.adres || '';
     const numbering = mergeNumberingSettings(db.ayarlar.numaralandirma);
     [
+        ['input-num-hareket-prefix', 'hareket'],
+        ['input-num-satis-prefix', 'hizliSatis'],
+        ['input-num-kesim-prefix', 'sacKesim'],
         ['input-num-cari-prefix', 'cari'],
         ['input-num-stok-prefix', 'stok'],
         ['input-num-teklif-prefix', 'teklif'],
@@ -4621,12 +4854,14 @@ window.openAyarlarModal = function() {
     if (resetInput) resetInput.value = '';
     if (resetButton) resetButton.disabled = true;
     renderUpdateState();
+    renderNumberingExamples();
     setSettingsTab('company');
     openModal('modal-ayarlar');
 }
 
 window.setSettingsTab = function(tab = 'company') {
     const validTab = ['company', 'numbering', 'backup', 'update'].includes(tab) ? tab : 'company';
+    if (validTab === 'backup') refreshBackupStatus();
     document.querySelectorAll('#modal-ayarlar .settings-tab').forEach(button => {
         const active = button.id === `settings-tab-${validTab}`;
         button.classList.toggle('active', active);
@@ -4652,8 +4887,12 @@ window.saveAyarlar = function() {
         return alert('Makine ve işçilik maliyetleri negatif olamaz.');
     }
 
+    if ([...document.querySelectorAll('[id^="input-num-"]')].some(el => !/^[A-Z][A-Z0-9]{0,11}$/.test(el.value.trim().toUpperCase()))) return alert('Kod ön ekleri 1–12 harf/rakam olmalı ve harfle başlamalıdır.');
     const currentNumbering = mergeNumberingSettings(db.ayarlar?.numaralandirma);
     [
+        ['input-num-hareket-prefix', 'hareket'],
+        ['input-num-satis-prefix', 'hizliSatis'],
+        ['input-num-kesim-prefix', 'sacKesim'],
         ['input-num-cari-prefix', 'cari'],
         ['input-num-stok-prefix', 'stok'],
         ['input-num-teklif-prefix', 'teklif'],
@@ -4693,6 +4932,7 @@ function getCariMovementFormType(islem) {
 }
 
 function canEditCariMovement(islem) {
+    if(islem?.sheetPurchase) return !islem.reversedBy;
     const type = getCariMovementFormType(islem);
     return canReverseCariMovement(islem) && ['tahsilat', 'mal_alimi', 'odeme_yaptik'].includes(type);
 }
@@ -4706,17 +4946,19 @@ function resetIslemModalState(id, adi) {
     setValue('input-islem-cari-id', id);
     setValue('input-islem-firma-adi', adi);
     setValue('input-islem-payment-order-id');
+    setValue('input-islem-payment-invoice-id');
     setValue('input-islem-aciklama');
     setValue('input-islem-fatura-no');
     setValue('input-islem-tutar');
     setValue('input-islem-kasa');
     setValue('input-islem-ek-not');
     resetAttachmentInputs('input-islem-ek', 'input-islem-ek-not');
+    resetSheetPurchaseForm();
 
     const typeSelect = document.getElementById('input-islem-tipi');
     if (typeSelect) {
         [...typeSelect.options].forEach(option => { option.disabled = false; });
-        typeSelect.value = 'tahsilat';
+        typeSelect.disabled=false;typeSelect.value = 'tahsilat';
     }
     const editNotice = document.getElementById('islem-edit-notice');
     if (editNotice) editNotice.hidden = true;
@@ -4727,6 +4969,7 @@ function resetIslemModalState(id, adi) {
 }
 
 window.openIslemModal = function(id, adi) {
+    if (getDBArray('cariler').some(c => c.id == id && c.systemRole === 'retail')) return openQuickSale();
     resetIslemModalState(id, adi);
     document.getElementById('modal-islem-title').textContent = adi + " - İşlem Ekle";
     const orderSelect = document.getElementById('input-islem-order-id');
@@ -4742,6 +4985,7 @@ window.openIslemModal = function(id, adi) {
 window.openEditCariMovement = function(id) {
     const original = getDBArray('islemler').find(item => String(item.id) === String(id));
     if (!original) return alert('Düzeltilecek cari hareketi bulunamadı.');
+    if(original.sheetPurchase)return openEditSheetPurchase(original);
     if (!canEditCariMovement(original)) {
         const owner = getCariMovementOwner(original);
         return alert(owner
@@ -4777,6 +5021,11 @@ window.openEditCariMovement = function(id) {
     const saveButton = document.getElementById('btn-islem-save');
     if (saveButton) saveButton.innerHTML = '<i class="fa-solid fa-pen-to-square" aria-hidden="true"></i> Düzeltmeyi Kaydet';
     updateIslemTipiInfo();
+    // The options renderer also restores unambiguous legacy work-order links.
+    if (original.paymentInvoiceId != null) {
+        document.getElementById('input-islem-payment-invoice-id').value = original.paymentInvoiceId;
+    }
+    updatePaymentInvoiceSummary();
     markModalFormClean('modal-islem');
 };
 
@@ -4818,6 +5067,10 @@ function getCurrentIslemCari() {
 }
 
 function getTahsilEdilebilirBorc(cari) {
+    const invoice = getSelectedPaymentInvoice();
+    if (invoice && invoiceMatchesCari(invoice, cari?.id, cari?.adi)) {
+        return getInvoicePaymentSummary(invoice, document.getElementById('input-islem-edit-id')?.value).remaining ?? 0;
+    }
     let effectiveBalance = Number(cari?.bakiye) || 0;
     const editId = document.getElementById('input-islem-edit-id')?.value || '';
     if (editId) {
@@ -4854,6 +5107,8 @@ window.updateTahsilatSummary = function() {
     const tutar = roundMoney(parseFloat(document.getElementById('input-islem-tutar')?.value || '0') || 0);
     const kalan = roundMoney(Math.max(borc - tutar, 0));
 
+    const label = document.getElementById('tahsilat-balance-label');
+    if (label) label.textContent = getSelectedPaymentInvoice() ? 'Faturanın Kalan Tutarı' : 'Müşterinin Toplam Borcu';
     const currentEl = document.getElementById('tahsilat-current-balance');
     const enteredEl = document.getElementById('tahsilat-entered-amount');
     const remainingEl = document.getElementById('tahsilat-remaining-balance');
@@ -4877,7 +5132,7 @@ function getCashMovementDelta(movement) {
 function saveCorrectedCariMovement(options = {}) {
     const {
         original, cari, tip, tipText, tutar, bakiyeArtisi,
-        aciklama, kasaId, relatedOrder, isSuccess, isGelir, ek
+        aciklama, kasaId, relatedOrder, paymentInvoice, isSuccess, isGelir, ek
     } = options;
     if (!original || !cari) return false;
 
@@ -4932,6 +5187,7 @@ function saveCorrectedCariMovement(options = {}) {
             tutar,
             bakiyeDegisimi: bakiyeArtisi,
             orderId: relatedOrder?.id || null,
+            paymentInvoiceId: paymentInvoice?.id || null,
             orderNo: relatedOrder?.orderNo || '',
             isSuccess,
             isGelir,
@@ -4990,6 +5246,7 @@ function saveCorrectedCariMovement(options = {}) {
 }
 
 window.saveIslem = function() {
+    if(document.getElementById('input-islem-tipi').value==='sac_alimi') return saveSheetPurchase();
     const editId = document.getElementById('input-islem-edit-id')?.value || '';
     const unlock = beginModalSubmit('modal-islem', editId ? 'Düzeltiliyor...' : 'Kaydediliyor...');
     if (!unlock) return;
@@ -5007,7 +5264,9 @@ window.saveIslem = function() {
         const linkedOrder = linkedOrderId ? getDBArray('isEmirleri').find(o => o.id == linkedOrderId) : null;
         const paymentOrderId = tip === 'tahsilat' ? (document.getElementById('input-islem-payment-order-id')?.value || '') : '';
         const paymentOrder = paymentOrderId ? getDBArray('isEmirleri').find(o => o.id == paymentOrderId) : null;
-        const relatedOrder = linkedOrder || paymentOrder;
+        const paymentInvoice = getSelectedPaymentInvoice();
+        const invoiceOrder = paymentInvoice?.orderId ? getDBArray('isEmirleri').find(order => String(order.id) === String(paymentInvoice.orderId)) : null;
+        const relatedOrder = linkedOrder || (paymentInvoice ? invoiceOrder : paymentOrder);
         const tutar = linkedOrder ? roundMoney(linkedOrder.total) : parseFloat(document.getElementById('input-islem-tutar').value);
         const selectedFile = document.getElementById('input-islem-ek')?.files?.[0] || null;
         const newAttachment = getAttachmentFromInputs('input-islem-ek', 'input-islem-ek-not');
@@ -5031,6 +5290,16 @@ window.saveIslem = function() {
 
         const cari = db.cariler.find(c => c.id === cariId);
         if(!cari) return alert("Cari bulunamadı!");
+        if (cari.systemRole === 'retail') return alert('Perakende hesabına kayıt için Hızlı Satış bölümünü kullanın. Veresiye satış için ayrı cari açın.');
+        if (document.getElementById('input-islem-payment-invoice-id')?.value && !paymentInvoice) return alert('Seçilen fatura artık bulunamıyor. Fatura seçimini yenileyin.');
+        if (paymentInvoice) {
+            const expectedType = paymentInvoice.tur === 'kesilen' ? 'tahsilat' : 'odeme_yaptik';
+            if (tip !== expectedType || !invoiceMatchesCari(paymentInvoice, cari.id, cari.adi)) return alert('Fatura, seçilen cari ve işlem tipiyle eşleşmiyor.');
+            const summary = getInvoicePaymentSummary(paymentInvoice, original?.id);
+            if (summary.legacy) return alert('Fatura detayından önceki ödeme bilgisini tamamlayın.');
+            if (tutar > summary.remaining) return alert(`Bu faturanın kalan tutarı ${formatCurrency(summary.remaining)}. Fazla tutarı ayrı cari işlemi olarak kaydedin.`);
+        }
+
 
         let isSuccess = false;
         let tipText = '';
@@ -5073,6 +5342,7 @@ window.saveIslem = function() {
                 aciklama,
                 kasaId,
                 relatedOrder,
+                paymentInvoice,
                 isSuccess,
                 isGelir,
                 ek
@@ -5089,6 +5359,7 @@ window.saveIslem = function() {
             tutar: tutar,
             bakiyeDegisimi: bakiyeArtisi,
             orderId: relatedOrder?.id || null,
+            paymentInvoiceId: paymentInvoice?.id || null,
             orderNo: relatedOrder?.orderNo || '',
             isSuccess: isSuccess,
             isGelir: isGelir,
@@ -5105,13 +5376,19 @@ window.saveIslem = function() {
                 kaynak: 'cari-islem',
                 refId: hareket?.id || null
             });
-            if (!cashMovement) return alert('Kasa/banka hareketi oluşturulamadı. İşlem kaydedilmedi.');
+            if (!cashMovement) {
+                db.islemler = getDBArray('islemler').filter(item => String(item.id) !== String(hareket?.id));
+                cari.bakiye = eskiBakiye;
+                updateCariStatus(cari);
+                return alert('Kasa/banka hareketi oluşturulamadı. İşlem kaydedilmedi.');
+            }
             if (hareket) hareket.kasaHareketId = cashMovement.id;
         }
 
         if (tip === 'fatura_kes') {
             if (!db.faturalar) db.faturalar = [];
             const faturaId = createRecordId();
+            if (hareket) hareket.faturaId = faturaId;
             db.faturalar.push({
                 id: faturaId,
                 tur: 'kesilen',
@@ -5127,6 +5404,9 @@ window.saveIslem = function() {
                 orderId: linkedOrder?.id || null,
                 orderNo: linkedOrder?.orderNo || '',
                 ek,
+                paymentTrackingVersion: 1,
+                odemeDurumu: 'odenmedi',
+                ...(linkedOrder ? { matrah: getOrderStatementAmounts(linkedOrder).subTotal, kdvOrani: getOrderStatementAmounts(linkedOrder).taxRate, kdvTutari: getOrderStatementAmounts(linkedOrder).tax, discountAmount: linkedOrder.discountAmount, discountPercent: linkedOrder.discountPercent } : {}),
                 kaynak: linkedOrder ? 'is-emri-faturasi' : 'cari-islem-faturasi'
             });
         }
@@ -5233,7 +5513,7 @@ window.openDetayModal = function(id) {
         
         tbody.innerHTML += `<tr>
             <td>${escapeHTML(islem.tarih)}</td>
-            <td><strong>${escapeHTML(islem.tip)}</strong>${islem.aciklama ? `<br><span style="font-size:11px; color:var(--text-muted);">${escapeHTML(islem.aciklama)}</span>` : ''}</td>
+            <td><strong>${escapeHTML(islem.tip)}</strong>${islem.movementNo ? '<br><span class="dashboard-muted-text">'+escapeHTML(islem.movementNo)+'</span>' : ''}${islem.aciklama ? `<br><span style="font-size:11px; color:var(--text-muted);">${escapeHTML(islem.aciklama)}</span>` : ''}</td>
             <td class="${colorClass}" style="text-align:right; font-weight:600;">${islemSign}${formatCurrency(islem.tutar)}</td>
         </tr>`;
     });
@@ -5247,7 +5527,7 @@ window.openDetayModal = function(id) {
     } else {
         carininStoklari.forEach(s => {
             stokTbody.innerHTML += `<tr>
-                <td>${escapeHTML(s.kodu)}</td>
+                <td>${escapeHTML(getStockDisplayCode(s))}</td>
                 <td>${escapeHTML(s.cinsi)}</td>
                 <td>${escapeHTML(s.mm)} mm</td>
                 <td><strong>${s.miktar} Plaka</strong></td>
@@ -5276,7 +5556,7 @@ window.openStatModal = function(type) {
         if (kicker) kicker.textContent = 'Finansal hareketler';
         title.textContent = 'Toplam Gelir Detayları';
         thead.innerHTML = '<tr><th>Tarih</th><th>Firma</th><th>İşlem</th><th>Tutar</th></tr>';
-        window.currentStatData = (db.islemler || []).filter(i => i.isGelir).reverse();
+        window.currentStatData = (db.islemler || []).filter(isActiveIncomeMovement).reverse();
     } else if (type === 'alacak') {
         if (kicker) kicker.textContent = 'Finansal dağılım';
         title.textContent = 'Kimlerden Alacaklıyız?';
@@ -5338,7 +5618,7 @@ window.renderStatModal = function() {
         ? String(document.getElementById('stat-detail-search')?.value || '').trim().toLocaleLowerCase('tr-TR')
         : '';
     const filteredData = search
-        ? window.currentStatData.filter(cari => [cari.adi, cari.kodu, cari.tel, cari.telefon]
+        ? window.currentStatData.filter(cari => [cari.adi, codeSearchText(cari), cari.tel, cari.telefon]
             .some(value => String(value || '').toLocaleLowerCase('tr-TR').includes(search)))
         : window.currentStatData;
     const itemsPerPage = getListPageSize('stat-detail');
@@ -5444,6 +5724,8 @@ window.navigateTo = function(page, tab) {
 
 function getCariMovementOwner(islem) {
     if (!islem) return '';
+    if(islem.sheetPurchase || islem.sheetPurchasePaymentFor) return 'Sac Alımı';
+    if (islem.quickSaleId) return 'Hızlı Satış';
     if (islem.orderId && !isIncomeMovement(islem)) return 'İş Emri';
     if (islem.faturaId || getDBArray('faturalar').some(item => String(item.cariIslemId) === String(islem.id))) return 'Fatura';
     if (getDBArray('cekSenetler').some(item => String(item.cariIslemId) === String(islem.id))) return 'Çek / Senet';
@@ -5452,12 +5734,14 @@ function getCariMovementOwner(islem) {
 }
 
 function canReverseCariMovement(islem) {
+    if(islem?.sheetPurchase) return !islem.reversedBy;
     return !!islem && !islem.reversedBy && !islem.reversalOf && !getCariMovementOwner(islem);
 }
 
 window.reverseCariMovement = function(id) {
     const original = getDBArray('islemler').find(item => String(item.id) === String(id));
     if (!original) return alert('Cari hareketi bulunamadı.');
+    if(original.sheetPurchase)return cancelSheetPurchase(original.id);
     if (original.reversedBy) return alert('Bu cari hareketi daha önce geri alınmış.');
     if (original.reversalOf) return alert('Ters kayıt yeniden geri alınamaz.');
 
@@ -5467,10 +5751,17 @@ window.reverseCariMovement = function(id) {
     const cari = findCariByReference(original.cariId, original.firma);
     if (!cari) return alert('Cari bulunamadığı için hareket geri alınamadı.');
     confirmAction(`${original.tip || 'Cari işlemi'} geri alınsın mı?\n\nCari ve kasa/banka etkisi ters kayıtla düzeltilecek.`, () => {
+        if (!getDBArray('islemler').includes(original) || !canReverseCariMovement(original) ||
+            findCariByReference(original.cariId, original.firma) !== cari) {
+            return alert('Bu işlem değişti veya daha önce geri alındı. Listeyi yenileyin.');
+        }
         const originalDelta = roundMoney(Number(original.bakiyeDegisimi) || 0);
         const originalCash = original.kasaHareketId
             ? getDBArray('kasaHareketleri').find(item => String(item.id) === String(original.kasaHareketId))
             : null;
+        if (original.kasaHareketId && (!originalCash || originalCash.reversedBy)) {
+            return alert('Bağlı kasa/banka hareketi bulunamadı veya daha önce geri alındı. İşlem değiştirilmedi.');
+        }
         const reversal = addCariMovement(cari, {
             tip: `İşlem Geri Alındı (${original.tip || 'Cari İşlem'})`,
             aciklama: `Hatalı işlem ters kayıtla geri alındı.${original.aciklama ? ` Önceki açıklama: ${original.aciklama}` : ''}`,
@@ -5509,14 +5800,19 @@ window.updateIslemTipiInfo = function() {
     const tip = document.getElementById('input-islem-tipi')?.value;
     const infoEl = document.getElementById('islem-tipi-info');
     const faturaContainer = document.getElementById('fatura-no-container');
-    const faturaOrderContainer = document.getElementById('fatura-order-container');
+    const faturaOrderContainer = document.getElementById('islem-fatura-order-container');
     const kasaContainer = document.getElementById('islem-kasa-container');
     if (!infoEl) return;
+    const buying=tip==='sac_alimi';document.getElementById('sheet-purchase-fields').hidden=!buying;
+    const amountInput=document.getElementById('input-islem-tutar');if(!buying&&amountInput.dataset.turkishMoney==='true'){const amount=parseSheetPurchaseDocumentTotal(amountInput.value);amountInput.value=Number.isFinite(amount)?String(amount):'';}amountInput.readOnly=false;amountInput.type=buying?'text':'number';amountInput.inputMode=buying?'decimal':'';amountInput.dataset.turkishMoney=buying?'true':'false';document.getElementById('sheet-purchase-amount-help').hidden=!buying;
+    document.getElementById('input-islem-tutar-label').textContent=buying?'Kaydedilecek toplam alış tutarı (₺)':'Tutar (₺)';
+    if(buying)updateSheetPurchaseSummary();
     const msgs = {
         'tahsilat': '🟢 Müşteri size ödeme yaptı. Müşterinin borcu azalacak.',
         'fatura_kes': '🟡 Teslim edilmiş iş seçerseniz tutar otomatik gelir ve cari borç ikinci kez artmaz. Serbest fatura seçerseniz yeni borç oluşturur.',
+        'sac_alimi': 'Alınan sac stoğa girer; alış tutarı tedarikçiye borç olarak kaydedilir.',
         'mal_alimi': '🔴 Firmadan mal/hizmet aldınız. Siz o firmaya borçlandınız.',
-        'odeme_yaptik': '🟢 Firmaya ödeme yaptınız. O firmaya olan borcunuz kapandı.'
+        'odeme_yaptik': '🟢 Firmaya ödeme yaptınız. O firmaya olan borcunuz azalacak.'
     };
     infoEl.textContent = msgs[tip] || '';
     infoEl.style.color = (tip === 'mal_alimi' || tip === 'fatura_kes') ? 'var(--warning)' : 'var(--success)';
@@ -5530,6 +5826,7 @@ window.updateIslemTipiInfo = function() {
     if (kasaContainer) {
         kasaContainer.style.display = (tip === 'tahsilat' || tip === 'odeme_yaptik') ? 'block' : 'none';
     }
+    renderPaymentInvoiceOptions();
     updateTahsilatSummary();
 };
 
@@ -5643,7 +5940,7 @@ function renderCariler() {
     renderPaymentPlans();
 
     // Populate all customer dropdowns
-    const aktifCariler = cariler.filter(c => !c.isPasif);
+    const aktifCariler = cariler.filter(c => !c.isPasif && c.systemRole !== 'retail');
     const options = '<option value="">Seçiniz...</option>' + 
         '<option value="internal" style="font-weight:bold; color:var(--primary);">--- Kendi İşletmem (Firma İçi Üretim) ---</option>' +
         aktifCariler.map(c => `<option value="${c.id}">${escapeHTML(c.adi)} (${escapeHTML(c.kodu)})</option>`).join('');
@@ -5676,6 +5973,7 @@ window.openCariDetay = function(id) {
     const cari = db.cariler.find(c => c.id == id);
     if (!cari) return;
 
+    renderCariPaymentOverview(cari.id);
     document.getElementById('ekstre-cari-adi').textContent = cari.adi;
     document.getElementById('ekstre-cari-kodu').textContent = cari.kodu;
     
@@ -5851,6 +6149,10 @@ function parseTRDate(dateStr) {
     return new Date(text);
 }
 
+function isActiveIncomeMovement(islem) {
+    return !islem.reversedBy && !islem.reversalOf && isIncomeMovement(islem);
+}
+
 function isIncomeMovement(islem) {
     const tip = normalizeLookupText(islem?.tip || '');
     return islem?.isGelir === true || tip.includes('tahsilat') || tip.includes('gelen');
@@ -5958,13 +6260,47 @@ function orderReservesStock(order) {
     return order?.stokDusuldu !== true && (status === 'Beklemede' || status === 'Üretimde');
 }
 
+function isDimensionedSheet(stock) {
+    return [stock?.en,stock?.boy,stock?.mm].every(value=>Number.isFinite(Number(value)) && Number(value)>0);
+}
+// A physical sheet has one count and one weight; both must move together.
+function secondaryStockUsage(stock, field, quantity) {
+    quantity=Number(quantity);
+    if(!Number.isFinite(quantity)||quantity<=0)throw new Error('Geçerli stok miktarı girin.');
+    const count=Number(stock.miktar)||0,kg=Number(stock.kg)||0;
+    if(field==='miktar') {
+        if((isDimensionedSheet(stock)||stock.originCutId)&&!Number.isSafeInteger(quantity))throw new Error('Plaka adedi tam sayı olmalıdır. Bir kısmını kesmek için ölçüyle kesimi kullanın.');
+        return count>0&&kg>0 ? {field:'kg',quantity:roundMoney(kg*quantity/count)} : null;
+    }
+    if(field==='kg'&&isDimensionedSheet(stock)&&count>0&&kg>0) {
+        const plates=Math.round(quantity*count/kg);
+        if(plates<1||Math.abs(roundMoney(plates*kg/count)-quantity)>.001)throw new Error('Bu KG miktarı tam plaka adedine karşılık gelmiyor. Sacın bir kısmını kullanmak için Ölçüyle Kes / Kalan Parça işlemini seçin.');
+        return {field:'miktar',quantity:plates};
+    }
+    return null;
+}
+function validateStockUsage(stock, field, quantity, excludeOrderId=null) {
+    if(!stock||stock.isPasif||stock.cutVoided)throw new Error('Aktif stok kaydı bulunamadı.');
+    if(!['miktar','kg'].includes(field)||!Number.isFinite(Number(quantity))||Number(quantity)<=0)throw new Error('Geçerli stok miktarı ve birimi girin.');
+    const secondary=secondaryStockUsage(stock,field,quantity);
+    for(const usage of [{field,quantity},secondary].filter(Boolean)) {
+        if(usage.quantity>getAvailableStockQuantity(stock,usage.field,excludeOrderId))throw new Error('Kullanılabilir stok yetersiz. Diğer işlere ayrılan plaka ve KG miktarı birlikte korunur.');
+    }
+    return secondary;
+}
 function getReservedStockQuantity(stokId, field = 'miktar', excludeOrderId = null) {
     if (stokId === undefined || stokId === null || String(stokId) === '0') return 0;
+    const stock=getDBArray('stoklar').find(s=>String(s.id)===String(stokId));
+    const perPlate=Number(stock?.miktar)>0&&Number(stock?.kg)>0 ? Number(stock.kg)/Number(stock.miktar) : 0;
     return roundMoney(getDBArray('isEmirleri').reduce((total, order) => {
         if (!orderReservesStock(order) || String(order.stokId) !== String(stokId)) return total;
         if (excludeOrderId !== null && String(order.id) === String(excludeOrderId)) return total;
         const usage = getOrderStockUsage(order);
-        return usage?.field === field ? total + usage.quantity : total;
+        if(!usage)return total;
+        if(usage.field===field)return total+usage.quantity;
+        if(!perPlate)return total;
+        const converted=field==='kg' ? usage.quantity*perPlate : usage.quantity/perPlate;
+        return total+(field==='miktar'&&isDimensionedSheet(stock)?Math.ceil(converted-1e-8):converted);
     }, 0));
 }
 
@@ -5997,7 +6333,7 @@ function getQuoteReservationOrderId() {
     return getQuoteFingerprint(formState) === getQuoteFingerprint(quote) ? quote.orderId : null;
 }
 
-window.updateQuoteMaterials = function() {
+window.updateQuoteMaterials = function(retainStockId = null) {
     const customerId = document.getElementById('quote-customer').value;
     const islemTipi = document.getElementById('quote-type')?.value || 'lazer';
     const stockField = islemTipi === 'hammadde' ? 'kg' : 'miktar';
@@ -6005,6 +6341,11 @@ window.updateQuoteMaterials = function() {
     const selectMaterial = document.getElementById('quote-material');
     if (!selectMaterial) return;
     const previousValue = selectMaterial.value;
+    const savedQuote = getDBArray('teklifler').find(q => q.id === activeQuoteId);
+    const retainedId = retainStockId ?? savedQuote?.stokId;
+    const reservationOrderId = getQuoteReservationOrderId();
+    const visible = stock => !stock.isPasif && !stock.cutVoided &&
+        (getAvailableStockQuantity(stock, stockField, reservationOrderId) > 0 || String(stock.id) === String(retainedId));
 
     selectMaterial.innerHTML = '';
     const defaultOption = document.createElement('option');
@@ -6013,21 +6354,21 @@ window.updateQuoteMaterials = function() {
     selectMaterial.appendChild(defaultOption);
     
     // Add our materials
-    db.stoklar.filter(s => s.sahibiTipi === 'biz' || !s.sahibiTipi).forEach(stok => {
+    db.stoklar.filter(s => visible(s) && (s.sahibiTipi === 'biz' || !s.sahibiTipi)).forEach(stok => {
         const option = document.createElement('option');
         option.value = stok.id;
         const available = getAvailableStockQuantity(stok, stockField);
-        option.textContent = `[BİZ] ${plainText(stok.cinsi)} (${plainText(stok.mm)}mm) - Kullanılabilir: ${available} ${stockUnit} - ${formatCurrency(stok.maliyet)}/plaka`;
+        option.textContent = `[${stok.originCutId ? 'KALAN PARÇA' : 'BİZ'}] ${getStockDisplayCode(stok)} ${plainText(stok.cinsi)} (${plainText(stok.mm)}mm · ${plainText(stok.ebat || '')}) - Kullanılabilir: ${available} ${stockUnit} - ${formatCurrency(stok.maliyet)}/KG`;
         selectMaterial.appendChild(option);
     });
 
     // Add this customer's materials
     if (customerId) {
-        db.stoklar.filter(s => s.sahibiTipi === 'musteri' && s.cariId == customerId).forEach(stok => {
+        db.stoklar.filter(s => visible(s) && s.sahibiTipi === 'musteri' && s.cariId == customerId).forEach(stok => {
             const option = document.createElement('option');
             option.value = stok.id;
             const available = getAvailableStockQuantity(stok, stockField);
-            option.textContent = `[EMANET] ${plainText(stok.cinsi)} (${plainText(stok.mm)}mm) - Kullanılabilir: ${available} ${stockUnit}`;
+            option.textContent = `[EMANET${stok.originCutId ? ' PARÇA' : ''}] ${getStockDisplayCode(stok)} ${plainText(stok.cinsi)} (${plainText(stok.mm)}mm · ${plainText(stok.ebat || '')}) - Kullanılabilir: ${available} ${stockUnit}`;
             selectMaterial.appendChild(option);
         });
     }
@@ -6042,7 +6383,7 @@ function renderStoklar() {
         const tbody = document.getElementById('inventory-tbody');
         if (!tbody) return;
 
-        const filteredStoklar = applyListSort('inventory', getFilteredStoklarForReport(), {
+        const filteredStoklar = applyListSort('inventory', getFilteredStoklarForReport().filter(s => !s.cutVoided), {
             code: item => item.kodu || '',
             material: item => item.cinsi || '',
             thickness: item => Number(item.mm) || 0,
@@ -6050,7 +6391,8 @@ function renderStoklar() {
             quantity: item => Number(item.miktar) || 0,
             weight: item => Number(item.kg) || 0,
             owner: item => item.sahibi || '',
-            cost: item => Number(item.maliyet) || 0
+            cost: item => Number(item.maliyet) || 0,
+            totalCost: item => getStockTotalCost(item)
         });
         window.pageInventory = window.pageInventory || 1;
         const itemsPerPage = getListPageSize('inventory');
@@ -6071,11 +6413,13 @@ function renderStoklar() {
             const kritikMi = kritikSeviye > 0 && trackedQuantity.value <= kritikSeviye;
             const reservedPlates = getReservedStockQuantity(stok.id, 'miktar');
             const availablePlates = getAvailableStockQuantity(stok, 'miktar');
+            const reservedKg = getReservedStockQuantity(stok.id, 'kg');
+            const availableKg = getAvailableStockQuantity(stok, 'kg');
             return `
             <tr>
                 ${renderSelectionCell('inventory', stok.id)}
-                <td style="width:80px;"><span class="badge" style="background:rgba(69, 123, 157, 0.2); color:var(--secondary); border:1px solid var(--secondary);">${escapeHTML(stok.kodu || '-')}</span></td>
-                <td><strong>${escapeHTML(stok.cinsi || '-')}</strong></td>
+                <td style="width:80px;"><span class="badge" style="background:rgba(69, 123, 157, 0.2); color:var(--secondary); border:1px solid var(--secondary);">${escapeHTML(stok.kodu || '-')}</span>${stok.partNo ? '<br><span class="dashboard-muted-text">Parça '+escapeHTML(stok.partNo)+'</span>' : ''}</td>
+                <td><strong>${escapeHTML(stok.cinsi || '-')}</strong>${stok.originCutId ? '<br><span class="badge info">Kalan Parça</span>' : ''}</td>
                 <td style="text-align:center;">${escapeHTML(stok.mm || '-')} mm</td>
                 <td style="color:var(--text-muted);">${escapeHTML(stok.ebat || '-')}</td>
                 <td style="text-align:center;">
@@ -6083,15 +6427,17 @@ function renderStoklar() {
                     ${reservedPlates > 0 ? `<br><span class="dashboard-muted-text">Rezerve: ${reservedPlates} | Kullanılabilir: ${availablePlates}</span>` : ''}
                     ${kritikSeviye > 0 ? `<br><span class="dashboard-muted-text">Kritik: ${kritikSeviye} ${trackedQuantity.unit}</span>` : ''}
                 </td>
-                <td style="text-align:center;"><span style="color:var(--success); font-weight:600;">${stok.kg || 0} KG</span></td>
+                <td style="text-align:center;"><span style="color:var(--success); font-weight:600;">${stok.kg || 0} KG</span>${stok.weightBasis === 'estimate' ? '<small class="text-muted" style="display:block">Tahmini</small>' : ''}${reservedKg > 0 ? `<br><span class="dashboard-muted-text">Rezerve: ${reservedKg} KG | Kullanılabilir: ${availableKg} KG</span>` : ''}</td>
                 <td style="text-align:center;"><span class="badge ${stok.sahibiTipi === 'musteri' ? 'info' : 'success'}">${escapeHTML(stok.sahibi || 'Biz')}</span></td>
-                <td style="text-align:right; font-weight:600;">${stok.sahibiTipi === 'musteri' ? '-' : formatCurrency(stok.maliyet)}</td>
+                <td style="text-align:right; font-weight:600;">${stok.sahibiTipi === 'musteri' ? '-' : formatCurrency(stok.maliyet)}${stok.costReviewRequired ? '<br><small>KG fiyatını kontrol edin</small>' : ''}</td>
+                <td style="text-align:right;">${stok.sahibiTipi === 'musteri' ? '-' : formatCurrency(getStockTotalCost(stok))}</td>
                 <td style="text-align:right;"><div class="table-actions">
-                    <button class="btn btn-outline table-action-button" aria-label="Stok kaydını düzenle" title="Düzenle" onclick="openStokDuzenleModal(${stok.id})"><i class="fa-solid fa-pen" aria-hidden="true"></i> Düzenle</button>
+                    <button class="btn btn-outline table-action-button" aria-label="Sac kesimi ve kalan parça oluştur" title="Kesim / Kalan Parça" onclick="openSheetCut(${stok.id})"><i class="fa-solid fa-scissors" aria-hidden="true"></i> Kesim / Kalan</button>
+                    ${stok.originCutId ? `<button type="button" class="btn btn-outline table-action-button" aria-label="Kesim geçmişini aç" title="Kesim Geçmişi" onclick="showSheetCutHistory(${stok.originCutId})"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> Kesim Geçmişi</button>` : `<button class="btn btn-outline table-action-button" aria-label="Stok kaydını düzenle" title="Düzenle" onclick="openStokDuzenleModal(${stok.id})"><i class="fa-solid fa-pen" aria-hidden="true"></i> Düzenle</button>`}
                     <button class="btn btn-danger table-action-button" aria-label="Stok kaydını sil" title="Sil" onclick="deleteStok(${stok.id})"><i class="fa-solid fa-trash-can" aria-hidden="true"></i> Sil</button>
                 </div></td>
             </tr>
-        `}).join('') || renderTableEmptyState(10, 'Stok kaydı bulunamadı.', 'Aramayı temizleyin veya yeni bir malzeme girişi yapın.', 'fa-boxes-stacked');
+        `}).join('') || renderTableEmptyState(11, 'Stok kaydı bulunamadı.', 'Aramayı temizleyin veya yeni bir malzeme girişi yapın.', 'fa-boxes-stacked');
         updateReportSelectionUI('inventory');
         renderStockMovements();
     } catch(e) {
@@ -6105,7 +6451,7 @@ function renderStockMovements() {
     const search = normalizeLookupText(document.getElementById('stock-movements-search')?.value || '');
     let movements = [...getDBArray('stokHareketleri')].reverse();
     if (search) {
-        movements = movements.filter(item => [item.stokAdi, item.stokKodu, item.tip, item.aciklama, item.ref, item.tarih]
+        movements = movements.filter(item => [item.stokAdi, item.stokKodu, codeSearchText(getDBArray('stoklar').find(s=>String(s.id)===String(item.stokId))), item.tip, item.aciklama, item.ref, item.tarih]
             .some(value => normalizeLookupText(value).includes(search)));
     }
     window.pageStockMovements = window.pageStockMovements || 1;
@@ -6123,7 +6469,7 @@ function renderStockMovements() {
     tbody.innerHTML = paginatedMovements.map(movement => `
         <tr>
             <td>${escapeHTML(movement.tarih || '-')}</td>
-            <td><strong>${escapeHTML(movement.stokAdi || '-')}</strong><br><span class="dashboard-muted-text">${escapeHTML(movement.stokKodu || '-')}</span></td>
+            <td><strong>${escapeHTML(movement.stokAdi || '-')}</strong><br><span class="dashboard-muted-text">${escapeHTML(getStockDisplayCode(getDBArray('stoklar').find(s => String(s.id) === String(movement.stokId)) || {kodu:movement.stokKodu,originCutId:movement.stockPartNo,partNo:movement.stockPartNo}))}</span></td>
             <td><span class="badge ${Number(movement.miktar) < 0 ? 'alert' : 'success'}">${escapeHTML(movement.tip || '-')}</span></td>
             <td>${escapeHTML(movement.aciklama || movement.ref || '-')}</td>
             <td style="text-align:right; font-weight:700; color:${Number(movement.miktar) < 0 ? 'var(--alert)' : 'var(--success)'};">${Number(movement.miktar) > 0 ? '+' : ''}${escapeHTML(movement.miktar || 0)} ${escapeHTML(movement.alan || '')}</td>
@@ -6182,6 +6528,7 @@ window.toggleStats = function() {
 };
 
 function renderDashboard() {
+    renderBackupStatus();
     try {
         const dashboardDateLabel = document.getElementById('dashboard-date-label');
         let dashboardFormattedDate = '';
@@ -6195,7 +6542,7 @@ function renderDashboard() {
         const chartPeriod = document.getElementById('dashboard-chart-period');
         if (chartPeriod) chartPeriod.textContent = `${new Date().getFullYear()} · Aylık`;
 
-        const incomeTransactions = (db.islemler || []).filter(isIncomeMovement);
+        const incomeTransactions = (db.islemler || []).filter(isActiveIncomeMovement);
         const toplamGelir = incomeTransactions.reduce((acc, curr) => acc + curr.tutar, 0);
 
         const bekleyenAlacak = (db.cariler || []).reduce((acc, curr) => acc + (curr.bakiye > 0 ? curr.bakiye : 0), 0);
@@ -6282,7 +6629,7 @@ function renderDashboard() {
                         <span class="dashboard-primary-text">${escapeHTML(islem.firma || '-')}</span>
                         ${islem.aciklama ? `<span class="dashboard-muted-text">${escapeHTML(islem.aciklama)}</span>` : ''}
                     </td>
-                    <td><span class="badge ${badgeClass}">${escapeHTML(islem.tip || '-')}</span></td>
+                    <td><span class="badge ${badgeClass}">${escapeHTML(islem.tip || '-')}</span>${islem.movementNo ? '<br><small>'+escapeHTML(islem.movementNo)+'</small>' : ''}</td>
                     <td><span class="dashboard-amount ${amountClass}">${isStatsVisible ? formatCurrency(islem.tutar) : '***'}</span></td>
                 </tr>
             `;
@@ -7014,30 +7361,19 @@ function printPayrollStatement(rowId) {
                 <div class="document-card-detail">Baz ücret: ${escapeHTML(formatCurrency(personel?.maas || 0))}</div>
             </div>
         </div>
-        <div class="metric-strip" aria-label="Bordro özeti">
-            <div class="metric-item"><span class="metric-label">Brüt Maaş</span><strong class="metric-value">${escapeHTML(formatCurrency(calc.brut))}</strong></div>
-            <div class="metric-item"><span class="metric-label">Toplam Kesinti</span><strong class="metric-value">${escapeHTML(formatCurrency(roundMoney(calc.kesinti + calc.avans)))}</strong></div>
-            <div class="metric-item is-accent"><span class="metric-label">Net Ödenecek</span><strong class="metric-value">${escapeHTML(formatCurrency(calc.net))}</strong></div>
-        </div>
-        <div class="section-heading">
-            <h2>Puantaj Bilgileri</h2>
-            <span>${escapeHTML(formatMonthLabel(record.donem))}</span>
-        </div>
+        <div class="section-heading"><h2>Puantaj Bilgileri</h2></div>
         <table>
-            <thead><tr><th>Dönem</th><th>Geldiği Gün</th><th>İzin</th><th>Eksik</th><th>Mesai</th><th>Durum</th></tr></thead>
-            <tbody><tr><td>${escapeHTML(formatMonthLabel(record.donem))}</td><td>${record.geldiGun || 0}</td><td>${record.izinGun || 0}</td><td>${record.eksikGun || 0}</td><td>${record.mesaiSaat || 0} saat</td><td>${record.odendi ? 'Ödendi' : 'Bekliyor'}</td></tr></tbody>
+            <thead><tr><th>Geldiği Gün</th><th>İzin</th><th>Eksik</th><th>Fazla Mesai</th></tr></thead>
+            <tbody><tr><td>${record.geldiGun || 0}</td><td>${record.izinGun || 0}</td><td>${record.eksikGun || 0}</td><td>${record.mesaiSaat || 0} saat</td></tr></tbody>
         </table>
         <div class="document-footer-grid">
-            <div class="document-note">
-                <span class="document-note-title">Bordro Notu</span>
-                ${record.not ? escapeHTML(record.not) : 'Personel maaş ve puantaj dökümüdür.'}
-            </div>
+            ${record.not ? `<div class="document-note"><span class="document-note-title">Not</span>${escapeHTML(record.not)}</div>` : ''}
             <table class="totals-panel" aria-label="Bordro tutar özeti">
                 <tbody>
                     <tr><td>Brüt Maaş</td><td>${escapeHTML(formatCurrency(calc.brut))}</td></tr>
-                    <tr><td>Eksik Gün Kesintisi</td><td>-${escapeHTML(formatCurrency(calc.kesinti))}</td></tr>
-                    <tr><td>Avans / Kesinti</td><td>-${escapeHTML(formatCurrency(calc.avans))}</td></tr>
-                    <tr><td>Fazla Mesai + Prim</td><td>${escapeHTML(formatCurrency(calc.ekOdeme))}</td></tr>
+                    ${calc.kesinti ? `<tr><td>Eksik Gün Kesintisi</td><td>-${escapeHTML(formatCurrency(calc.kesinti))}</td></tr>` : ''}
+                    ${calc.avans ? `<tr><td>Avans / Kesinti</td><td>-${escapeHTML(formatCurrency(calc.avans))}</td></tr>` : ''}
+                    ${calc.ekOdeme ? `<tr><td>Fazla Mesai + Prim</td><td>${escapeHTML(formatCurrency(calc.ekOdeme))}</td></tr>` : ''}
                     <tr class="total-row"><td>Net Ödenecek</td><td>${escapeHTML(formatCurrency(calc.net))}</td></tr>
                 </tbody>
             </table>
@@ -7262,7 +7598,7 @@ window.openGiderModal = function(id = '') {
     populateKasaOptions(gider?.kasaId || '');
     const cariSelect = document.getElementById('input-gider-cari');
     if (cariSelect) {
-        cariSelect.innerHTML = '<option value="">Cari bağlantısı yok</option>' + getDBArray('cariler').filter(c => !c.isPasif).map(c => `<option value="${c.id}">${escapeHTML(c.adi)} (${escapeHTML(c.kodu || '-')})</option>`).join('');
+        cariSelect.innerHTML = '<option value="">Cari bağlantısı yok</option>' + getDBArray('cariler').filter(c => !c.isPasif && c.systemRole !== 'retail').map(c => `<option value="${c.id}">${escapeHTML(c.adi)} (${escapeHTML(c.kodu || '-')})</option>`).join('');
     }
     const set = (idValue, value) => { const el = document.getElementById(idValue); if (el) el.value = value ?? ''; };
     set('input-gider-id', gider?.id || '');
@@ -7303,7 +7639,10 @@ window.deleteGider = function(id) {
     if (!gider) return alert('Gider kaydı bulunamadı.');
     if (gider.kaynak === 'personel-maas') return alert('Maaş gideri Personel > Maaş / Puantaj bölümünden düzenlenmeli veya silinmelidir.');
     confirmAction('Bu gider kaydı silinsin mi? Kasa/banka çıkışı ters kayıtla geri alınacak.', () => {
-        if (gider.kasaHareketId) reverseCashMovement(gider.kasaHareketId, `Gider silindi: ${gider.aciklama || gider.kategori || ''}`);
+        if (!getDBArray('giderler').includes(gider)) return alert('Bu gider daha önce kaldırıldı.');
+        if (gider.kasaHareketId && !reverseCashMovement(gider.kasaHareketId, `Gider silindi: ${gider.aciklama || gider.kategori || ''}`)) {
+            return alert('Kasa/banka hareketi geri alınamadığı için gider silinmedi.');
+        }
         addAuditLog('Silindi', 'Gider', gider.id, `${gider.kategori || ''} / ${formatCurrency(gider.tutar)}`);
         db.giderler = db.giderler.filter(g => g.id !== id);
         saveDB();
@@ -7367,6 +7706,7 @@ function convertQuoteToOrder(quote) {
             alert('Teklifte seçilen stok kaydı bulunamadı. İş emri oluşturulmadı.');
             return null;
         }
+        try { validateStockUsage(stock,stockUsage.field,stockUsage.quantity); } catch(error){alert(error.message);return null;}
         const available = getAvailableStockQuantity(stock, stockUsage.field);
         if (stockUsage.quantity > available) {
             const physical = Number(stock[stockUsage.field]) || 0;
@@ -7532,6 +7872,7 @@ function getQuoteData() {
         const requiredQty = (islemTipi === 'hammadde') ? kgAmount : stokQty;
         const stockField = islemTipi === 'hammadde' ? 'kg' : 'miktar';
         const excludeOrderId = getQuoteReservationOrderId();
+        try { if(requiredQty>0)validateStockUsage(stok,stockField,requiredQty,excludeOrderId); } catch(error){alert(error.message);return null;}
         const availableQty = getAvailableStockQuantity(stok, stockField, excludeOrderId);
         const physicalQty = Number(stok[stockField]) || 0;
         const reservedQty = getReservedStockQuantity(stok.id, stockField, excludeOrderId);
@@ -7542,7 +7883,8 @@ function getQuoteData() {
         }
     }
 
-    const materialCostPerUnit = stok ? ((stok.sahibiTipi === 'biz' || !stok.sahibiTipi) ? stok.maliyet : 0) : 0;
+    if (stok && stok.sahibiTipi!=='musteri' && Number(stok.maliyet)>0 && stokQty>0 && islemTipi!=='hammadde' && !getStockPlateWeight(stok)) { alert('Malzeme bedeli için stok kartındaki toplam KG ve plaka adedini tamamlayın.');return null; }
+    const materialCostPerUnit = getStockPlateCost(stok);
     const amounts = calculateQuoteAmounts({
         islemTipi,
         minutes,
@@ -7638,16 +7980,9 @@ function printQuoteDocument(quoteData) {
     const contentHTML = `
         ${getPrintBrandHTML('Fiyat Teklifi', getPrintMetaHTML([
             ...(quoteData.teklifNo ? [['Teklif No', quoteData.teklifNo]] : []),
-            ['Teklif Tarihi', documentDate],
-            ['Geçerlilik', '15 gün']
+            ['Tarih', documentDate]
         ]))}
-        <div class="document-intro-grid quote-intro">
-            <div class="document-card">
-                <div class="document-card-label">Teklif Verilen</div>
-                <div class="document-card-value">${escapeHTML(quoteData.customerName || '-')}</div>
-                <div class="document-card-detail">${escapeHTML(description)}</div>
-            </div>
-        </div>
+        ${getPrintPartyHTML('Teklif Verilen', quoteData.customerName || quoteCari?.adi, quoteCari)}
         <div class="section-heading">
             <h2>Teklif Kalemleri</h2>
             <span>${lineItems.length} kalem</span>
@@ -7657,7 +7992,7 @@ function printQuoteDocument(quoteData) {
                 <tr>
                     <th>No</th>
                     <th>Açıklama</th>
-                    <th>Hesaplama</th>
+                    <th>Miktar / Birim Fiyat</th>
                     <th class="text-right">Tutar</th>
                 </tr>
             </thead>
@@ -7677,19 +8012,7 @@ function printQuoteDocument(quoteData) {
                 <span class="document-note-title">Teklif Koşulu</span>
                 Verilen fiyatlar teklif tarihinden itibaren 15 gün geçerlidir.
             </div>
-            <table class="totals-panel" aria-label="Teklif tutar özeti">
-                <tbody>
-                    <tr><td>Brüt Tutar</td><td>${escapeHTML(formatCurrency(quoteData.subTotalBeforeDiscount ?? ((quoteData.operationCost || 0) + (quoteData.materialCost || 0))))}</td></tr>
-                    <tr><td>İskonto (%${escapeHTML(quoteData.discountPercent || 0)})</td><td>-${escapeHTML(formatCurrency(quoteData.discountAmount || 0))}</td></tr>
-                    <tr><td>Ara Toplam</td><td>${escapeHTML(formatCurrency(subTotal))}</td></tr>
-                    <tr><td>KDV (%${escapeHTML(taxRate)})</td><td>${escapeHTML(formatCurrency(quoteData.tax || 0))}</td></tr>
-                    <tr class="total-row"><td>Genel Toplam</td><td>${escapeHTML(formatCurrency(quoteData.total || 0))}</td></tr>
-                </tbody>
-            </table>
-        </div>
-        <div class="bank-details" aria-label="Banka ve IBAN bilgileri">
-            <div class="bank-field"><span>Banka</span><strong>&nbsp;</strong></div>
-            <div class="bank-field bank-field-iban"><span>IBAN</span><strong>&nbsp;</strong></div>
+            ${getPrintTotalsHTML({ ...quoteData, subTotal, taxRate }, 'Teklif tutar özeti')}
         </div>
     `;
 
@@ -7709,6 +8032,7 @@ function printQuoteDocument(quoteData) {
         .quote-footer .totals-panel .total-row td:last-child { font-size: 17px; }
         .bank-details { margin-top: 34px; }
     `, {
+        paymentFooter: true,
         share: {
             phone: quoteCari?.tel || quoteCari?.telefon || '',
             customerName: quoteData.customerName || quoteCari?.adi || '',
@@ -7742,8 +8066,8 @@ window.loadQuote = function(id) {
     document.getElementById('quote-kg-amount').value = quote.kgAmount || 0;
     document.getElementById('quote-kg-price').value = quote.kgPrice || 50;
     
-    // Update materials dropdown first
-    updateQuoteMaterials();
+    // Keep the saved material selectable even when this order consumed it.
+    updateQuoteMaterials(quote.stokId);
     document.getElementById('quote-material').value = quote.stokId || "0";
     document.getElementById('quote-material-qty').value = quote.stokQty || 1;
     document.getElementById('quote-discount').value = quote.discountPercent ?? 0;
@@ -7943,7 +8267,7 @@ function renderOrders() {
             return `
             <tr>
                 ${renderSelectionCell('orders', o.id)}
-                <td style="width:100px;"><span class="badge" style="background:rgba(233, 196, 106, 0.2); color:var(--warning); border:1px solid var(--warning); cursor:pointer; text-decoration:underline;" onclick="openOrderHistory(${o.id})" title="Tarihçeyi Gör">${escapeHTML(o.orderNo || '-')}</span></td>
+                <td style="width:100px;"><button type="button" class="order-code-button" onclick="openOrderHistory(${o.id})" title="İş emri detayını aç">${escapeHTML(o.orderNo || '-')}</button></td>
                 <td><strong>${escapeHTML(o.customerName || '-')}</strong></td>
                 <td style="color:var(--text-muted); font-size:13px;">
                     <span class="badge ${operationMeta.badgeClass}" style="margin-right:6px; font-size:10px;">${operationMeta.shortLabel}</span>
@@ -7955,6 +8279,7 @@ function renderOrders() {
                     <div class="order-action-stack">
                         <button class="btn btn-outline order-row-action-button" aria-label="Bağlı kayıtları aç" title="Bağlı teklif, cari, stok, fatura ve ödemeleri aç" onclick="openOrderHistory(${o.id})"><i class="fa-solid fa-link" aria-hidden="true"></i><span>Bağlantılar</span></button>
                         <button class="btn btn-outline order-row-action-button" aria-label="Kârlılık detayını aç" title="İş emri kârlılık detayını aç" onclick="openOrderProfitability(${o.id})"><i class="fa-solid fa-chart-line" aria-hidden="true"></i><span>Kârlılık</span></button>
+                        ${o.durum !== 'İptal' && sheetCutOrderUsage(o)?.field === 'miktar' ? `<button type="button" class="btn btn-outline order-row-action-button" onclick="openOrderSheetCut(${o.id})"><i class="fa-solid fa-scissors" aria-hidden="true"></i> Kesim / Kalan Parça</button>` : ''}
                         <button class="btn btn-outline order-row-action-button" aria-label="İş emri durumunu değiştir" title="İş emri durumunu değiştir" onclick="openOrderStatusModal(${o.id})"><i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i><span>Durumu Değiştir</span></button>
                     </div>
                 </td>
@@ -8291,7 +8616,7 @@ function renderOrderLinkedRecords(order) {
     const cards = [
         { type: 'quote', icon: 'fa-file-invoice-dollar', label: 'Teklif', value: linked.quote?.teklifNo || 'Bağlı teklif yok', enabled: !!linked.quote },
         { type: 'cari', icon: 'fa-user-tie', label: 'Cari', value: linked.cari?.adi || order.customerName || 'Cari bulunamadı', enabled: !!linked.cari },
-        { type: 'stock', icon: 'fa-boxes-stacked', label: 'Stok', value: linked.stock ? `${linked.stock.kodu || ''} ${linked.stock.cinsi || ''}`.trim() : 'Müşteri malzemesi', enabled: !!linked.stock },
+        { type: 'stock', icon: 'fa-boxes-stacked', label: 'Stok', value: linked.stock ? `${getStockDisplayCode(linked.stock)} ${linked.stock.cinsi || ''}`.trim() : 'Müşteri malzemesi', enabled: !!linked.stock },
         { type: 'invoice', icon: 'fa-file-invoice', label: 'Fatura', value: linked.invoice?.faturaNo || (order.durum === 'Teslim Edildi' ? 'Fatura oluştur' : 'Teslimat bekleniyor'), enabled: !!linked.invoice || order.durum === 'Teslim Edildi', action: !linked.invoice },
         { type: 'payment', icon: 'fa-money-bill-transfer', label: 'Ödeme', value: linked.payments.length ? `${formatCurrency(paidTotal)} tahsil edildi` : 'Tahsilat ekle', enabled: !!linked.cari, action: !linked.payments.length }
     ];
@@ -8396,6 +8721,7 @@ window.updateOrderStatus = function() {
     const movingToDelivered = newStatus === 'Teslim Edildi' && oldStatus !== 'Teslim Edildi';
     const cancellingOrder = newStatus === 'İptal';
 
+    if (cancellingOrder && getActiveSheetCutForOrder(order.id)) return alert('Bu işin kalan parçaları kayıtlı. Önce Kesim Geçmişi bölümünden kesimi geri alın.');
     if (cancellingOrder) {
         const linkedInvoice = getDBArray('faturalar').find(fatura => String(fatura.orderId) === String(order.id));
         if (linkedInvoice) return alert(`Bu iş emrine ${linkedInvoice.faturaNo || 'bir fatura'} bağlı. İş emrini iptal etmeden önce bağlı faturayı Faturalar bölümünden silin veya iptal edin.`);
@@ -8409,6 +8735,7 @@ window.updateOrderStatus = function() {
         if (stok) {
             deductQty = order.islemTipi === 'hammadde' ? (order.kgAmount || 0) : (order.stokQty || 0);
             deductField = order.islemTipi === 'hammadde' ? 'kg' : 'miktar';
+            if (stok.originCutId && (deductField !== 'miktar' || !Number.isInteger(deductQty))) return alert('Kalan parçalar tam adetle kullanılır. Bölmek için Kesim / Kalan Parça işlemini kullanın.');
             const availableQty = getAvailableStockQuantity(stok, deductField, order.id);
             const physicalQty = Number(stok[deductField]) || 0;
             const reservedForOthers = getReservedStockQuantity(stok.id, deductField, order.id);
@@ -8420,6 +8747,15 @@ window.updateOrderStatus = function() {
     }
 
     const completeStatusUpdate = reflectToCari => {
+        if (quickSaleSaving || sheetCutSaving || !getDBArray('isEmirleri').includes(order) || (order.durum || 'Beklemede') !== oldStatus) return alert('Kayıt değişti. İş emrini yeniden açın.');
+        if (cancellingOrder && getActiveSheetCutForOrder(order.id)) return alert('Önce Kesim Geçmişi bölümünden kesimi geri alın.');
+        let secondary=null;
+        if(movingToDelivered&&!order.stokDusuldu&&order.stokId&&String(order.stokId)!=='0'&&Number(order.islemTipi==='hammadde'?order.kgAmount:order.stokQty)!==0) {
+            stok=db.stoklar.find(s=>String(s.id)===String(order.stokId));
+            try { secondary=validateStockUsage(stok,deductField,deductQty,order.id); }
+            catch(error){return alert(error.message);}
+        }
+        if(cancellingOrder&&order.stokDusuldu&&!db.stoklar.some(s=>String(s.id)===String(order.stokId)))return alert('Stok kaydı eksik; iptal işlemi uygulanmadı.');
         let cariYansitilacak = null;
         if (movingToDelivered && !order.bakiyeCariyeYansitildi && reflectToCari && !isInternalOrder) {
             cariYansitilacak = findCariByReference(order.customerId, order.customerName);
@@ -8458,8 +8794,14 @@ window.updateOrderStatus = function() {
             impacts.push({ label: 'Cari', value: tutar });
         }
 
-        if (movingToDelivered && stok && !order.stokDusuldu) {
+        if (movingToDelivered && stok && !order.stokDusuldu && deductQty>0) {
             const oncekiStok = Number(stok[deductField]) || 0;
+            order.stockTrackingVersion=2;
+            if(secondary) {
+                const movementId=changeSheetStock(stok,secondary.field,-secondary.quantity,'İş Emri Teslim',order.orderNo);
+                if(secondary.field==='kg'){order.stokDusulenKg=secondary.quantity;order.stockKgMovementId=movementId;}
+                else{order.stokDusulenPlaka=secondary.quantity;order.stockPlateMovementId=movementId;}
+            }
             stok[deductField] = roundMoney(oncekiStok - deductQty);
             order.stokDusuldu = true;
             order.stokDusulenMiktar = deductQty;
@@ -8486,6 +8828,10 @@ window.updateOrderStatus = function() {
         if (cancellingOrder && order.stokDusuldu === true && order.stokId && order.stokId !== '0') {
             const restoreStok = db.stoklar.find(s => s.id == order.stokId);
             if (restoreStok) {
+                if (Number(order.stokDusulenKg) > 0) order.stockKgReversalId=changeSheetStock(restoreStok,'kg',order.stokDusulenKg,'İş Emri İptal',order.orderNo);
+                if (Number(order.stokDusulenPlaka) > 0) order.stockPlateReversalId=changeSheetStock(restoreStok,'miktar',order.stokDusulenPlaka,'İş Emri İptal',order.orderNo);
+                order.stokDusulenPlaka=0;
+                order.stokDusulenKg = 0;
                 const restoreField = order.stokDusulenAlan || (order.islemTipi === 'hammadde' ? 'kg' : 'miktar');
                 const oncekiStok = Number(restoreStok[restoreField]) || 0;
                 const restoreQty = order.stokDusulenMiktar || 0;
@@ -8544,7 +8890,7 @@ function updateDashboardChart() {
         if (!i.tarih) return;
         const date = parseTRDate(i.tarih);
         const m = date.getMonth();
-        if (!isNaN(m) && m <= currentMonth && date.getFullYear() === new Date().getFullYear() && isIncomeMovement(i)) {
+        if (!isNaN(m) && m <= currentMonth && date.getFullYear() === new Date().getFullYear() && isActiveIncomeMovement(i)) {
             incomeData[m] += Number(i.tutar) || 0;
         }
     });
@@ -8598,11 +8944,14 @@ function updateDashboardChart() {
         const chartContext = ctx.getContext('2d');
         const chartHeight = ctx.parentElement?.clientHeight || 250;
         const incomeGradient = chartContext.createLinearGradient(0, 0, 0, chartHeight);
-        incomeGradient.addColorStop(0, 'rgba(6, 214, 160, 0.28)');
-        incomeGradient.addColorStop(1, 'rgba(6, 214, 160, 0.015)');
+        incomeGradient.addColorStop(0, 'rgba(19, 116, 93, 0.28)');
+        incomeGradient.addColorStop(1, 'rgba(19, 116, 93, 0.015)');
         const expenseGradient = chartContext.createLinearGradient(0, 0, 0, chartHeight);
-        expenseGradient.addColorStop(0, 'rgba(239, 71, 111, 0.18)');
-        expenseGradient.addColorStop(1, 'rgba(239, 71, 111, 0.01)');
+        expenseGradient.addColorStop(0, 'rgba(191, 53, 69, 0.18)');
+        expenseGradient.addColorStop(1, 'rgba(191, 53, 69, 0.01)');
+        const chartTheme = getComputedStyle(document.documentElement);
+        const chartLabel = chartTheme.getPropertyValue('--text-muted').trim();
+        const chartGrid = chartTheme.getPropertyValue('--border').trim();
         const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
         dashboardChart = new Chart(ctx, {
             type: 'line',
@@ -8613,21 +8962,21 @@ function updateDashboardChart() {
                         label: 'Gelir',
                         data: incomeData,
                         backgroundColor: incomeGradient,
-                        borderColor: 'rgba(6, 214, 160, 1)',
+                        borderColor: 'rgba(19, 116, 93, 1)',
                         borderWidth: 2.5,
                         fill: true,
                         tension: 0.34,
                         pointRadius: 3,
                         pointHoverRadius: 7,
-                        pointBackgroundColor: '#0d1818',
-                        pointBorderColor: 'rgba(6, 214, 160, 1)',
+                        pointBackgroundColor: chartTheme.getPropertyValue('--bg-panel').trim(),
+                        pointBorderColor: 'rgba(19, 116, 93, 1)',
                         pointBorderWidth: 2
                     },
                     {
                         label: 'Gider',
                         data: expenseData,
                         backgroundColor: expenseGradient,
-                        borderColor: 'rgba(239, 71, 111, 1)',
+                        borderColor: 'rgba(191, 53, 69, 1)',
                         borderWidth: 2.25,
                         borderDash: [7, 5],
                         fill: true,
@@ -8635,8 +8984,8 @@ function updateDashboardChart() {
                         pointRadius: 3,
                         pointStyle: 'rectRot',
                         pointHoverRadius: 7,
-                        pointBackgroundColor: '#1a1118',
-                        pointBorderColor: 'rgba(239, 71, 111, 1)',
+                        pointBackgroundColor: chartTheme.getPropertyValue('--bg-panel').trim(),
+                        pointBorderColor: 'rgba(191, 53, 69, 1)',
                         pointBorderWidth: 2
                     }
                 ]
@@ -8649,14 +8998,14 @@ function updateDashboardChart() {
                 scales: {
                     x: {
                         grid: { display: false, drawBorder: false },
-                        ticks: { color: 'rgba(248,249,250,0.58)', font: { size: 12, weight: '600' } }
+                        ticks: { color: chartLabel, font: { size: 12, weight: '600' } }
                     },
                     y: {
                         beginAtZero: true,
-                        grid: { color: 'rgba(255,255,255,0.045)', drawBorder: false },
+                        grid: { color: chartGrid, drawBorder: false },
                         border: { display: false },
                         ticks: {
-                            color: 'rgba(248,249,250,0.55)',
+                            color: chartLabel,
                             callback: value => Number(value).toLocaleString('tr-TR')
                         }
                     }
@@ -8665,7 +9014,7 @@ function updateDashboardChart() {
                     legend: {
                         position: 'top',
                         labels: {
-                            color: 'rgba(248,249,250,0.86)',
+                            color: chartLabel,
                             usePointStyle: true,
                             pointStyle: 'line',
                             boxWidth: 28,
@@ -9040,8 +9389,14 @@ window.undoPaymentPlanSettlement = function(id) {
     const cari = findCariByReference(plan.cariId, plan.firma);
     if (!cari) return alert('Cari bulunamadığı için ödeme geri alınamadı.');
     confirmAction(`${plan.planNo} numaralı ${formatCurrency(plan.tutar)} tutarlı ödeme/tahsilat geri alınsın mı?\n\nCari ve kasa etkileri ters kayıtla düzeltilecek; plan yeniden beklemeye alınacak.`, () => {
+        if (!getDBArray('odemePlanlari').includes(plan) || plan.durum !== 'odendi' || findCariByReference(plan.cariId, plan.firma) !== cari) {
+            return alert('Vade planı değişti veya daha önce geri alındı. Listeyi yenileyin.');
+        }
         const originalDelta = plan.tip === 'tahsilat' ? -plan.tutar : plan.tutar;
         const originalCariMovement = getDBArray('islemler').find(item => String(item.id) === String(plan.cariIslemId));
+        const originalCash = getDBArray('kasaHareketleri').find(item => String(item.id) === String(plan.kasaHareketId));
+        if ((plan.cariIslemId && (!originalCariMovement || originalCariMovement.reversedBy)) ||
+            (plan.kasaHareketId && (!originalCash || originalCash.reversedBy))) return alert('Bağlı ödeme hareketi eksik veya daha önce geri alınmış. Plan değiştirilmedi.');
         const cashReversal = plan.kasaHareketId ? reverseCashMovement(plan.kasaHareketId, `Vade ödemesi geri alındı: ${plan.planNo}`) : null;
         if (plan.kasaHareketId && !cashReversal) return alert('Kasa/banka ters kaydı oluşturulamadı.');
         const cariReversal = addCariMovement(cari, {
@@ -9054,6 +9409,7 @@ window.undoPaymentPlanSettlement = function(id) {
             reversalOf: originalCariMovement?.id || null
         });
         if (originalCariMovement && cariReversal) originalCariMovement.reversedBy = cariReversal.id;
+        if (cariReversal && cashReversal) cariReversal.kasaHareketId = cashReversal.id;
         plan.sonGeriAlmaTarihi = new Date().toLocaleString('tr-TR');
         plan.durum = 'beklemede';
         plan.kapanisTarihi = null;
@@ -9073,19 +9429,28 @@ window.deletePaymentPlan = function(id) {
     const plan = getDBArray('odemePlanlari').find(p => String(p.id) === String(id));
     if (!plan) return alert('Vade planı bulunamadı.');
     confirmAction('Bu vade planı silinsin mi? Ödenmiş bir plansa cari ve kasa etkileri ters kayıtla düzeltilecek.', () => {
+        if (!getDBArray('odemePlanlari').includes(plan)) return alert('Bu vade planı daha önce kaldırıldı.');
         const originalDelta = plan.tip === 'tahsilat' ? -plan.tutar : plan.tutar;
         if (plan.durum === 'odendi') {
             const cari = findCariByReference(plan.cariId, plan.firma);
             if (!cari) return alert('Cari bulunamadığı için ödenmiş vade planı silinemedi.');
-            addCariMovement(cari, {
+            const originalCariMovement = getDBArray('islemler').find(item => String(item.id) === String(plan.cariIslemId));
+            const originalCash = getDBArray('kasaHareketleri').find(item => String(item.id) === String(plan.kasaHareketId));
+            if ((plan.cariIslemId && (!originalCariMovement || originalCariMovement.reversedBy)) ||
+                (plan.kasaHareketId && (!originalCash || originalCash.reversedBy))) return alert('Bağlı ödeme hareketi eksik veya daha önce geri alınmış. Plan silinmedi.');
+            const cashReversal = plan.kasaHareketId ? reverseCashMovement(plan.kasaHareketId, `Vade planı silindi: ${plan.planNo}`) : null;
+            if (plan.kasaHareketId && !cashReversal) return alert('Kasa/banka hareketi geri alınamadığı için plan silinmedi.');
+            const cariReversal = addCariMovement(cari, {
                 tip: `Vade Planı Silindi (${plan.planNo})`,
                 aciklama: 'Ödenmiş vade planı silindi; cari etkisi ters kayıtla geri alındı.',
                 tutar: plan.tutar,
                 bakiyeDegisimi: -originalDelta,
                 isSuccess: false,
-                isGelir: false
+                isGelir: false,
+                reversalOf: originalCariMovement?.id || null
             });
-            if (plan.kasaHareketId) reverseCashMovement(plan.kasaHareketId, `Vade planı silindi: ${plan.planNo}`);
+            if (originalCariMovement && cariReversal) originalCariMovement.reversedBy = cariReversal.id;
+            if (cariReversal && cashReversal) cariReversal.kasaHareketId = cashReversal.id;
         }
         addAuditLog('Silindi', 'Vade Planı', plan.id, `${plan.planNo} / ${plan.firma} / ${plan.durum}`);
         db.odemePlanlari = getDBArray('odemePlanlari').filter(p => String(p.id) !== String(id));
@@ -9186,7 +9551,7 @@ window.saveKasaHesap = function() {
         return;
     }
 
-    const account = { id: createRecordId(), kodu: generateSerialNo('kasa'), ad, tip, bakiye, isPasif: false, tarih: new Date().toLocaleDateString('tr-TR') };
+    const account = { id: createRecordId(), kodu: generateSerialNo('kasa'), ad, tip, bakiye, ledgerOpeningBalance: 0, isPasif: false, tarih: new Date().toLocaleDateString('tr-TR') };
     db.kasaHesaplari.push(account);
     if (bakiye !== 0) {
         db.kasaHareketleri.push({ id: createRecordId(), kasaId: account.id, kasaAdi: account.ad, tip: bakiye >= 0 ? 'giris' : 'cikis', tutar: Math.abs(bakiye), aciklama: 'Açılış bakiyesi', kaynak: 'kasa-acilis', tarih: new Date().toLocaleString('tr-TR') });
@@ -9260,6 +9625,9 @@ window.openKasaHareketModal = function() {
 };
 
 window.saveKasaHareket = function() {
+    const unlock = beginModalSubmit('modal-kasa-hareket');
+    if (!unlock) return;
+    try {
     const kasaId = document.getElementById('input-kasa-hareket-hesap')?.value || '';
     const tip = document.getElementById('input-kasa-hareket-tip')?.value || 'giris';
     const tarihValue = document.getElementById('input-kasa-hareket-tarih')?.value || '';
@@ -9269,16 +9637,20 @@ window.saveKasaHareket = function() {
     if (!tarihValue) return alert('İşlem tarihini seçin.');
     if (!Number.isFinite(tutar) || tutar <= 0) return alert('Geçerli tutar girin.');
     const account = getDBArray('kasaHesaplari').find(item => String(item.id) === String(kasaId));
-    if (!isCashAccountActive(account)) return alert('Pasif bir hesaba yeni hareket eklenemez.');
+    if (!account || !isCashAccountActive(account)) return alert('Aktif bir kasa/banka hesabı seçin.');
     const movement = addCashMovement(kasaId, { tip, tutar, aciklama, kaynak: 'manuel', tarih: toTRDateFromInput(tarihValue) });
     if (!movement) return alert('Kasa/banka hareketi oluşturulamadı.');
     addAuditLog('Oluşturuldu', 'Manuel Kasa Hareketi', movement.id, `${movement.kasaAdi} / ${tip === 'giris' ? 'Giriş' : 'Çıkış'} / ${formatCurrency(tutar)}`);
     saveDB();
+    document.getElementById('input-kasa-hareket-tutar').value = '';
     closeModal('modal-kasa-hareket');
     renderCashBank();
     showImpactSummary('Kasa hareketi kaydedildi', [
         { label: 'Kasa', value: tip === 'giris' ? tutar : -tutar }
     ], { message: aciklama || (tip === 'giris' ? 'Manuel para girişi' : 'Manuel para çıkışı') });
+    } finally {
+        unlock();
+    }
 };
 
 window.undoManualCashMovement = function(id) {
@@ -9287,6 +9659,7 @@ window.undoManualCashMovement = function(id) {
     if (movement.kaynak !== 'manuel') return alert('Bağlı hareketler oluşturulduğu modülden düzeltilmelidir.');
     if (movement.reversedBy) return alert('Bu hareket daha önce geri alınmış.');
     confirmAction(`${movement.kasaAdi || 'Hesap'} üzerindeki ${formatCurrency(movement.tutar || 0)} tutarlı ${movement.tip === 'giris' ? 'giriş' : 'çıkış'} geri alınsın mı?\n\nHareket silinmeyecek; denetim izi için ters kayıt oluşturulacak.`, () => {
+        if (!getDBArray('kasaHareketleri').includes(movement) || movement.reversedBy) return alert('Bu hareket daha önce geri alındı veya değişti.');
         const reversal = reverseCashMovement(movement.id, 'Manuel kasa hareketi geri alındı');
         if (!reversal) return alert('Ters kasa hareketi oluşturulamadı.');
         addAuditLog('Geri Alındı', 'Manuel Kasa Hareketi', movement.id, `${movement.kasaAdi} / ${formatCurrency(movement.tutar || 0)}`);
@@ -9308,6 +9681,7 @@ function renderAll() {
         { name: 'Fireler', fn: renderFireler },
         { name: 'Dashboard', fn: renderDashboard },
         { name: 'Expenses', fn: renderExpenses },
+        { name: 'Invoices', fn: renderInvoices },
         { name: 'Profitability', fn: renderProfitability },
         { name: 'CashBank', fn: renderCashBank },
         { name: 'Personnel', fn: renderPersonnel },
@@ -9315,7 +9689,10 @@ function renderAll() {
         { name: 'Cheques', fn: renderCekSenetler },
         { name: 'SidebarBadges', fn: updateSidebarBadges },
         { name: 'QuoteMaterials', fn: updateQuoteMaterials },
-        { name: 'QuoteHistory', fn: renderQuoteHistory }
+        { name: 'QuoteHistory', fn: renderQuoteHistory },
+        { name: 'FinanceFollowUp', fn: renderFinanceFollowUp },
+        { name: 'QuickSales', fn: renderQuickSales },
+        { name: 'SheetCuts', fn: renderSheetCuts }
     ];
 
     tasks.forEach(task => {
@@ -9342,7 +9719,9 @@ function hydrateDBFromFileIfNeeded() {
 
     startupHydrationPromise = (async () => {
         if (!window.electronAPI?.loadDBFromFile) {
+            startupHydrationPending = false;
             if (startupHasValidLocalDB) {
+                try { await backupBeforeReadableCodes(storedDBAtStartup); } catch(error) { startupPersistenceBlocked=true; return {success:false,error:error.message}; }
                 return { success: true, source: 'local-storage' };
             }
             const saveResult = await saveDB(true);
@@ -9354,6 +9733,7 @@ function hydrateDBFromFileIfNeeded() {
         try {
             const response = await window.electronAPI.loadDBFromFile();
             if (response && response.success && response.data) {
+                await backupBeforeReadableCodes(response.data);
                 db = validateAndNormalizeDB(response.data);
                 try {
                     localStorage.setItem(DB_KEY, JSON.stringify(db));
@@ -9362,10 +9742,13 @@ function hydrateDBFromFileIfNeeded() {
                 }
                 startupHasValidLocalDB = true;
                 startupPersistenceBlocked = false;
+                startupHydrationPending = false;
                 renderAll();
                 return { success: true, source: 'disk' };
             }
             if (response?.missing) {
+                startupHydrationPending = false;
+                if (startupHasValidLocalDB) await backupBeforeReadableCodes(storedDBAtStartup);
                 const source = startupHasValidLocalDB ? 'local-storage-migrated' : 'new-install';
                 const saveResult = await saveDB(true);
                 return saveResult.success
@@ -9374,6 +9757,7 @@ function hydrateDBFromFileIfNeeded() {
             }
             throw new Error(response?.error || 'Kalıcı veri dosyası okunamadı.');
         } catch (error) {
+            startupHydrationPending = false;
             startupPersistenceBlocked = true;
             console.error('Dosya verisi yüklenemedi:', error);
             alert(`DİKKAT: Kayıtlı veri dosyası okunamadı ve üzerine yazılmadı.\n\n${error.message}\n\nAyarlar bölümünden sağlam bir yedek geri yükleyin.`);
@@ -9399,17 +9783,19 @@ window.toggleNavGroup = function(groupName) {
     const selectedGroup = document.querySelector(`.nav-group[data-nav-group="${groupName}"]`);
     if (!selectedGroup) return;
     const willOpen = selectedGroup.querySelector('.nav-section-toggle')?.getAttribute('aria-expanded') !== 'true';
-    document.querySelectorAll('.nav-group').forEach(group => setNavGroupState(group, willOpen && group === selectedGroup));
+    setNavGroupState(selectedGroup, willOpen);
+    saveWorkspacePreferences({ navGroups: { ...readWorkspacePreferences().navGroups, [groupName]: willOpen } });
 };
 
 function openNavGroupForTarget(target) {
     const activeItem = document.querySelector(`.nav-item[data-target="${target}"]`);
     const activeGroup = activeItem?.closest('.nav-group') || null;
-    document.querySelectorAll('.nav-group').forEach(group => setNavGroupState(group, group === activeGroup));
+    if (activeGroup) setNavGroupState(activeGroup, true);
 }
 
 window.switchView = function(target) {
-    if (!target) target = 'dashboard';
+    if (!document.getElementById(`view-${target}`)) target = 'dashboard';
+    toggleWorkspaceMenu(false);
     addLog("Görünüm Değişiyor: " + target);
     
     try {
@@ -9438,6 +9824,8 @@ window.switchView = function(target) {
             }
         });
         openNavGroupForTarget(target);
+        const scroller = document.querySelector('.view-container');
+        if (scroller) scroller.scrollTop = 0;
 
         // View Update - Absolute Force Show
         views.forEach(v => {
@@ -9459,7 +9847,7 @@ window.switchView = function(target) {
                     case 'accounts': renderCariler(); break;
                     case 'inventory': renderStoklar(); break;
                     case 'orders': renderOrders(); break;
-                    case 'scraps': renderFireler(); break;
+                    case 'scraps': renderFireler(); renderSheetCuts(); break;
                     case 'expenses': renderExpenses(); break;
                     case 'profitability': renderProfitability(); break;
                     case 'cashbank': renderCashBank(); break;
@@ -9467,6 +9855,9 @@ window.switchView = function(target) {
                     case 'audit': renderAuditTrail(); break;
                     case 'cheques': renderCekSenetler(); break;
                     case 'invoices': renderInvoices(); break;
+                    case 'quicksales': renderQuickSales(); break;
+                    case 'collections': renderCollections(); break;
+                    case 'accountcheck': renderAccountChecks(); break;
                 }
                 enhanceTableHeaderScopes(document.getElementById(`view-${target}`) || document);
                 enhanceSortableTableHeaders();
@@ -9608,7 +9999,7 @@ window.calculateQuote = function() {
         const value = Number(raw);
         return Number.isFinite(value) ? value : fallback;
     };
-    const materialCostPerUnit = stok ? ((stok.sahibiTipi === 'biz' || !stok.sahibiTipi) ? stok.maliyet : 0) : 0;
+    const materialCostPerUnit = getStockPlateCost(stok);
     const materialQty = readPreviewNumber(inputMaterialQty);
     const discountPercent = readPreviewNumber(inputDiscount);
     const taxRatePercent = readPreviewNumber(selectTax, 20);
@@ -10009,6 +10400,7 @@ window.deleteCekSenet = function(id) {
     const record = getDBArray('cekSenetler').find(item => item.id == id);
     if (!record) return alert('Çek/senet kaydı bulunamadı.');
     confirmAction('Bu çek/senet kaydı silinsin mi? Tahsil edilmiş veya ödenmişse cari ve kasa etkileri geri alınacak.', () => {
+        if (!getDBArray('cekSenetler').includes(record)) return alert('Bu çek/senet daha önce kaldırıldı.');
         const wasReflected = record.cariYansitildi === true;
         const oldDelta = Number(record.cariBakiyeDegisimi) || getCekSenetCariDelta(record);
         const cashDelta = getCekSenetDirection(record) === 'incoming' ? -record.tutar : record.tutar;
@@ -10187,9 +10579,10 @@ function renderInvoices() {
             <td><span class="badge" style="background:rgba(69,123,157,0.2); color:var(--secondary); border:1px solid var(--secondary);">${escapeHTML(f.faturaNo)}</span></td>
             <td style="color:var(--text-muted);">${escapeHTML(f.tarih)}</td>
             <td><strong>${escapeHTML(f.firma)}</strong></td>
-            <td style="color:var(--text-muted); font-size:13px;">${escapeHTML(f.aciklama || '-')}<br><span class="dashboard-muted-text">Vade: ${escapeHTML(f.vadeTarihi || '-')} · ${f.odemeDurumu === 'odendi' ? 'Ödendi' : (f.odemeDurumu === 'kismi' ? 'Kısmi Ödendi' : 'Ödenmedi')}</span>${renderAttachmentBadge(f)}</td>
-            <td style="text-align:right; font-weight:600; color:${f.tur === 'kesilen' ? 'var(--success)' : 'var(--alert)'};">${f.tur === 'kesilen' ? '+' : '-'}${formatCurrency(f.tutar)}</td>
+            <td style="color:var(--text-muted); font-size:13px;">${escapeHTML(f.aciklama || '-')}<br><span class="dashboard-muted-text">Vade: ${escapeHTML(f.vadeTarihi || '-')} · ${getInvoicePaymentLabel(f)}</span>${renderAttachmentBadge(f)}</td>
+            <td style="text-align:right; font-weight:600; color:${f.tur === 'kesilen' ? 'var(--success)' : 'var(--alert)'};">${f.tur === 'kesilen' ? '+' : '-'}${formatCurrency(f.tutar)}<div class="dashboard-muted-text">Kalan: ${getInvoicePaymentSummary(f).remaining === null ? 'Belirtilmemiş' : formatCurrency(getInvoicePaymentSummary(f).remaining)}</div></td>
             <td style="text-align:right;"><div class="table-actions">
+                ${!getInvoicePaymentSummary(f).legacy && getInvoicePaymentSummary(f).remaining > 0 ? `<button class="btn btn-outline table-action-button" aria-label="${f.tur === 'kesilen' ? 'Faturaya tahsilat ekle' : 'Faturaya ödeme ekle'}" onclick="event.stopPropagation(); openInvoicePayment(${f.id})"><i class="fa-solid fa-wallet" aria-hidden="true"></i> ${f.tur === 'kesilen' ? 'Tahsilat' : 'Ödeme'}</button>` : ''}
                 <button class="btn btn-outline table-action-button" aria-label="Faturayı yazdır" title="Yazdır" onclick="event.stopPropagation(); printInvoiceDocument(${f.id})"><i class="fa-solid fa-print" aria-hidden="true"></i> Yazdır</button>
                 <button class="btn btn-danger table-action-button" aria-label="Faturayı sil" title="Sil" onclick="event.stopPropagation(); deleteFatura(${f.id})"><i class="fa-solid fa-trash-can" aria-hidden="true"></i> Sil</button>
             </div></td>
@@ -10211,13 +10604,14 @@ window.nextInvoicesPage = function() {
 }
 
 window.showFaturaDetail = function(id) {
-    const f = (db.faturalar || []).find(x => x.id === id);
+    const f = (db.faturalar || []).find(x => String(x.id) === String(id));
     if (!f) return;
 
     const turLabel = f.tur === 'kesilen' ? 'Kesilen Fatura' : 'Alınan Fatura';
     const turIcon = f.tur === 'kesilen' ? 'fa-arrow-up-from-bracket' : 'fa-arrow-down-to-bracket';
     const turColor = f.tur === 'kesilen' ? 'var(--success)' : 'var(--alert)';
 
+    const payment = getInvoicePaymentSummary(f);
     const html = `
         <div class="modal-content glass-panel" style="max-width:500px;">
             <div class="flex-between mb-4">
@@ -10229,18 +10623,28 @@ window.showFaturaDetail = function(id) {
                     <tr><td style="color:var(--text-muted); width:140px;">Fatura Türü</td><td><span class="badge ${f.tur === 'kesilen' ? 'success' : ''}" style="${f.tur === 'alinan' ? 'background:rgba(230,57,70,0.2); color:var(--alert); border:1px solid var(--alert);' : ''}">${turLabel}</span></td></tr>
                     <tr><td style="color:var(--text-muted);">Fatura No</td><td><strong>${escapeHTML(f.faturaNo)}</strong></td></tr>
                     <tr><td style="color:var(--text-muted);">Tarih</td><td>${escapeHTML(f.tarih)}</td></tr>
-                    <tr><td style="color:var(--text-muted);">Vade / Ödeme</td><td>${escapeHTML(f.vadeTarihi || '-')} · ${f.odemeDurumu === 'odendi' ? 'Ödendi' : (f.odemeDurumu === 'kismi' ? 'Kısmi Ödendi' : 'Ödenmedi')}</td></tr>
+                    <tr><td style="color:var(--text-muted);">Vade / Ödeme</td><td>${escapeHTML(f.vadeTarihi || '-')} · ${getInvoicePaymentLabel(f)}</td></tr>
                     ${f.seriSira ? `<tr><td style="color:var(--text-muted);">Seri / Sıra</td><td>${escapeHTML(f.seriSira)}</td></tr>` : ''}
                     ${f.vergiNo ? `<tr><td style="color:var(--text-muted);">Vergi No</td><td>${escapeHTML(f.vergiNo)}</td></tr>` : ''}
                     <tr><td style="color:var(--text-muted);">Firma / Müşteri</td><td><strong>${escapeHTML(f.firma)}</strong></td></tr>
                     <tr><td style="color:var(--text-muted);">Açıklama</td><td>${escapeHTML(f.aciklama || '-')}</td></tr>
                     ${f.ek ? `<tr><td style="color:var(--text-muted);">Belge Eki</td><td><strong>${escapeHTML(f.ek.name || 'Ek belge')}</strong>${f.ek.note ? `<br><span class="dashboard-muted-text">${escapeHTML(f.ek.note)}</span>` : ''}</td></tr>` : ''}
-                    <tr><td style="color:var(--text-muted);">Matrah</td><td>${formatCurrency(f.matrah ?? ((f.tutar || 0) / 1.2))}</td></tr>
-                    <tr><td style="color:var(--text-muted);">KDV (${escapeHTML(f.kdvOrani ?? 20)}%)</td><td>${formatCurrency(f.kdvTutari ?? ((f.tutar || 0) - ((f.tutar || 0) / 1.2)))}</td></tr>
+                    <tr><td style="color:var(--text-muted);">Matrah</td><td>${formatCurrency(getInvoiceDocumentLine(f).subTotal)}</td></tr>
+                    <tr><td style="color:var(--text-muted);">KDV (${escapeHTML(getInvoiceDocumentLine(f).taxRate)}%)</td><td>${formatCurrency(getInvoiceDocumentLine(f).tax)}</td></tr>
                     <tr style="border-top:2px solid var(--border);"><td style="font-weight:700; font-size:15px; padding-top:10px;">GENEL TOPLAM</td><td style="font-weight:700; font-size:20px; color:${turColor}; padding-top:10px;">${f.tur === 'kesilen' ? '+' : '-'}${formatCurrency(f.tutar)}</td></tr>
+                    <tr><td>${f.tur === 'kesilen' ? 'Tahsil Edilen' : 'Ödenen'}</td><td>${payment.paid === null ? 'Önceki kayıtta tutar belirtilmemiş' : formatCurrency(payment.paid)}</td></tr>
+                    <tr><td><strong>Kalan Tutar</strong></td><td><strong>${payment.remaining === null ? 'Belirtilmemiş' : formatCurrency(payment.remaining)}</strong></td></tr>
                 </tbody>
             </table>
-            <div style="margin-top:16px; display:flex; gap:8px;">
+            ${payment.legacy || f.paymentOpeningAmount !== undefined ? `<div class="form-group" style="margin-top:16px;">
+                <label for="invoice-history-paid">Önceki kayıtlarda ödenen toplam (₺)</label>
+                <input id="invoice-history-paid" class="form-control" type="number" min="${payment.linkedPaid}" max="${f.tutar}" step="0.01" value="${payment.paid ?? ''}">
+                <p class="dashboard-muted-text">Ödeme geçmişini tamamlar. Cari ve kasa bakiyelerini değiştirmez; yeni tahsilat oluşturmaz.</p>
+                <button type="button" class="btn btn-outline" onclick="saveInvoicePaymentHistory(${f.id})">Ödeme Geçmişini Tamamla</button>
+            </div>` : ''}
+            ${payment.movements.length ? `<div style="margin-top:16px;"><strong>Bağlı Ödemeler</strong><div class="table-responsive"><table class="data-table"><thead><tr><th>Tarih</th><th>Tutar</th><th>İşlem</th></tr></thead><tbody>${payment.movements.map(m => `<tr><td>${escapeHTML(m.tarih)}</td><td>${formatCurrency(m.tutar)}</td><td>${canEditCariMovement(m) ? `<button type="button" class="btn btn-outline" onclick="closeModal('modal-fatura-detail'); openEditCariMovement(${m.id})">Düzelt</button>` : ''} ${canReverseCariMovement(m) ? `<button type="button" class="btn btn-outline" onclick="closeModal('modal-fatura-detail'); reverseCariMovement(${m.id})">Geri Al</button>` : ''}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
+            <div class="modal-actions" style="display:flex; flex-wrap:wrap; gap:8px;">
+                ${!payment.legacy && payment.remaining > 0 ? `<button type="button" class="btn btn-primary" onclick="openInvoicePayment(${f.id})">${f.tur === 'kesilen' ? 'Tahsilat Ekle' : 'Ödeme Ekle'}</button>` : ''}
                 <button class="btn btn-primary" style="flex:1;" onclick="printInvoiceDocument(${f.id})">
                     <i class="fa-solid fa-print"></i> Yazdır
                 </button>
@@ -10428,7 +10832,7 @@ window.saveFatura = function() {
         const faturaTarihiInput = faturaTarihiEl?.value || toDateInputValue(new Date());
         if (faturaTarihiEl && !faturaTarihiEl.value) faturaTarihiEl.value = faturaTarihiInput;
         const vadeTarihiInput = document.getElementById('input-fatura-vade')?.value || '';
-        const odemeDurumu = document.getElementById('input-fatura-odeme-durumu')?.value || 'odenmedi';
+        const odemeDurumu = 'odenmedi';
         const seriSira = plainText(document.getElementById('input-fatura-seri')?.value || '');
         const vergiNo = plainText(document.getElementById('input-fatura-vergi-no')?.value || '');
         const ek = getAttachmentFromInputs('input-fatura-ek', 'input-fatura-ek-not');
@@ -10477,6 +10881,9 @@ window.saveFatura = function() {
             faturaTarihi: toTRDateFromInput(faturaTarihiInput),
             vadeTarihi: vadeTarihiInput ? toTRDateFromInput(vadeTarihiInput) : '',
             odemeDurumu,
+            paymentTrackingVersion: 1,
+            discountAmount: linkedOrder?.discountAmount || 0,
+            discountPercent: linkedOrder?.discountPercent ?? null,
             seriSira,
             vergiNo,
             cariYansitildi: true,
@@ -10554,7 +10961,14 @@ window.saveFatura = function() {
 window.deleteFatura = function(id) {
     const fatura = (db.faturalar || []).find(f => f.id === id);
     if (!fatura) return alert('Fatura kaydı bulunamadı.');
+    const payment = getInvoicePaymentSummary(fatura);
+    if (payment.linkedPaid > 0 || Number(fatura.paymentOpeningAmount) > 0 || payment.legacy) return alert('Ödemesi bulunan fatura silinemez. Önce fatura detayından bağlı ödemeleri geri alın veya hatalı ödeme geçmişini düzeltin.');
     confirmAction('Bu fatura kaydı silinsin mi? Cari etkisi varsa ters kayıtla geri alınacak.', () => {
+        if (!getDBArray('faturalar').includes(fatura)) return alert('Bu fatura daha önce kaldırıldı.');
+        const currentPayment = getInvoicePaymentSummary(fatura);
+        if (currentPayment.linkedPaid > 0 || Number(fatura.paymentOpeningAmount) > 0 || currentPayment.legacy) {
+            return alert('Faturaya ödeme işlendiği için silme durduruldu. Önce bağlı ödemeleri kontrol edin.');
+        }
         const originalBakiyeDegisimi = typeof fatura.cariBakiyeDegisimi === 'number'
             ? fatura.cariBakiyeDegisimi
             : (fatura.tur === 'kesilen' ? fatura.tutar : -fatura.tutar);
@@ -10566,13 +10980,16 @@ window.deleteFatura = function(id) {
                 return;
             }
 
-            addCariMovement(cari, {
+            const originalMovement = getDBArray('islemler').find(item => String(item.id) === String(fatura.cariIslemId));
+            if (originalMovement?.reversedBy) return alert('Faturanın cari etkisi daha önce geri alınmış. Hesap kontrolünden kaydı inceleyin.');
+            const cancellation = addCariMovement(cari, {
                 tip: `Fatura Silindi (${fatura.faturaNo})`,
                 aciklama: originalBakiyeDegisimi === 0
                     ? 'Fatura kaydı iptal edildi. Satış teslim aşamasında cari hesaba işlendiği için bakiye değişmedi.'
                     : 'Fatura kaydı silindi, cari etkisi geri alındı.',
                 faturaNo: fatura.faturaNo,
                 faturaId: fatura.id,
+                reversalOf: originalMovement?.id || null,
                 orderId: fatura.orderId || null,
                 orderNo: fatura.orderNo || '',
                 tutar: fatura.tutar,
@@ -10580,6 +10997,7 @@ window.deleteFatura = function(id) {
                 isSuccess: false,
                 isGelir: false
             });
+            if (originalMovement && cancellation) originalMovement.reversedBy = cancellation.id;
         }
 
         if (fatura.orderId) {
@@ -10735,9 +11153,31 @@ function enhanceCloseButtons() {
     });
 }
 
+function lockStartupWorkspace() {
+    const previousInert = [...document.body.children].map(element => [element, element.inert]);
+    previousInert.forEach(([element]) => { element.inert = true; });
+    const status = document.createElement('div');
+    status.className = 'startup-status';
+    status.setAttribute('role', 'status');
+    status.innerHTML = '<strong>Kayıtlar yükleniyor</strong><span>Program birazdan hazır olacak.</span>';
+    document.body.appendChild(status);
+    document.body.setAttribute('aria-busy', 'true');
+    const blockInput = event => { event.preventDefault(); event.stopImmediatePropagation(); };
+    const events = ['click', 'keydown', 'submit'];
+    events.forEach(name => document.addEventListener(name, blockInput, true));
+    return () => {
+        events.forEach(name => document.removeEventListener(name, blockInput, true));
+        previousInert.forEach(([element, inert]) => { element.inert = !!inert; });
+        status.remove();
+        document.body.removeAttribute('aria-busy');
+    };
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
+    const releaseStartup = startupHydrationPending ? lockStartupWorkspace() : () => {};
     try {
         addLog("Uygulama başlatıldı.");
+        initializeWorkspace();
         enhanceCloseButtons();
         enhanceFilterPanels();
         enhanceQuoteSections();
@@ -10748,20 +11188,30 @@ document.addEventListener('DOMContentLoaded', async () => {
         const hash = window.location.hash.substring(1) || 'dashboard';
         switchView(hash);
         scheduleAutomaticUpdateCheck();
+        refreshBackupStatus();
     } catch (e) {
         console.error("Initialization Error:", e);
+    } finally {
+        releaseStartup();
     }
 });
 window.createManualBackup = async function() {
     if (window.electronAPI && window.electronAPI.manualBackup) {
         let data;
         try {
-            data = JSON.stringify(validateAndNormalizeDB(db));
+            const normalized = validateAndNormalizeDB(db);
+        db.ayarlar.numaralandirma = normalized.ayarlar.numaralandirma;
+        data = JSON.stringify(normalized);
         } catch (error) {
             return alert(`Yedeklenecek veri doğrulanamadı: ${error?.message || String(error)}`);
         }
         
-        const response = await window.electronAPI.manualBackup(data);
+        let response;
+        try { response = await window.electronAPI.manualBackup(data); }
+        catch (error) { response = { success: false, error: error?.message || 'Yedekleme tamamlanamadı.' }; }
+        if (!response?.canceled) applyBackupStatus(response?.backupStatus || (response?.success
+            ? { success: true, lastSuccessAt: new Date().toISOString(), kind: 'manual', available: true }
+            : { ...backupStatusView, success: false, error: response?.error || 'Yedekleme tamamlanamadı.' }));
         if (response && response.success) {
             alert(`Yedek dosyası başarıyla kaydedildi:\n${response.path}`);
         } else if (response && !response.canceled) {
@@ -10837,5 +11287,1641 @@ window.confirmSafeReset = async function() {
         if (!saveResult.success) return alert(`Yeni boş veritabanı kalıcı dosyaya yazılamadı. Mevcut veriler değiştirilmedi.\n\n${saveResult.error || ''}`);
         alert("Tüm veriler sıfırlandı. Uygulama yeniden başlatılıyor.");
         location.reload();
+    }
+}
+
+// Workspace preferences are separate from accounting records and backups.
+const WORKSPACE_PREFERENCES_KEY = 'AkLazerWorkspacePreferences';
+let workspacePreferencesCache;
+function readWorkspacePreferences() {
+    if (workspacePreferencesCache) return workspacePreferencesCache;
+    try {
+        const value = JSON.parse(localStorage.getItem(WORKSPACE_PREFERENCES_KEY) || '{}');
+        return workspacePreferencesCache = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    } catch (_) { return workspacePreferencesCache = {}; }
+}
+function saveWorkspacePreferences(changes) {
+    workspacePreferencesCache = { ...readWorkspacePreferences(), ...changes };
+    try { localStorage.setItem(WORKSPACE_PREFERENCES_KEY, JSON.stringify(workspacePreferencesCache)); } catch (_) {}
+}
+function applyWorkspacePreferences() {
+    const preferences = readWorkspacePreferences();
+    const dark = preferences.theme === 'dark';
+    const compact = preferences.density === 'compact';
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    document.documentElement.dataset.density = compact ? 'compact' : 'comfortable';
+    const themeButton = document.getElementById('workspace-theme');
+    const themeLabel = dark ? 'Açık görünüme geç' : 'Koyu görünüme geç';
+    if (themeButton) {
+        themeButton.setAttribute('aria-label', themeLabel);
+        themeButton.title = themeLabel;
+        themeButton.innerHTML = `<i class="fa-solid ${dark ? 'fa-sun' : 'fa-moon'}" aria-hidden="true"></i>`;
+    }
+    const densityButton = document.getElementById('workspace-density');
+    if (densityButton) {
+        densityButton.setAttribute('aria-pressed', String(compact));
+        densityButton.setAttribute('aria-label', compact ? 'Tablo satırları sık; rahat görünüme geç' : 'Tablo satırları rahat; sık görünüme geç');
+        densityButton.querySelector('span').textContent = compact ? 'Sık' : 'Rahat';
+    }
+}
+window.toggleWorkspaceTheme = function() {
+    saveWorkspacePreferences({ theme: document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark' });
+    applyWorkspacePreferences();
+    if (document.getElementById('view-dashboard')?.classList.contains('active')) renderDashboard();
+};
+window.toggleWorkspaceDensity = function() {
+    saveWorkspacePreferences({ density: document.documentElement.dataset.density === 'compact' ? 'comfortable' : 'compact' });
+    applyWorkspacePreferences();
+};
+window.toggleWorkspaceMenu = function(force) {
+    const open = typeof force === 'boolean' ? force : !document.body.classList.contains('workspace-menu-open');
+    document.body.classList.toggle('workspace-menu-open', open);
+    const main = document.getElementById('main-content');
+    if (main) main.inert = open;
+    const trigger = document.getElementById('sidebar-mobile-toggle');
+    trigger?.setAttribute('aria-expanded', String(open));
+    trigger?.setAttribute('aria-label', open ? 'Menüyü kapat' : 'Menüyü aç');
+    const backdrop = document.querySelector('.workspace-menu-backdrop');
+    if (backdrop) backdrop.hidden = !open;
+    if (open) document.querySelector('.sidebar .nav-item.active')?.focus();
+    else if (document.activeElement?.closest('.sidebar')) trigger?.focus();
+};
+
+let workspaceSearchResults = [];
+function getWorkspaceSearchItems(query) {
+    const normalize = value => String(value || '').toLocaleLowerCase('tr-TR').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ı/g, 'i');
+    const terms = normalize(query).trim().split(/\s+/).filter(Boolean);
+    const matches = item => terms.every(term => normalize(`${item.title} ${item.detail} ${item.kind}`).includes(term));
+    const items = [
+        { title: 'Yeni teklif oluştur', detail: 'Müşteri, malzeme ve fiyatlandırma', kind: 'İşlem', icon: 'fa-plus', run: () => navigateTo('quotation') },
+        { title: 'Yeni cari ekle', detail: 'Müşteri veya tedarikçi kartı', kind: 'İşlem', icon: 'fa-user-plus', run: () => navigateToLinkedModule('accounts', () => openModal('modal-cari')) },
+        { title: 'Yeni gider ekle', detail: 'İşletme gideri ve ödeme kaynağı', kind: 'İşlem', icon: 'fa-receipt', run: () => navigateToLinkedModule('expenses', () => openGiderModal()) },
+        { title: 'Yeni fatura ekle', detail: 'Kesilen veya alınan fatura', kind: 'İşlem', icon: 'fa-file-circle-plus', run: () => navigateToLinkedModule('invoices', () => openFaturaModal()) },
+        { title: 'Ayarlar ve yedekleme', detail: 'Firma bilgileri, yedekler ve sürüm', kind: 'Menü', icon: 'fa-gear', run: () => openAyarlarModal() },
+        { title: 'Gösterge Paneli', detail: 'İşletme özeti ve öncelikler', kind: 'Menü', icon: 'fa-chart-pie', run: () => navigateTo('dashboard') },
+        ...Object.entries(INNER_PAGE_LAYOUTS).map(([page, meta]) => ({ title: meta.title, detail: `${meta.category} · ${meta.context}`, kind: 'Menü', icon: meta.icon, run: () => navigateTo(page) }))
+    ];
+    if (terms.join('').length >= 2) {
+        const sources = [
+            ['cariler', 'Cari', 'fa-building', c => ({ title: c.adi || 'İsimsiz cari', detail: `${codeSearchText(c)} · ${c.tel || c.telefon || 'Cari hesap'}`, run: () => navigateToLinkedModule('accounts', () => openCariDetay(c.id)) })],
+            ['isEmirleri', 'İş emri', 'fa-clipboard-list', o => ({ title: o.orderNo || 'İş emri', detail: `${o.customerName || ''} · ${o.description || ''} · ${o.durum || ''}`, run: () => navigateToLinkedModule('orders', () => openOrderHistory(o.id)) })],
+            ['faturalar', 'Fatura', 'fa-file-invoice', f => ({ title: f.faturaNo || 'Fatura', detail: `${f.firma || ''} · ${f.aciklama || ''}`, run: () => navigateToLinkedModule('invoices', () => showFaturaDetail(f.id)) })],
+            ['stoklar', 'Stok', 'fa-boxes-stacked', s => ({ title: s.cinsi || s.kodu || 'Stok', detail: `${getStockDisplayCode(s)} · ${getCodeAliases(s).join(' / ')} · ${s.mm || 0} mm`, run: () => navigateToLinkedModule('inventory', () => openStokDuzenleModal(s.id)) })]
+        ];
+        // Limit each source while scanning, so large databases never build thousands of result nodes.
+        for (const [key, kind, icon, map] of sources) {
+            let count = 0;
+            for (const record of getDBArray(key)) {
+                const item = { ...map(record), kind, icon };
+                if (!matches(item)) continue;
+                items.push(item);
+                if (++count === 12) break;
+            }
+        }
+    }
+    return items.filter(matches).slice(0, 30);
+}
+window.renderWorkspaceSearch = function() {
+    const query = document.getElementById('workspace-search-input')?.value || '';
+    workspaceSearchResults = getWorkspaceSearchItems(query);
+    const results = document.getElementById('workspace-search-results');
+    const count = document.getElementById('workspace-search-count');
+    if (!results || !count) return;
+    count.textContent = query.trim().length < 2
+        ? 'Hızlı işlemler ve menüler · Kayıt aramak için en az 2 karakter yazın.'
+        : `${workspaceSearchResults.length} sonuç${workspaceSearchResults.length === 30 ? ' · Daha kesin sonuç için aramayı daraltın.' : ''}`;
+    results.innerHTML = workspaceSearchResults.length ? workspaceSearchResults.map((item, index) => `
+        <button type="button" class="workspace-search-result" data-workspace-result="${index}">
+            <i class="fa-solid ${item.icon}" aria-hidden="true"></i><span><strong>${escapeHTML(item.title)}</strong><small>${escapeHTML(item.detail)}</small></span><em>${escapeHTML(item.kind)}</em>
+        </button>`).join('') : '<p class="workspace-search-empty">Eşleşen kayıt bulunamadı. İsim veya belge numarasının bir bölümünü deneyin.</p>';
+};
+window.openWorkspaceSearch = function() {
+    // A form in progress keeps its own focus and cannot be replaced by navigation.
+    if (document.querySelector('.modal-overlay.active')) return;
+    document.getElementById('workspace-search-input').value = '';
+    renderWorkspaceSearch();
+    toggleWorkspaceMenu(false);
+    openModal('modal-workspace-search');
+};
+function initializeWorkspace() {
+    applyWorkspacePreferences();
+    const preferences = readWorkspacePreferences();
+    document.querySelectorAll('.nav-group').forEach(group => {
+        const name = group.dataset.navGroup;
+        const saved = preferences.navGroups?.[name];
+        setNavGroupState(group, typeof saved === 'boolean' ? saved : ['operations', 'finance'].includes(name));
+    });
+    document.querySelector('.sidebar')?.addEventListener('click', event => {
+        if (event.target.closest('.nav-item, .sidebar-create')) toggleWorkspaceMenu(false);
+    });
+    window.matchMedia?.('(max-width: 760px)').addEventListener?.('change', event => {
+        if (!event.matches) toggleWorkspaceMenu(false);
+    });
+    document.getElementById('workspace-search-results')?.addEventListener('click', event => {
+        const button = event.target.closest('[data-workspace-result]');
+        if (!button) return;
+        const item = workspaceSearchResults[Number(button.dataset.workspaceResult)];
+        if (!item) return;
+        closeModal('modal-workspace-search');
+        item.run();
+    });
+    document.getElementById('modal-workspace-search')?.addEventListener('keydown', event => {
+        if (event.isComposing) return;
+        const buttons = [...document.querySelectorAll('.workspace-search-result')];
+        const index = buttons.indexOf(document.activeElement);
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault();
+            if (!buttons.length) return;
+            const next = index < 0 ? (event.key === 'ArrowDown' ? 0 : buttons.length - 1) : (index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
+            buttons[next].focus();
+        } else if (event.key === 'Enter' && event.target.id === 'workspace-search-input') {
+            event.preventDefault();
+            buttons[0]?.click();
+        }
+    });
+    document.addEventListener('keydown', event => {
+        if ((event.metaKey || event.ctrlKey) && !event.shiftKey && event.key.toLowerCase() === 'k') {
+            event.preventDefault();
+            openWorkspaceSearch();
+        }
+        if (event.key === 'Escape' && document.body.classList.contains('workspace-menu-open')) toggleWorkspaceMenu(false);
+        if (event.key === 'Tab' && document.body.classList.contains('workspace-menu-open') && !document.querySelector('.modal-overlay.active')) {
+            const elements = getModalFocusables(document.getElementById('workspace-sidebar'));
+            if (!elements.length) return;
+            if (event.shiftKey && document.activeElement === elements[0]) { event.preventDefault(); elements.at(-1).focus(); }
+            else if (!event.shiftKey && document.activeElement === elements.at(-1)) { event.preventDefault(); elements[0].focus(); }
+        }
+    });
+}
+
+// Read-only finance follow-up. These views never allocate payments or repair records.
+let collectionsPage = 1;
+let accountCheckLimit = 50;
+let activePaymentOverviewCariId = null;
+let currentAccountCheckFindings = [];
+let backupStatusView = null;
+let backupStatusRevision = 0;
+
+function normalizeSearchText(value) {
+    return String(value || '').toLocaleLowerCase('tr-TR').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ı/g, 'i').trim();
+}
+
+function financeDay(value) {
+    const text = String(value || '').trim();
+    const match = text.match(/^(\d{4})-(\d{2})-(\d{2})(?:T|$)/) || text.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})(?:\s|$)/);
+    if (!match) return null;
+    const iso = text.includes('-');
+    const [year, month, day] = iso ? [+match[1], +match[2], +match[3]] : [+match[3], +match[2], +match[1]];
+    const date = new Date(Date.UTC(year, month - 1, day));
+    if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+    return date.getTime() / 86400000;
+}
+
+function financeCariFor(record, database = db) {
+    if (record.cariId != null) return (database.cariler || []).find(c => String(c.id) === String(record.cariId)) || null;
+    const matches = (database.cariler || []).filter(c => normalizeLookupText(c.adi) === normalizeLookupText(record.firma));
+    return matches.length === 1 ? matches[0] : null;
+}
+
+function getCollectionRows(database = db, now = new Date()) {
+    const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) / 86400000;
+    return (database.faturalar || []).filter(invoice => invoice.tur === 'kesilen').map(invoice => {
+        const payment = getInvoicePaymentSummary(invoice, '', database);
+        const due = financeDay(invoice.vadeTarihi);
+        const days = due === null ? null : today - due;
+        const status = payment.remaining === null ? 'unknown' : days === null ? 'undated' : days > 0 ? 'overdue' : days === 0 ? 'today' : days >= -7 ? 'soon' : 'future';
+        return { invoice, payment, cari: financeCariFor(invoice, database), due, days, status };
+    }).filter(row => row.payment.remaining === null || row.payment.remaining > 0);
+}
+
+function collectionStatusLabel(row) {
+    return ({ unknown: 'Ödeme geçmişi eksik', undated: 'Vade belirtilmedi', overdue: `${row.days} gün gecikti`, today: 'Bugün vadeli', soon: `${-row.days} gün sonra`, future: `${-row.days} gün sonra` })[row.status];
+}
+
+function financeSummaryCard(label, value, detail = '') {
+    return `<div class="finance-summary-card"><span>${escapeHTML(label)}</span><strong>${escapeHTML(value)}</strong><small>${escapeHTML(detail)}</small></div>`;
+}
+
+function filterCollections() { collectionsPage = 1; renderCollections(); }
+function changeCollectionsPage(delta) { collectionsPage += delta; renderCollections(); }
+function openCollectionsForCari(id) {
+    const cari = getDBArray('cariler').find(c => String(c.id) === String(id));
+    if (!cari) return;
+    closeModal('modal-cari-ekstre');
+    renderCollections();
+    document.getElementById('collections-cari').value = String(cari.id);
+    document.getElementById('collections-search').value = '';
+    document.getElementById('collections-status').value = 'all';
+    location.hash = 'collections'; switchView('collections'); filterCollections();
+}
+
+function renderCollections() {
+    const tbody = document.getElementById('collections-tbody');
+    if (!tbody) return;
+    const all = getCollectionRows();
+    const cariSelect = document.getElementById('collections-cari');
+    const selectedCariId = cariSelect.value;
+    cariSelect.innerHTML = '<option value="">Tüm müşteriler</option>' + [...getDBArray('cariler')].sort((a,b) => String(a.adi).localeCompare(String(b.adi),'tr')).map(c => `<option value="${escapeHTML(c.id)}">${escapeHTML(c.adi)} · ${escapeHTML(c.kodu || '')}</option>`).join('');
+    cariSelect.value = selectedCariId;
+    const total = rows => formatCurrency(roundMoney(rows.reduce((sum, r) => sum + (r.payment.remaining ?? 0), 0)));
+    const unknown = all.filter(r => r.status === 'unknown').length;
+    document.getElementById('collections-summary').innerHTML =
+        financeSummaryCard('Açık fatura tutarı', total(all), `${all.length} fatura · ${unknown ? `${unknown} faturanın kalan tutarı bilinmiyor` : 'Tüm açık faturalar'}`) +
+        financeSummaryCard('Geciken tutar', total(all.filter(r => r.status === 'overdue')), `${all.filter(r => r.status === 'overdue').length} fatura`) +
+        financeSummaryCard('Bugün vadeli', total(all.filter(r => r.status === 'today')), `${all.filter(r => r.status === 'today').length} fatura`) +
+        financeSummaryCard('Önümüzdeki 7 gün', total(all.filter(r => r.status === 'soon')), `${all.filter(r => r.status === 'soon').length} fatura`);
+    const query = normalizeSearchText(document.getElementById('collections-search').value);
+    const filter = document.getElementById('collections-status').value;
+    const sort = document.getElementById('collections-sort').value;
+    const rows = all.filter(r => (!cariSelect.value || String(r.cari?.id) === cariSelect.value) && (filter === 'all' || r.status === filter) && (!query || normalizeSearchText(`${r.cari?.adi || r.invoice.firma} ${r.cari?.kodu || ''} ${r.invoice.faturaNo}`).includes(query)));
+    rows.sort((a, b) => {
+        if (sort === 'customer') return String(a.cari?.adi || a.invoice.firma).localeCompare(String(b.cari?.adi || b.invoice.firma), 'tr') || (a.due ?? Infinity) - (b.due ?? Infinity);
+        if (sort === 'amount') return (b.payment.remaining ?? -1) - (a.payment.remaining ?? -1);
+        return (a.due ?? Infinity) - (b.due ?? Infinity) || String(a.invoice.faturaNo).localeCompare(String(b.invoice.faturaNo), 'tr');
+    });
+    const pages = Math.max(1, Math.ceil(rows.length / 25));
+    collectionsPage = Math.max(1, Math.min(pages, collectionsPage));
+    tbody.innerHTML = rows.slice((collectionsPage - 1) * 25, collectionsPage * 25).map(row => {
+        const id = escapeJSStringForAttr(row.invoice.id);
+        return `<tr><td><strong>${escapeHTML(row.cari?.adi || row.invoice.firma || 'Cari bulunamadı')}</strong><small>${escapeHTML(row.invoice.faturaNo || 'Fatura numarası yok')}${row.cari?.kodu ? ' · ' + escapeHTML(row.cari.kodu) : ''}</small></td>
+            <td>${escapeHTML(row.invoice.vadeTarihi || '—')}</td><td><span class="finance-status ${row.status}">${escapeHTML(collectionStatusLabel(row))}</span></td>
+            <td>${row.payment.remaining === null ? 'Bilinmiyor' : formatCurrency(row.payment.remaining)}</td><td><div class="finance-row-actions">
+            <button type="button" class="btn btn-outline" onclick="showFaturaDetail(${id})">Fatura</button>
+            ${row.payment.legacy ? `<button type="button" class="btn btn-outline" onclick="showFaturaDetail(${id})">Geçmişi Tamamla</button>` : `<button type="button" class="btn btn-primary" onclick="openInvoicePayment(${id})"${row.cari ? '' : ' disabled'}>Tahsilat</button>`}
+            ${row.payment.remaining !== null && row.cari ? `<button type="button" class="btn btn-outline" onclick="openCollectionReminder(${id})" aria-label="${escapeHTML(row.invoice.faturaNo)} için hatırlatma hazırla"><i class="fa-solid fa-comment" aria-hidden="true"></i> Hatırlat</button>` : ''}
+            </div></td></tr>`;
+    }).join('') || '<tr><td colspan="5" class="finance-empty"><strong>Bu görünümde açık fatura yok.</strong>Farklı bir vade durumu veya arama deneyebilirsiniz.</td></tr>';
+    document.getElementById('collections-page-info').textContent = `${rows.length} fatura · Sayfa ${collectionsPage} / ${pages}`;
+    document.getElementById('collections-prev').disabled = collectionsPage === 1;
+    document.getElementById('collections-next').disabled = collectionsPage === pages;
+}
+
+function openCollectionReminder(id) {
+    const row = getCollectionRows().find(r => String(r.invoice.id) === String(id));
+    if (!row || row.payment.remaining === null || !row.cari) return alert('Hatırlatma için cari ve kalan fatura tutarı belirli olmalıdır.');
+    const company = db.ayarlar?.firmaAdi || 'AK LAZER';
+    const due = row.due !== null ? ` Vade tarihi: ${row.invoice.vadeTarihi}.` : '';
+    document.getElementById('collection-reminder-text').value = `Merhaba ${row.cari.adi},\n\n${row.invoice.faturaNo || 'Faturanız'} için kayıtlarımızdaki kalan tutar ${formatCurrency(row.payment.remaining)}.${due}\nÖdeme planınız hakkında bilgi paylaşabilir misiniz? Ödemenizi yaptıysanız dekontunuzu iletmenizi rica ederiz.\n\nZİRAAT BANKASI · MERT ODUNKESEN\nIBAN: TR04 0001 0090 1065 8664 4050 01\n\nTeşekkür ederiz.\n${company}`;
+    openModal('modal-collection-reminder');
+}
+
+async function copyCollectionReminder() {
+    const field = document.getElementById('collection-reminder-text');
+    try {
+        await navigator.clipboard.writeText(field.value);
+        showToast({ type: 'success', title: 'Metin kopyalandı', message: 'Mesajı kontrol ederek istediğiniz uygulamadan gönderebilirsiniz.' });
+    } catch (_) {
+        field.focus(); field.select();
+        showToast({ type: 'info', title: 'Metin seçildi', message: 'Kopyalamak için Ctrl+C veya ⌘C kullanın.' });
+    }
+}
+
+function renderCariPaymentOverview(id = activePaymentOverviewCariId) {
+    const container = document.getElementById('cari-payment-overview');
+    const cari = getDBArray('cariler').find(c => String(c.id) === String(id));
+    if (!container || !cari) return;
+    activePaymentOverviewCariId = cari.id;
+    const rows = getCollectionRows().filter(row => row.cari && String(row.cari.id) === String(id));
+    const unknown = rows.filter(row => row.payment.remaining === null).length;
+    const total = roundMoney(rows.reduce((sum, row) => sum + (row.payment.remaining ?? 0), 0));
+    const overdue = roundMoney(rows.filter(row => row.status === 'overdue').reduce((sum, row) => sum + row.payment.remaining, 0));
+    const payments = getDBArray('islemler').filter(m => !m.reversedBy && !m.reversalOf && financeCariFor(m)?.id === cari.id && getCariMovementFormType(m) === 'tahsilat');
+    payments.sort((a,b) => (parseTRDate(b.tarih).getTime() || 0) - (parseTRDate(a.tarih).getTime() || 0));
+    const last = payments[0];
+    container.innerHTML = '<div class="finance-summary-grid">' +
+        financeSummaryCard('Açık faturalar', formatCurrency(total), `${rows.length} fatura${unknown ? ` · ${unknown} tutar bilinmiyor` : ''}`) +
+        financeSummaryCard('Geciken fatura tutarı', formatCurrency(overdue), 'Kalan tutarı bilinen faturalar') +
+        financeSummaryCard('Son tahsilat', last ? formatCurrency(last.tutar) : 'Henüz yok', last?.tarih || 'Aktif tahsilat kaydı bulunmuyor') +
+        `</div><button type="button" class="btn btn-outline" onclick="openCollectionsForCari(${escapeJSStringForAttr(cari.id)})">Açık Faturaları Gör</button>`;
+}
+
+function buildStockCheckFindings(database=db) {
+    const findings=[],stocks=database.stoklar||[],movements=database.stokHareketleri||[];
+    const add=(stock,detail,severity='error')=>findings.push({severity,category:'Stok',title:getStockDisplayCode(stock),detail,target:'stock',id:stock.id});
+    const grouped=new Map();
+    for(const m of movements){const key=String(m.stokId);if(!grouped.has(key))grouped.set(key,[]);grouped.get(key).push(m);}
+    for(const stock of stocks) {
+        const rows=grouped.get(String(stock.id))||[];
+        for(const field of ['miktar','kg']) {
+            if(!Number.isFinite(Number(stock[field]||0))||Number(stock[field])<0){add(stock,'Stok adedi veya ağırlığı geçersiz.');continue;}
+            const fieldRows=rows.filter(m=>m.alan===field);
+            let last=null,broken=false;
+            for(const m of fieldRows) {
+                if(![m.miktar,m.onceki,m.sonraki].every(v=>typeof v==='number'&&Number.isFinite(v)) || roundMoney(m.onceki+m.miktar)!==roundMoney(m.sonraki) || (last&&roundMoney(last.sonraki)!==roundMoney(m.onceki)))broken=true;
+                last=m;
+            }
+            if(broken)add(stock,`${field==='kg'?'KG':'Adet'} hareketlerinin önceki ve sonraki değerleri birbirini tutmuyor.`);
+            else if(last&&roundMoney(last.sonraki)!==roundMoney(stock[field]||0))add(stock,`Karttaki ${field==='kg'?'KG':'adet'} miktarı son stok hareketiyle eşleşmiyor.`);
+            else if(fieldRows.length&&roundMoney(fieldRows[0].onceki)!==0)add(stock,`İlk ${field==='kg'?'KG':'adet'} girişi hareket geçmişinde yok (${roundMoney(fieldRows[0].onceki).toLocaleString('tr-TR')} ${field==='kg'?'KG':'adet'} kayıtsız başlıyor). Stok geçmişi eksik; fiziki sayımla kontrol edin.`,'review');
+        }
+        if(stock.isPasif||stock.cutVoided)continue;
+        if(isDimensionedSheet(stock)&&stock.weightBasis==='estimate'&&Number(stock.miktar)>0&&Number(stock.kg)>0) {
+            try {
+                const density=stock.weightDensity||sheetDensity(stock.cinsi);
+                const expected=roundMoney(Number(stock.en)*Number(stock.boy)*Number(stock.mm)*Number(stock.miktar)*density/1e9);
+                if(Math.abs(expected-Number(stock.kg))>Math.max(.05,expected*.05))add(stock,`Tahmini ağırlık ölçü ve adetle uyuşmuyor: kayıtta ${Number(stock.kg).toLocaleString('tr-TR')} KG, ölçüye göre yaklaşık ${expected.toLocaleString('tr-TR')} KG. Tartım veya geçmiş stok düşümleri incelenmeli.`,'review');
+            }catch(_){}
+        }
+    }
+    for(const order of database.isEmirleri||[]) {
+        if(!order.stokDusuldu)continue;
+        const stock=stocks.find(s=>String(s.id)===String(order.stokId));
+        if(!stock){findings.push({severity:'error',category:'Stok',title:order.orderNo,detail:'Stok düşülen iş emrinin malzeme kartı bulunamadı.',target:'order',id:order.id});continue;}
+        if(order.stockTrackingVersion===2)for(const [amountKey,idKey,field] of [['stokDusulenKg','stockKgMovementId','kg'],['stokDusulenPlaka','stockPlateMovementId','miktar']]) {
+            if(!(Number(order[amountKey])>0))continue;
+            const m=movements.find(m=>m.id===order[idKey]);
+            if(!m||String(m.stokId)!==String(stock.id)||m.alan!==field||m.miktar!==-order[amountKey])add(stock,`${order.orderNo}: bağlı plaka / KG düşüm hareketi eksik veya tutarsız.`);
+        }
+        const field=order.stokDusulenAlan||(order.islemTipi==='hammadde'?'kg':'miktar');
+        if(field==='miktar'&&!order.sheetCutId&&!(Number(order.stokDusulenKg)>0)&&Number(stock.kg)>0)add(stock,`${order.orderNo}: plaka düşülmüş ancak KG düşümü kayıtlı değil.`,'review');
+    }
+    return findings;
+}
+
+function buildAccountCheckReport(database = db) {
+    const findings = buildStockCheckFindings(database);
+    const caris = database.cariler || [], invoices = database.faturalar || [], movements = database.islemler || [], cash = database.kasaHareketleri || [], accounts = database.kasaHesaplari || [];
+    const cariIds = new Map(caris.map(c => [String(c.id), c]));
+    const cariNames = new Map();
+    for (const c of caris) {
+        const name = normalizeLookupText(c.adi);
+        cariNames.set(name, cariNames.has(name) ? null : c);
+    }
+    const resolveCari = record => record.cariId != null ? cariIds.get(String(record.cariId)) : cariNames.get(normalizeLookupText(record.firma));
+    const cariRows = new Map(), cashRows = new Map();
+    for (const movement of movements) {
+        const owner = resolveCari(movement);
+        if (owner) { const key = String(owner.id); if (!cariRows.has(key)) cariRows.set(key, []); cariRows.get(key).push(movement); }
+    }
+    for (const movement of cash) {
+        const key = String(movement.kasaId); if (!cashRows.has(key)) cashRows.set(key, []); cashRows.get(key).push(movement);
+    }
+    const byId = rows => new Map(rows.map(row => [String(row.id), row]));
+    const invoiceMap = byId(invoices), movementMap = byId(movements), cashMap = byId(cash), accountMap = byId(accounts);
+    const add = (severity, category, title, detail, target, id) => findings.push({ severity, category, title, detail, target, id });
+    const numeric = value => typeof value === 'number' && Number.isFinite(value);
+    for (const cari of caris) {
+        const rows = cariRows.get(String(cari.id)) || [];
+        const unknown = rows.some(m => !numeric(m.bakiyeDegisimi));
+        const sum = roundMoney(rows.reduce((n,m) => n + (Number(m.bakiyeDegisimi) || 0), 0));
+        const knownOpening = numeric(cari.ledgerOpeningBalance);
+        const difference = roundMoney(Number(cari.bakiye || 0) - sum - (knownOpening ? cari.ledgerOpeningBalance : 0));
+        if (unknown || difference !== 0) add(knownOpening && !unknown ? 'error' : 'review', 'Cari', cari.adi,
+            `Kayıtlı bakiye ${formatCurrency(cari.bakiye)}; hareket toplamı ${formatCurrency(sum)}. ${knownOpening ? `Başlangıç ${formatCurrency(cari.ledgerOpeningBalance)}; fark ${formatCurrency(difference)}.` : `Açıklanması gereken fark ${formatCurrency(difference)}. Eski devir veya eksik hareket bilgisi kontrol edilmeli.`}${unknown ? ' Tutar etkisi bilinmeyen eski hareket var.' : ''}`, 'cari', cari.id);
+    }
+    for (const account of accounts) {
+        const rows = cashRows.get(String(account.id)) || [];
+        const sum = roundMoney(rows.reduce((n,m) => n + (m.tip === 'cikis' ? -1 : 1) * (Number(m.tutar) || 0), 0));
+        const knownOpening = numeric(account.ledgerOpeningBalance);
+        const difference = roundMoney(Number(account.bakiye || 0) - sum - (knownOpening ? account.ledgerOpeningBalance : 0));
+        if (difference !== 0) add(knownOpening ? 'error' : 'review', 'Kasa / Banka', account.ad, `Kayıtlı bakiye ${formatCurrency(account.bakiye)}; hareket toplamı ${formatCurrency(sum)}; fark ${formatCurrency(difference)}.${knownOpening ? '' : ' Eski açılış bakiyesi veya eksik hareket kontrol edilmeli.'}`, 'cash', account.id);
+    }
+    for (const invoice of invoices) {
+        const label = invoice.faturaNo || 'Fatura';
+        if (!resolveCari(invoice)) add('error','Fatura',label,'Faturanın bağlı olduğu cari bulunamıyor veya isim birden fazla cariye ait.','invoice',invoice.id);
+        const summary = getInvoicePaymentSummary(invoice, '', database);
+        if (summary.remaining === null) add('review','Fatura',label,'Eski kısmi ödemenin tutarı bilinmiyor. Fatura detayından ödeme geçmişini tamamlayın.','invoice',invoice.id);
+        if (summary.paid !== null && summary.paid > Number(invoice.tutar)) add('error','Fatura',label,`Bağlı ödeme toplamı ${formatCurrency(summary.paid)}, fatura tutarı ${formatCurrency(invoice.tutar)}.`, 'invoice',invoice.id);
+        if (numeric(invoice.matrah) && numeric(invoice.kdvTutari) && Math.abs(roundMoney(invoice.matrah + invoice.kdvTutari - Number(invoice.tutar))) > .01) add('error','Fatura',label,'Matrah ve KDV toplamı fatura tutarıyla eşleşmiyor.','invoice',invoice.id);
+        if (invoice.cariIslemId != null) {
+            const movement = movementMap.get(String(invoice.cariIslemId));
+            if (!movement || movement.reversedBy || resolveCari(movement)?.id !== resolveCari(invoice)?.id || (numeric(invoice.cariBakiyeDegisimi) && roundMoney(movement.bakiyeDegisimi) !== roundMoney(invoice.cariBakiyeDegisimi))) add('error','Fatura',label,'Faturanın cari hareketi eksik, geri alınmış veya cari/tutar bilgisi farklı.','invoice',invoice.id);
+        } else if (invoice.cariYansitildi) add('review','Fatura',label,'Cari hesaba işlendiği belirtiliyor ancak kaynak hareket bağlantısı yok.','invoice',invoice.id);
+        if (invoice.orderId != null && !(database.isEmirleri || []).some(order => String(order.id) === String(invoice.orderId))) add('error','Fatura',label,'Bağlı iş emri bulunamıyor.','invoice',invoice.id);
+    }
+    for (const movement of movements) {
+        const cari = resolveCari(movement);
+        const label = `${cari?.adi || movement.firma || 'Cari hareketi'} · ${movement.tip || movement.id}`;
+        if (!cari) add('review','Cari',label,'Hareketin carisi bulunamıyor veya eski isim bağlantısı belirsiz.','accounts',null);
+        if (movement.paymentInvoiceId != null && !movement.reversalOf && !movement.reversedBy) {
+            const invoice = invoiceMap.get(String(movement.paymentInvoiceId));
+            if (!invoice || !invoiceMatchesCari(invoice, movement.cariId, movement.firma, database) || getCariMovementFormType(movement) !== (invoice.tur === 'kesilen' ? 'tahsilat' : 'odeme_yaptik')) add('error','Ödeme',label,'Ödemenin fatura bağlantısı bulunamıyor veya cari/ödeme yönü eşleşmiyor.','cari',cari?.id);
+        }
+        if (movement.kasaHareketId != null) {
+            const linked = cashMap.get(String(movement.kasaHareketId));
+            const cashDelta = linked ? roundMoney((linked.tip === 'cikis' ? -1 : 1) * Number(linked.tutar)) : null;
+            if (!linked || (numeric(movement.bakiyeDegisimi) && cashDelta !== -roundMoney(movement.bakiyeDegisimi))) add('error','Ödeme',label,'Cari hareketinin kasa/banka kaydı eksik veya tutar/yön farklı.','cari',cari?.id);
+        }
+    }
+    for (const [rows, map, category] of [[movements,movementMap,'Cari'],[cash,cashMap,'Kasa / Banka']]) {
+        const reversalSource = row => row?.reversalOf ?? (category === 'Kasa / Banka' && String(row?.kaynak || '').endsWith('-ters-kayit') ? row.refId : null);
+        for (const row of rows) {
+            const target = category === 'Cari' ? 'cari' : 'cash';
+            const targetId = category === 'Cari' ? resolveCari(row)?.id : row.kasaId;
+            if (category === 'Kasa / Banka' && !accountMap.has(String(row.kasaId))) add('error',category,row.kasaAdi || 'Kasa hareketi','Hareketin kasa/banka hesabı bulunamıyor.','cash',null);
+            if (reversalSource(row) != null) {
+                const original = map.get(String(reversalSource(row)));
+                const delta = item => category === 'Cari' ? Number(item.bakiyeDegisimi) : (item.tip === 'cikis' ? -1 : 1) * Number(item.tutar);
+                if (!original || String(original.reversedBy) !== String(row.id) || Math.abs(roundMoney(delta(original) + delta(row))) > .01) add('error',category,`Ters kayıt · ${row.id}`,'Kaynak hareket ve ters kayıt bağlantısı veya tutarı eşleşmiyor.',target,targetId);
+            }
+            if (row.reversedBy != null && String(reversalSource(map.get(String(row.reversedBy)))) !== String(row.id)) add('error',category,`Geri alınan işlem · ${row.id}`,'İşaretlenen ters kayıt bulunamıyor veya kaynak bağlantısı farklı.',target,targetId);
+        }
+    }
+    for (const sale of database.hizliSatislar || []) {
+        const issue = getQuickSaleLinkError(sale, database);
+        if (issue) add('error', 'Hızlı Satış', sale.satisNo, issue, 'quicksale', sale.id);
+        const cut=(database.sacKesimleri||[]).find(c=>c.id===sale.sheetCutId);
+        if(sale.status==='active'&&cut&&!cut.pieces?.length&&sale.cut?.remainderMode!=='none'&&Number(sale.cut?.en)*Number(sale.cut?.boy)<Number(cut.sourceEn)*Number(cut.sourceBoy))add('review','Hızlı Satış',sale.satisNo,'Kısmi kesimin kalan parçaları kaydedilmemiş. Gerçek kalan ölçüler kontrol edilmeli.','quicksale',sale.id);
+    }
+    for (const cut of database.sacKesimleri || []) {
+        const issue = getSheetCutLinkError(cut, database);
+        if (issue) add('error', 'Sac Kesimi', cut.kesimNo, issue, 'cut', cut.id);
+    }
+    for(const movement of movements.filter(m=>m.sheetPurchase)){const issue=getSheetPurchaseLinkError(movement,database);if(issue)add('error','Sac Alımı',movement.sheetPurchase.code,issue,'cari',movement.cariId);}
+    return { findings, records: (database.stoklar || []).length + (database.isEmirleri || []).length + (database.sacKesimleri || []).length + (database.hizliSatislar || []).length + caris.length + invoices.length + movements.length + cash.length + accounts.length };
+}
+
+function showMoreAccountChecks() { accountCheckLimit += 50; renderAccountChecks(); }
+function renderAccountChecks() {
+    if (!document.getElementById('account-check-results')) return;
+    const report = buildAccountCheckReport();
+    const errors = report.findings.filter(f => f.severity === 'error').length;
+    const reviews = report.findings.length - errors;
+    document.getElementById('account-check-summary').innerHTML = financeSummaryCard('Kontrol edilen kayıt', String(report.records)) + financeSummaryCard('Tutarsızlık', String(errors), 'Bağlantı veya tutar farkı') + financeSummaryCard('İncelenecek', String(reviews), 'Eski veri / devir bilgisi') + financeSummaryCard('Kontrol sonucu', errors ? 'Kontrol gerekli' : reviews ? 'İnceleme gerekli' : 'Fark bulunmadı', 'Mevcut kayıtlar üzerinden');
+    const filter = document.getElementById('account-check-filter').value;
+    currentAccountCheckFindings = report.findings.filter(f => filter === 'all' || f.severity === filter).sort((a,b) => (a.severity === 'error' ? 0 : 1) - (b.severity === 'error' ? 0 : 1));
+    document.getElementById('account-check-results').innerHTML = currentAccountCheckFindings.slice(0,accountCheckLimit).map((f,index) => `<article class="finance-check-item"><div><span class="finance-status ${f.severity}">${f.severity === 'error' ? 'Tutarsızlık' : 'İncelenecek'} · ${escapeHTML(f.category)}</span><h4>${escapeHTML(f.title)}</h4><p>${escapeHTML(f.detail)}</p></div><button type="button" class="btn btn-outline" onclick="openAccountCheckFinding(${index})">Kaydı İncele</button></article>`).join('') || `<div class="finance-empty"><strong>${report.records ? 'Bu görünümde bulgu yok.' : 'Henüz kontrol edilecek kayıt yok.'}</strong>${report.records ? 'Kontrol mevcut kayıtların tutar ve bağlantılarıyla sınırlıdır.' : 'Kayıtlar eklendikçe burada kontrol edebilirsiniz.'}</div>`;
+    document.getElementById('account-check-more').hidden = currentAccountCheckFindings.length <= accountCheckLimit;
+    document.getElementById('account-check-time').textContent = `Son kontrol: ${new Date().toLocaleString('tr-TR')}`;
+}
+
+function openAccountCheckFinding(index) {
+    const f = currentAccountCheckFindings[index];
+    if (!f) return;
+    if (f.target === 'cut') return showSheetCutHistory(f.id);
+    if(f.target==='stock'){const stock=getDBArray('stoklar').find(s=>s.id===f.id);document.getElementById('stok-search').value=stock?.kodu||'';location.hash='inventory';switchView('inventory');renderStoklar();return;}
+    if(f.target==='order')return openOrderHistory(f.id);
+    if (f.target === 'quicksale') { location.hash = 'quicksales'; switchView('quicksales'); return; }
+    if (f.target === 'invoice') return showFaturaDetail(f.id);
+    if (f.target === 'cari' && f.id != null) return openCariDetay(f.id);
+    const target = f.target === 'cash' ? 'cashbank' : 'accounts';
+    location.hash = target; switchView(target);
+}
+
+function renderFinanceFollowUp() {
+    if (document.getElementById('view-collections')?.classList.contains('active')) renderCollections();
+    if (document.getElementById('view-accountcheck')?.classList.contains('active')) renderAccountChecks();
+    if (document.getElementById('modal-cari-ekstre')?.classList.contains('active')) renderCariPaymentOverview();
+}
+
+function applyBackupStatus(status) {
+    backupStatusRevision++;
+    backupStatusView = status;
+    renderBackupStatus();
+}
+
+async function refreshBackupStatus() {
+    const revision = backupStatusRevision;
+    if (!window.electronAPI?.getBackupStatus) { renderBackupStatus(); return; }
+    try {
+        const status = await window.electronAPI.getBackupStatus();
+        if (revision === backupStatusRevision) applyBackupStatus(status);
+    } catch (_) {
+        if (revision === backupStatusRevision) applyBackupStatus({ success: false, error: 'Yedek bilgisi okunamadı.' });
+    }
+}
+
+function renderBackupStatus() {
+    const status = backupStatusView;
+    const date = status?.lastSuccessAt ? new Date(status.lastSuccessAt) : null;
+    const dateValid = date && Number.isFinite(date.getTime());
+    const age = dateValid ? Date.now() - date.getTime() : Infinity;
+    let state = 'warning', title = 'Henüz doğrulanmış yedek yok', detail = 'Ayarlar bölümünden yedek oluşturabilirsiniz.';
+    if (!window.electronAPI?.sendBackup) { title = 'Yedekleme masaüstü uygulamasında kullanılabilir'; detail = 'Bu görünümde dosya yedeği oluşturulmaz.'; }
+    else if (status?.error || status?.success === false) { state = 'error'; title = 'Yedekleme kontrol edilmeli'; detail = status.error || 'Son yedekleme tamamlanamadı.'; }
+    else if (dateValid && status.available === false) { title = 'Son yedek dosyası bulunamıyor'; detail = 'Yeni bir yedek oluşturun.'; }
+    else if (dateValid) { state = age > 86400000 ? 'warning' : 'success'; title = age > 86400000 ? 'Son yedek 24 saatten eski' : 'Yedekleme güncel'; detail = `Son başarılı yedek: ${date.toLocaleString('tr-TR')}${status.kind === 'manual' ? ' · Manuel' : status.kind === 'safety' ? ' · Güvenlik yedeği' : ' · Otomatik'}`; }
+    if ((status?.error || status?.success === false) && dateValid) detail += ` Son başarılı yedek: ${date.toLocaleString('tr-TR')}.`;
+    for (const id of ['dashboard-backup-status','settings-backup-status']) {
+        const el = document.getElementById(id); if (!el) continue;
+        el.dataset.state = state;
+        el.innerHTML = `<i class="fa-solid ${state === 'success' ? 'fa-shield-halved' : 'fa-triangle-exclamation'}" aria-hidden="true"></i><div><strong>${escapeHTML(title)}</strong><small>${escapeHTML(detail)}</small></div>${id === 'dashboard-backup-status' ? '<button type="button" class="btn btn-outline" onclick="openAyarlarModal(); setSettingsTab(\'backup\'); refreshBackupStatus()">Yedekleme</button>' : '<button type="button" class="btn btn-outline" onclick="refreshBackupStatus()">Durumu Yenile</button>'}`;
+    }
+}
+
+// Quick sales are committed as a complete candidate database: a failed disk write
+// leaves both the live ledger and the form intact. A token makes retries idempotent.
+let quickSalesPage = 1;
+function quickSaleStatusLabel(sale) {
+    return sale.status === 'cancelled' ? 'İptal' : sale.status === 'corrected' ? 'Düzeltildi' : 'Tahsil edildi';
+}
+function getQuickSaleLinkError(sale, database = db) {
+    const same = (a,b) => String(a) === String(b);
+    const cari = (database.cariler || []).find(c => same(c.id, sale.cariId));
+    const debit = (database.islemler || []).find(m => same(m.id, sale.debitMovementId));
+    const receipt = (database.islemler || []).find(m => same(m.id, sale.receiptMovementId));
+    const cash = (database.kasaHareketleri || []).find(m => same(m.id, sale.cashMovementId));
+    if (!cari || !debit || !receipt || !cash) return 'Satışın bağlı cari veya tahsilat kaydı eksik.';
+    if (!['active','cancelled','corrected'].includes(sale.status) || !(sale.tutar > 0) || roundMoney(sale.matrah + sale.kdvTutari) !== sale.tutar) return 'Satış durumu veya tutar bilgisi tutarsız.';
+    if (![debit,receipt].every(m => same(m.cariId, cari.id) && same(m.quickSaleId, sale.id)) || debit.bakiyeDegisimi !== sale.tutar || receipt.bakiyeDegisimi !== -sale.tutar || cash.tutar !== sale.tutar || cash.tip !== 'giris' || !same(cash.kasaId,sale.kasaId) || !same(cash.refId,receipt.id) || !same(receipt.kasaHareketId,cash.id)) return 'Satış, cari ve tahsilat tutarları veya bağlantıları eşleşmiyor.';
+    if (!(database.kasaHesaplari || []).some(k => same(k.id,sale.kasaId))) return 'Tahsilat hesabı bulunamadı.';
+    const active = sale.status === 'active';
+    if ([debit,receipt,cash].some(m => active ? !!m.reversedBy : !m.reversedBy)) return 'Satış durumu ile geri alınan hareketler eşleşmiyor.';
+    if (!active) {
+        for (const original of [debit,receipt]) {
+            const rev = (database.islemler || []).find(m => same(m.id,original.reversedBy));
+            if (!rev || !same(rev.reversalOf, original.id) || rev.bakiyeDegisimi !== -original.bakiyeDegisimi) return 'Satışın geri alma hareketi eksik veya tutarı farklı.';
+        }
+        const rev = (database.kasaHareketleri || []).find(m => same(m.id,cash.reversedBy));
+        if (!rev || !same(rev.refId,cash.id) || !same(rev.kasaId,cash.kasaId) || rev.tip !== 'cikis' || rev.tutar !== cash.tutar) return 'Tahsilatın geri alma hareketi eksik veya tutarı farklı.';
+    }
+    if (sale.sheetCutId) {
+        const cut = (database.sacKesimleri || []).find(c => c.id === sale.sheetCutId);
+        if (!cut || cut.quickSaleId !== sale.id || cut.stokId !== sale.stokId || cut.quantity !== sale.stokMiktar || (cut.status === 'active') !== active) return 'Satışın kesim bağlantısı tutarsız.';
+        return getSheetCutLinkError(cut, database);
+    }
+    if (sale.stokId) {
+        const stok = (database.stoklar || []).find(s => same(s.id,sale.stokId));
+        const movement = (database.stokHareketleri || []).find(m => same(m.id,sale.stockMovementId));
+        if (!stok || (active && stok.sahibiTipi === 'musteri') || !movement || !same(movement.stokId,sale.stokId) || movement.alan !== sale.stokAlan || movement.miktar !== -sale.stokMiktar) return 'Satışın stok hareketi eksik veya miktarı farklı.';
+        if(sale.stockTrackingVersion===2)for(const [key,field] of [['stockKg','kg'],['stockPlateQty','miktar']]) {
+            if(!sale[key])continue;
+            const paired=(database.stokHareketleri||[]).find(m=>same(m.id,sale[key+'MovementId']));
+            if(!paired||!same(paired.stokId,sale.stokId)||paired.alan!==field||paired.miktar!==-sale[key])return 'Satışın eşleşen plaka / KG hareketi eksik veya farklı.';
+            if(!active){const undo=(database.stokHareketleri||[]).find(m=>same(m.id,sale[key+'ReversalId']));if(!undo||!same(undo.stokId,sale.stokId)||undo.alan!==field||undo.miktar!==sale[key])return 'Satışın plaka / KG iadesi eksik veya farklı.';}
+        }
+        if (!active) {
+            const rev = (database.stokHareketleri || []).find(m => same(m.id,sale.stockReversalId));
+            if (!rev || !same(rev.stokId,sale.stokId) || rev.alan !== sale.stokAlan || rev.miktar !== sale.stokMiktar) return 'Stok iade hareketi eksik veya miktarı farklı.';
+        }
+    }
+    return '';
+}
+function reverseQuickSaleRecords(sale, status) {
+    if (!sale || sale.status !== 'active') throw new Error('Bu satış daha önce iptal edilmiş veya düzeltilmiş. Listeyi yenileyin.');
+    const issue = getQuickSaleLinkError(sale);
+    if (issue) throw new Error(issue + ' Hesap Kontrolü bölümünden inceleyin.');
+    const cari = db.cariler.find(c => c.id === sale.cariId);
+    for (const id of [sale.debitMovementId, sale.receiptMovementId]) {
+        const original = db.islemler.find(m => m.id === id);
+        const reversal = addCariMovement(cari, { tip: 'Hızlı Satış Geri Alma', tutar: original.tutar, bakiyeDegisimi: -original.bakiyeDegisimi, reversalOf: original.id, quickSaleId: sale.id, quickSaleNo: sale.satisNo, aciklama: sale.satisNo });
+        original.reversedBy = reversal.id;
+        if (id === sale.receiptMovementId) {
+            const cashReversal = reverseCashMovement(sale.cashMovementId, `${sale.satisNo} ${status === 'corrected' ? 'düzeltildi' : 'iptal edildi'}`);
+            if (!cashReversal) throw new Error('Tahsilat geri alınamadı.');
+            reversal.kasaHareketId = cashReversal.id;
+        }
+    }
+    if (sale.sheetCutId) undoSheetCutRecords(sale.sheetCutId, sale.id);
+    if (sale.stokId && !sale.sheetCutId) {
+        const stok = db.stoklar.find(s => s.id === sale.stokId);
+        const before = Number(stok[sale.stokAlan]) || 0;
+        if (sale.stockKg) sale.stockKgReversalId=changeSheetStock(stok,'kg',sale.stockKg,'Hızlı Satış İadesi',sale.satisNo);
+        if (sale.stockPlateQty) sale.stockPlateQtyReversalId=changeSheetStock(stok,'miktar',sale.stockPlateQty,'Hızlı Satış İadesi',sale.satisNo);
+        stok[sale.stokAlan] = roundMoney(before + sale.stokMiktar);
+        sale.stockReversalId = addStokMovement(stok, { tip: 'Hızlı Satış İadesi', alan: sale.stokAlan, miktar: sale.stokMiktar, onceki: before, sonraki: stok[sale.stokAlan], ref: sale.satisNo }).id;
+    }
+    sale.status = status;
+    sale.closedAt = new Date().toISOString();
+    addAuditLog(status === 'corrected' ? 'Düzeltildi' : 'İptal', 'Hızlı Satış', sale.id, sale.satisNo);
+}
+function prepareQuickSaleCandidate(input, editId = '', cancel = false) {
+    const live = db;
+    try {
+        db = JSON.parse(JSON.stringify(live));
+        if (!Array.isArray(db.hizliSatislar)) db.hizliSatislar = [];
+        const previous = editId ? db.hizliSatislar.find(s => String(s.id) === String(editId)) : null;
+        if (editId && !previous) throw new Error('Satış bulunamadı.');
+        if (!cancel && (!input.token || typeof input.token !== 'string')) throw new Error('Satış formunu yeniden açın.');
+        if (!cancel && db.hizliSatislar.some(s => s.submitToken === input.token)) throw new Error('Bu satış zaten kaydedildi. Satış geçmişini kontrol edin.');
+        if (cancel) {
+            reverseQuickSaleRecords(previous, 'cancelled');
+            return { candidate: db, sale: previous };
+        }
+        const tutar = roundMoney(input.total), tax = Number(input.tax);
+        if (!Number.isFinite(Number(input.total)) || tutar <= 0 || tutar > 1e12) throw new Error('Geçerli bir satış tutarı girin.');
+        const preservingLegacyTax = previous && [1,10].includes(Number(previous.kdvOrani)) && tax === Number(previous.kdvOrani);
+        if (![0,20].includes(tax) && !preservingLegacyTax) throw new Error('KDV oranı %0 veya %20 olmalıdır.');
+        if (!plainText(input.description) || plainText(input.description).length > 300) throw new Error('Satış açıklaması girin (en fazla 300 karakter).');
+        if (plainText(input.name).length > 120) throw new Error('Müşteri adı en fazla 120 karakter olabilir.');
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date || '') || financeDay(input.date) === null) throw new Error('Geçerli bir satış tarihi seçin.');
+        const account = db.kasaHesaplari.find(k => String(k.id) === String(input.cashId) && isCashAccountActive(k));
+        if (!account) throw new Error('Aktif bir tahsilat hesabı seçin.');
+        // Return old stock before checking the replacement's available quantity.
+        if (previous) reverseQuickSaleRecords(previous, 'corrected');
+        let stok = null, quantity = 0;
+        const field = input.cut ? 'miktar' : input.unit || 'miktar';
+        if (input.stockId) {
+            stok = db.stoklar.find(s => String(s.id) === String(input.stockId));
+            quantity = roundMoney(input.quantity);
+            if (!stok || stok.sahibiTipi === 'musteri' || stok.isPasif) throw new Error('Satış için işletmeye ait aktif bir stok seçin.');
+            if (!['kg','miktar'].includes(field) || !Number.isFinite(Number(input.quantity)) || quantity <= 0) throw new Error('Geçerli stok miktarı ve birimi girin.');
+            if (stok.originCutId && (field !== 'miktar' || !Number.isInteger(quantity))) throw new Error('Kalan parçalar adetle kullanılır. Bölmek için Kesim / Kalan işlemini kullanın.');
+            validateStockUsage(stok,field,quantity);
+        }
+        let saleCut = null;
+        if (input.cut) {
+            if (!stok) throw new Error('Ölçüyle kesim için malzeme seçin.');
+            const basis = sheetWeightBasis(stok, input.cut.density);
+            if (!(Number(stok.kg)>0)) {
+                changeSheetStock(stok,'kg',basis.total,'Ölçüden Tahmini Ağırlık',input.token);
+                stok.weightBasis='estimate'; stok.weightDensity=basis.density;
+            }
+            const cutInput = quickSaleCutInput(input, stok);
+            const prepared = prepareSheetCutCandidate(cutInput);
+            db = prepared.candidate; saleCut = prepared.cut;
+            stok = db.stoklar.find(s => s.id === stok.id);
+        }
+        let cari = db.cariler.find(c => c.systemRole === 'retail');
+        if (!cari) {
+            cari = { id: createRecordId(), kodu: generateSerialNo('cari'), adi: 'Perakende Müşteri', tip: 'musteri', systemRole: 'retail', bakiye: 0, ledgerOpeningBalance: 0, isPasif: false };
+            db.cariler.push(cari);
+        }
+        if (cari.isPasif || Number(cari.bakiye) !== 0) throw new Error('Perakende hesabı kontrol edilmeli. Hesap Kontrolü bölümünü açın.');
+        const sale = { id: createRecordId(), satisNo: generateSerialNo('hizliSatis'), submitToken: input.token, status: 'active', tarih: toTRDateFromInput(input.date), date: input.date,
+            aciklama: plainText(input.description), customerName: plainText(input.name), cariId: cari.id, kasaId: account.id, kasaAdi: account.ad, kasaTip: account.tip,
+            tutar, kdvOrani: tax, matrah: roundMoney(tutar / (1 + tax / 100)), stokId: stok?.id || null, stokAdi: stok?.cinsi || '', stokAlan: field, stokMiktar: quantity,
+            issuer: { firmaAdi: db.ayarlar?.firmaAdi, telefon: db.ayarlar?.telefon, adres: db.ayarlar?.adres }, correctionOf: previous?.id || null, createdAt: new Date().toISOString() };
+        sale.kdvTutari = roundMoney(tutar - sale.matrah);
+        const common = { tarih: sale.tarih, quickSaleId: sale.id, quickSaleNo: sale.satisNo, tutar, aciklama: `${sale.satisNo} · ${sale.aciklama}${sale.customerName ? ' · ' + sale.customerName : ''}` };
+        sale.debitMovementId = addCariMovement(cari, { ...common, tip: 'Hızlı Satış', bakiyeDegisimi: tutar }).id;
+        const receipt = addCariMovement(cari, { ...common, tip: 'Hızlı Satış Tahsilatı', bakiyeDegisimi: -tutar, isGelir: true, isSuccess: true });
+        sale.receiptMovementId = receipt.id;
+        const cash = addCashMovement(account.id, { tip: 'giris', tutar, kaynak: 'hizli-satis', refId: receipt.id, aciklama: common.aciklama, tarih: sale.tarih });
+        if (!cash) throw new Error('Tahsilat kaydı oluşturulamadı.');
+        receipt.kasaHareketId = cash.id;
+        sale.cashMovementId = cash.id;
+        if (saleCut) {
+            sale.sheetCutId = saleCut.id; sale.cut = {...JSON.parse(JSON.stringify(input.cut)), pieces:saleCut.pieces.map(p=>({en:p.en,boy:p.boy,quantity:p.quantity})), remainderMode:input.cut.remainderMode || 'manual'};
+            saleCut.quickSaleId = sale.id; saleCut.quickSaleNo = sale.satisNo;
+        }
+        if (stok && !saleCut) {
+            const before = Number(stok[field]) || 0;
+            const secondary=secondaryStockUsage(stok,field,quantity);
+            sale.stockTrackingVersion=2;
+            if(secondary) {
+                const key=secondary.field==='kg'?'stockKg':'stockPlateQty';
+                sale[key]=secondary.quantity;
+                sale[key+'MovementId']=changeSheetStock(stok,secondary.field,-secondary.quantity,'Hızlı Satış',sale.satisNo,sale.tarih);
+            }
+            stok[field] = roundMoney(before - quantity);
+            sale.stockMovementId = addStokMovement(stok, { tip: 'Hızlı Satış', alan: field, miktar: -quantity, onceki: before, sonraki: stok[field], ref: sale.satisNo, tarih: sale.tarih }).id;
+        }
+        db.hizliSatislar.push(sale);
+        if (previous) db.hizliSatislar.find(s => s.id === previous.id).correctedBy = sale.id;
+        addAuditLog('Oluşturuldu', 'Hızlı Satış', sale.id, `${sale.satisNo} · ${formatCurrency(tutar)} · ${account.ad}`);
+        return { candidate: db, sale };
+    } finally { db = live; }
+}
+async function commitQuickSale(input, editId = '', cancel = false) {
+    if (quickSaleSaving || sheetCutSaving) return { success: false, error: 'Bir kayıt işlemi devam ediyor.' };
+    if (startupHydrationPending || startupPersistenceBlocked) return { success: false, error: 'Veriler hazır değil. Yükleme durumunu kontrol edin.' };
+    quickSaleSaving = true;
+    const surfaces = [...document.body.children].filter(el => !['SCRIPT','STYLE'].includes(el.tagName));
+    const inertStates = surfaces.map(el => [el,el.inert]);
+    surfaces.forEach(el => { el.inert = true; });
+    const notice = document.createElement('div');
+    notice.className = 'quick-sale-saving'; notice.setAttribute('role','status'); notice.textContent = 'Satış ve tahsilat kaydediliyor…'; document.body.append(notice);
+    try {
+        const prepared = prepareQuickSaleCandidate(input,editId,cancel);
+        const result = await replaceDatabaseSafely(prepared.candidate);
+        return { ...result, sale: result.success ? prepared.sale : null };
+    } catch(error) { return { success: false, error: error.message }; }
+    finally {
+        quickSaleSaving = false;
+        notice.remove(); inertStates.forEach(([el,inert]) => { el.inert = inert; });
+    }
+}
+function openQuickSale(id = '') {
+    if (quickSaleSaving || sheetCutSaving) return;
+    const sale = id ? getDBArray('hizliSatislar').find(s => String(s.id) === String(id)) : null;
+    if (id && (!sale || sale.status !== 'active')) return alert('Yalnızca geçerli satışlar düzeltilebilir.');
+    const set = (name,value) => { document.getElementById('quick-sale-'+name).value = value; };
+    const accounts = getDBArray('kasaHesaplari').filter(isCashAccountActive);
+    document.getElementById('quick-sale-cash').innerHTML = '<option value="">Hesap seçin</option>' + accounts.map(k => `<option value="${k.id}">${escapeHTML(k.ad)}</option>`).join('');
+    document.getElementById('quick-sale-stock').innerHTML = '<option value="">Stok düşme</option>' + getDBArray('stoklar').filter(s => s.sahibiTipi !== 'musteri' && !s.isPasif && !s.cutVoided && (Number(s.miktar)>0 || Number(s.kg)>0 || String(sale?.stokId)===String(s.id))).map(s => `<option value="${s.id}">${escapeHTML([getStockDisplayCode(s),s.cinsi,s.mm ? s.mm+' mm' : '', s.ebat || (s.en && s.boy ? s.en+' × '+s.boy : ''), 'Stok: '+roundMoney(s.miktar||0).toLocaleString('tr-TR')+' plaka / '+roundMoney(s.kg||0).toLocaleString('tr-TR')+' KG', s.originCutId ? 'Kalan Parça' : ''].filter(Boolean).join(' · '))}</option>`).join('');
+    const taxSelect = document.getElementById('quick-sale-tax');
+    taxSelect.innerHTML = '<option value="20">%20</option><option value="0">%0</option>';
+    if (sale && [1,10].includes(Number(sale.kdvOrani))) {
+        taxSelect.add(new Option(`%${Number(sale.kdvOrani)} (kayıtlı oran)`, String(Number(sale.kdvOrani))));
+    }
+    set('edit-id', sale?.id || ''); set('token', crypto.randomUUID());
+    set('description',sale?.aciklama || ''); set('name',sale?.customerName || ''); set('total',sale?.tutar || '');
+    set('cash',sale?.kasaId || ''); set('date',sale?.date || toDateInputValue(new Date())); set('tax',sale?.kdvOrani ?? 20);
+    set('stock',sale?.stokId || ''); set('quantity',sale?.stokMiktar || ''); set('unit',sale?.stokAlan || 'miktar');
+    set('mode', sale?.sheetCutId ? 'cut' : 'whole');
+    set('cut-en', sale?.cut?.en || ''); set('cut-boy', sale?.cut?.boy || '');
+    set('cut-density',sale?.cut?.density || '');set('cut-remaining-kg',sale?.cut?.remainingKg ?? '');
+    set('remainder-mode',sale?.cut ? (sale.cut.remainderMode || 'manual') : 'auto');
+    document.getElementById('quick-sale-cut-rows').innerHTML = '';
+    (sale?.cut?.pieces || []).forEach(p => addQuickSaleCutRow(p));
+    document.getElementById('quick-sale-stock-details').open = true;
+    document.getElementById('quick-sale-title').textContent = sale ? `Satışı Düzelt · ${sale.satisNo}` : 'Yeni Hızlı Satış';
+    document.getElementById('quick-sale-error').hidden = true;
+    updateQuickSaleStockHint(); updateQuickSaleSummary(); openModal('modal-quick-sale');
+    document.getElementById('quick-sale-description').focus();
+}
+function updateQuickSaleStockHint() {
+    const cutting = document.getElementById('quick-sale-mode').value === 'cut';
+    document.getElementById('quick-sale-cut-fields').hidden = !cutting;
+    document.getElementById('quick-sale-unit').disabled = cutting;
+    if (cutting) document.getElementById('quick-sale-unit').value = 'miktar';
+    const stock = getDBArray('stoklar').find(s => String(s.id) === document.getElementById('quick-sale-stock').value);
+    const field = document.getElementById('quick-sale-unit').value;
+    const previous = getDBArray('hizliSatislar').find(s => String(s.id) === document.getElementById('quick-sale-edit-id').value);
+    const returned = previous?.status === 'active' && previous.stokId === stock?.id && previous.stokAlan === field ? previous.stokMiktar : 0;
+    document.getElementById('quick-sale-stock-hint').textContent = stock ? `Kullanılabilir: ${roundMoney(getAvailableStockQuantity(stock,field) + returned).toLocaleString('tr-TR')} ${field === 'kg' ? 'KG' : 'adet'}${returned ? ' (bu satışın iadesi dahil)' : ''}` : 'Malzeme seçmezseniz stok miktarı değişmez.';
+    updateQuickSaleWeight();
+    updateQuickSaleSummary();
+}
+function updateQuickSaleSummary() {
+    const total = Math.max(0,roundMoney(document.getElementById('quick-sale-total').value));
+    const tax = Number(document.getElementById('quick-sale-tax').value);
+    const base = roundMoney(total/(1+tax/100));
+    // Selling without a material is valid for services, but must never look like a stock deduction.
+    const stock = getDBArray('stoklar').find(s => String(s.id) === document.getElementById('quick-sale-stock').value);
+    const cutting = document.getElementById('quick-sale-mode').value === 'cut';
+    const quantity = Number(document.getElementById('quick-sale-quantity').value);
+    const unit = cutting ? 'plaka (ölçüyle kesim)' : document.getElementById('quick-sale-unit').value === 'kg' ? 'KG' : 'adet';
+    const stockLine = !stock ? '<small class="quick-sale-stock-warning" role="note">Malzeme seçilmedi: stok miktarı değişmeyecek.</small>'
+        : quantity > 0 ? `<small>Stoktan düşülecek: ${escapeHTML(quantity.toLocaleString('tr-TR'))} ${unit} · ${escapeHTML(getStockDisplayCode(stock))}</small>`
+        : '<small class="quick-sale-stock-warning" role="note">Malzeme seçildi ancak miktar girilmedi.</small>';
+    document.getElementById('quick-sale-summary').innerHTML = `<div><span>Tahsil edilecek</span><strong>${formatCurrency(total)}</strong></div><small>Matrah ${formatCurrency(base)} · KDV ${formatCurrency(total-base)}</small>${stockLine}`;
+}
+async function saveQuickSale() {
+    const modal = document.getElementById('modal-quick-sale');
+    if (!modal.classList.contains('active')) return;
+    const unlock = beginModalSubmit('modal-quick-sale'); if (!unlock) return;
+    try {
+        const get = name => document.getElementById('quick-sale-'+name).value;
+        const input = { token: get('token'), description: get('description'), name: get('name'), total: get('total'), cashId: get('cash'), date: get('date'), tax: get('tax'), stockId: get('stock'), quantity: get('quantity'), unit: get('unit') };
+        if (get('mode') === 'cut') {
+            updateQuickSaleWeight();
+            input.cut = { remainderMode:get('remainder-mode'), density:get('cut-density'), remainingKg:get('cut-remaining-kg'), en:get('cut-en'), boy:get('cut-boy'), pieces:[...document.querySelectorAll('#quick-sale-cut-rows .sheet-cut-row')].map(row => ({en:row.querySelector('[data-field="en"]').value,boy:row.querySelector('[data-field="boy"]').value,quantity:row.querySelector('[data-field="quantity"]').value})) };
+        }
+        const result = await commitQuickSale(input,get('edit-id'));
+        if (!result.success) { const error = document.getElementById('quick-sale-error'); error.textContent = result.error; error.hidden = false; return; }
+        closeModal('modal-quick-sale');
+        location.hash = 'quicksales'; switchView('quicksales'); renderAll();
+        showToast({ type: result.backupWarning ? 'warning' : 'success', title: 'Satış kaydedildi', message: `${result.sale.satisNo} · ${formatCurrency(result.sale.tutar)} tahsil edildi.${result.backupWarning ? ' Otomatik yedek alınamadı; yedekleme durumunu kontrol edin.' : ''}` });
+    } finally { unlock(); }
+}
+function cancelQuickSale(id) {
+    const sale = getDBArray('hizliSatislar').find(s => s.id == id);
+    if (!sale || sale.status !== 'active') return alert('Bu satış daha önce geri alınmış.');
+    confirmAction(`${sale.satisNo} iptal edilsin mi? ${formatCurrency(sale.tutar)} tahsilat geri alınacak${sale.stokId ? ' ve malzeme stoğa iade edilecek' : ''}.`, async () => {
+        const result = await commitQuickSale(null,id,true);
+        if (!result.success) return alert(result.error);
+        renderAll(); showToast({ type: result.backupWarning ? 'warning' : 'success', title: 'Satış iptal edildi', message: `${sale.satisNo} hareketleri geri alındı.${result.backupWarning ? ' Otomatik yedek alınamadı.' : ''}` });
+    }, { title: 'Satışı İptal Et', confirmLabel: 'Satışı İptal Et' });
+}
+function filterQuickSales() { quickSalesPage = 1; renderQuickSales(); }
+function changeQuickSalesPage(delta) { quickSalesPage += delta; renderQuickSales(); }
+function renderQuickSales() {
+    const body = document.getElementById('quick-sales-tbody'); if (!body) return;
+    const query = normalizeSearchText(document.getElementById('quick-sales-search').value);
+    const from = document.getElementById('quick-sales-from').value, to = document.getElementById('quick-sales-to').value;
+    const status = document.getElementById('quick-sales-status').value;
+    const rows = getDBArray('hizliSatislar').filter(s => (status === 'all' || s.status === status) && (!from || s.date >= from) && (!to || s.date <= to) && normalizeSearchText([s.satisNo,s.aciklama,s.customerName,s.tutar,formatCurrency(s.tutar)].join(' ')).includes(query)).sort((a,b) => b.date.localeCompare(a.date) || b.id-a.id);
+    const active = rows.filter(s => s.status === 'active');
+    const sum = items => formatCurrency(items.reduce((n,s) => n+s.tutar,0));
+    document.getElementById('quick-sales-summary').innerHTML = financeSummaryCard('Geçerli satış',sum(active),`${active.length} satış · seçilen filtreler`) + financeSummaryCard('Nakit tahsilat',sum(active.filter(s => s.kasaTip === 'nakit')),'Geçerli satışlar') + financeSummaryCard('Banka tahsilatı',sum(active.filter(s => s.kasaTip !== 'nakit')),'Geçerli satışlar');
+    const pages = Math.max(1,Math.ceil(rows.length/25)); quickSalesPage = Math.min(pages,Math.max(1,quickSalesPage));
+    body.innerHTML = rows.slice((quickSalesPage-1)*25,quickSalesPage*25).map(s => `<tr><td><strong>${escapeHTML(s.satisNo)}</strong><small>${escapeHTML(s.tarih)}</small></td><td><strong>${escapeHTML(s.aciklama)}</strong><small>${escapeHTML(s.customerName || 'İsimsiz satış')}${s.stokId ? ' · '+escapeHTML(s.stokMiktar+' '+(s.stokAlan==='kg'?'KG':'adet')+' '+s.stokAdi) : ''}</small></td><td>${escapeHTML(s.kasaAdi)}</td><td class="number-cell">${formatCurrency(s.tutar)}</td><td><span class="finance-status ${s.status==='active'?'success':'review'}">${quickSaleStatusLabel(s)}</span>${s.correctionOf ? '<small>Önceki satışın düzeltmesi</small>' : ''}</td><td><div class="finance-row-actions"><button type="button" class="btn btn-outline" onclick="printQuickSale(${s.id})" aria-label="${escapeHTML(s.satisNo)} yazdır">Yazdır</button>${s.status==='active' ? `<button type="button" class="btn btn-outline" onclick="openQuickSale(${s.id})" aria-label="${escapeHTML(s.satisNo)} düzelt">Düzelt</button><button type="button" class="btn btn-outline" onclick="cancelQuickSale(${s.id})" aria-label="${escapeHTML(s.satisNo)} iptal et">İptal</button>` : ''}</div></td></tr>`).join('') || '<tr><td colspan="6"><div class="finance-empty"><strong>Bu görünümde satış yok.</strong>Yeni Hızlı Satış ile kayıt ekleyebilir veya filtreleri değiştirebilirsiniz.</div></td></tr>';
+    document.getElementById('quick-sales-page-info').textContent = `${rows.length} kayıt · Sayfa ${quickSalesPage} / ${pages}`;
+    document.getElementById('quick-sales-prev').disabled = quickSalesPage === 1;
+    document.getElementById('quick-sales-next').disabled = quickSalesPage === pages;
+}
+function getQuickSalePrintHTML(sale) {
+    return getPrintBrandHTML('Satış Özeti', getPrintMetaHTML([['Satış No',sale.satisNo],['Tarih',sale.tarih],['Durum',quickSaleStatusLabel(sale)]]),sale.issuer) +
+        (sale.customerName ? getPrintPartyHTML('Müşteri',sale.customerName) : '') +
+        `<table><thead><tr><th scope="col">Açıklama</th><th scope="col" class="number-cell">Tutar (TL)</th></tr></thead><tbody><tr><td>${escapeHTML(sale.aciklama)}${sale.stokId ? `<div class="document-card-detail">${escapeHTML(sale.stokMiktar+' '+(sale.stokAlan==='kg'?'KG':'adet')+' · '+sale.stokAdi)}</div>` : ''}</td><td class="number-cell">${formatCurrency(sale.matrah)}</td></tr><tr><td>KDV (%${escapeHTML(sale.kdvOrani)})</td><td class="number-cell">${formatCurrency(sale.kdvTutari)}</td></tr><tr class="total-row"><td>TOPLAM</td><td class="number-cell">${formatCurrency(sale.tutar)}</td></tr></tbody></table>` +
+        `<p>${sale.status === 'active' ? `Tahsil edildi · ${sale.kasaTip === 'nakit' ? 'Nakit' : 'Banka'}` : 'Bu satış kaydı geri alınmıştır.'}</p>`;
+}
+function printQuickSale(id) {
+    const sale = getDBArray('hizliSatislar').find(s => s.id == id); if (!sale) return;
+    openPrintPreview('Satış Özeti',getQuickSalePrintHTML(sale),'',{ paymentFooter: true });
+}
+
+// Sheet cutting records transfer whole sheets into individually identifiable remnants.
+let sheetCutPage = 1;
+function getActiveSheetCutForOrder(id) { return getDBArray('sacKesimleri').find(c => c.status === 'active' && String(c.orderId) === String(id)); }
+function isSheetCutStockLinked(id) {
+    return getDBArray('stoklar').some(s => s.id == id && s.originCutId) || getDBArray('sacKesimleri').some(c => c.stokId == id);
+}
+function changeSheetStock(stock, field, delta, type, ref, tarih) {
+    const before = Number(stock[field]) || 0;
+    const after = roundMoney(before + delta);
+    if (after < 0) throw new Error('Stok miktarı negatif olamaz.');
+    stock[field] = after;
+    return addStokMovement(stock, { alan: field, miktar: delta, onceki: before, sonraki: after, tip: type, ref, tarih }).id;
+}
+function sheetCutOrderUsage(order) {
+    return order?.stokDusuldu ? { field: order.stokDusulenAlan || (order.islemTipi === 'hammadde' ? 'kg' : 'miktar'), quantity: Number(order.stokDusulenMiktar) } : getOrderStockUsage(order);
+}
+function sheetCutInput() {
+    const value = name => document.getElementById('sheet-cut-'+name).value;
+    return { estimate:document.getElementById('sheet-cut-weight').dataset.estimate==='true', token: value('token'), stockId: value('stock'), orderId: value('order'), quantity: value('quantity'), weight: value('weight'), scrapKg: value('scrap'), note: value('note'),
+        pieces: [...document.querySelectorAll('#sheet-cut-rows .sheet-cut-row')].map(row => ({ en: row.querySelector('[data-field="en"]').value, boy: row.querySelector('[data-field="boy"]').value, quantity: row.querySelector('[data-field="quantity"]').value })) };
+}
+function validateSheetCutInput(input) {
+    const stock = getDBArray('stoklar').find(s => String(s.id) === String(input.stockId));
+    if (!stock || stock.isPasif) throw new Error('Kesilecek aktif sacı seçin.');
+    const en = Number(stock.en), boy = Number(stock.boy), mm = Number(stock.mm);
+    if (![en,boy,mm].every(n => Number.isFinite(n) && n > 0)) throw new Error('Kaynak sacın en, boy ve kalınlığı eksik. Önce stok kartını tamamlayın.');
+    const quantity = Number(input.quantity), weight = roundMoney(input.weight), scrapKg = roundMoney(input.scrapKg);
+    if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 10000) throw new Error('Kesime giren adedi pozitif bir tam sayı olarak girin.');
+    if (![Number(input.weight),Number(input.scrapKg)].every(n => Number.isFinite(n) && n >= 0)) throw new Error('Ağırlıklar geçerli ve negatif olmayan sayılar olmalıdır.');
+    if (plainText(input.note).length > 300) throw new Error('Not en fazla 300 karakter olabilir.');
+    const order = input.orderId ? getDBArray('isEmirleri').find(o => String(o.id) === String(input.orderId)) : null;
+    if (input.orderId && (!order || order.durum === 'İptal' || String(order.stokId) !== String(stock.id))) throw new Error('İş emri bu saca bağlı değil veya iptal edilmiş.');
+    if (order) {
+        if (getActiveSheetCutForOrder(order.id)) throw new Error('Bu iş emrinin kesimi zaten kayıtlı. Kesim Geçmişi bölümünü kontrol edin.');
+        const usage = sheetCutOrderUsage(order);
+        if (!usage || usage.field !== 'miktar' || usage.quantity !== quantity) throw new Error('Kesim adedi iş emrindeki plaka adediyle aynı olmalıdır.');
+    }
+    const alreadyDeducted = order?.stokDusuldu === true;
+    if (!alreadyDeducted && quantity > getAvailableStockQuantity(stock,'miktar',order?.id ?? null)) throw new Error('Kullanılabilir plaka yetersiz. Başka işlere ayrılan plakalar kullanılamaz.');
+    const weightAlreadyDeducted = alreadyDeducted && Number(order?.stokDusulenKg) > 0;
+    if (weightAlreadyDeducted && weight !== Number(order.stokDusulenKg)) throw new Error('Kesime giren KG, iş emrinde düşülen KG ile aynı olmalıdır.');
+    const availableWeight = weightAlreadyDeducted ? 0 : Number(stock.kg) || 0;
+    if (availableWeight > 0 && weight <= 0) throw new Error('Bu stokta ağırlık tutuluyor. Kesime giren toplam KG bilgisini girin.');
+    if (!weightAlreadyDeducted && weight > getAvailableStockQuantity(stock,'kg',order?.id ?? null)) throw new Error('Kesime giren KG, kullanılabilir stok ağırlığını aşamaz.');
+    if (!Array.isArray(input.pieces) || input.pieces.length > 50) throw new Error('En fazla 50 farklı parça ölçüsü ekleyebilirsiniz.');
+    const pieces = input.pieces.map(p => {
+        const w = Number(p.en), h = Number(p.boy), count = Number(p.quantity);
+        if (![w,h].every(n => Number.isFinite(n) && n > 0) || !Number.isSafeInteger(count) || count < 1 || count > 10000) throw new Error('Her parçaya geçerli en, boy ve tam sayı adet girin.');
+        if (!((w <= en && h <= boy) || (w <= boy && h <= en))) throw new Error('Kalan parçanın ölçüleri kaynak plakaya sığmalıdır.');
+        if(p.kg!==undefined && (!Number.isFinite(Number(p.kg)) || Number(p.kg)<0))throw new Error('Kalan parça KG geçersiz.');
+        return { en:w, boy:h, quantity:count, area:w*h*count, kg:p.kg === undefined ? roundMoney(weight * w*h*count/(en*boy*quantity)) : roundMoney(p.kg), cost:roundMoney(Number(stock.maliyet)||0) };
+    });
+    if (pieces.some(p=>!Number.isFinite(p.kg)||p.kg<0)) throw new Error('Kalan parça ağırlığı geçersiz.');
+    const area = pieces.reduce((n,p) => n+p.area,0), sourceArea=en*boy*quantity;
+    if (area >= sourceArea) throw new Error('Kalan parçaların toplam alanı kesime giren alandan küçük olmalıdır.');
+    const remainingKg = roundMoney(pieces.reduce((n,p) => n+p.kg,0));
+    if (roundMoney(remainingKg + scrapKg) > weight) throw new Error('Kalan parçalar ve hurdanın ağırlığı kesime giren ağırlığı aşamaz.');
+    return { stock, order, alreadyDeducted, weightAlreadyDeducted, quantity, weight, scrapKg, pieces, area, sourceArea, remainingKg };
+}
+function registerSheetCutRemainders(cut, stock, pieces, remainingWeightManual=false) {
+        for (const piece of pieces) {
+            const root = getRootSheetStock(stock);
+            if (!root) throw new Error('Sacın ilk stok kaydı bulunamadı. Kesim kaydedilmedi.');
+            const remainder = { id:createRecordId(), kodu:root.kodu, rootStockId:root.id, partNo:nextSheetPartNo(root), codeAliases:[...new Set([...getCodeAliases(root),...getCodeAliases(stock)])], cinsi:stock.cinsi, mm:stock.mm, en:piece.en, boy:piece.boy, ebat:`${piece.en}x${piece.boy}`, miktar:piece.quantity, kg:piece.kg, maliyet:piece.cost, costUnit:'kg',
+                sahibiTipi:stock.sahibiTipi || 'biz', sahibi:stock.sahibi || 'Biz', cariId:stock.cariId || '', kritikSeviye:0, weightBasis:remainingWeightManual ? 'manual' : 'estimate', weightDensity:stock.weightDensity || null, originCutId:cut.id, sourceStockId:stock.id, tarih:cut.tarih, isPasif:false };
+            db.stoklar.push(remainder);
+            const movement=addStokMovement(remainder,{tip:'Kesimden Kalan Parça',alan:'miktar',miktar:piece.quantity,onceki:0,sonraki:piece.quantity,ref:cut.kesimNo});
+            cut.pieces.push({ ...piece, stockId:remainder.id, code:remainder.kodu, partNo:remainder.partNo, movementId:movement.id });
+            if (piece.kg) addStokMovement(remainder,{tip:'Kesimden Kalan Parça',alan:'kg',miktar:piece.kg,onceki:0,sonraki:piece.kg,ref:cut.kesimNo});
+        }
+}
+function prepareSheetCutCandidate(input, undoId = '') {
+    const live = db;
+    try {
+        db = JSON.parse(JSON.stringify(live));
+        if (!Array.isArray(db.sacKesimleri)) db.sacKesimleri = [];
+        if (undoId) return { candidate: db, cut: undoSheetCutRecords(undoId) };
+        if (!input.token || db.sacKesimleri.some(c => c.submitToken === input.token)) throw new Error('Bu kesim zaten kaydedildi veya form geçersiz. Kesim Geçmişi bölümünü kontrol edin.');
+        if(input.estimate && !input.orderId) {
+            const source=db.stoklar.find(s=>String(s.id)===String(input.stockId));
+            if(source && !(Number(source.kg)>0)) {
+                const basis=sheetWeightBasis(source);
+                changeSheetStock(source,'kg',basis.total,'Ölçüden Tahmini Ağırlık',input.token);
+                source.weightBasis='estimate';source.weightDensity=basis.density;
+            }
+        }
+        const v=validateSheetCutInput(input), {stock,order}=v;
+        const cut = { id:createRecordId(), kesimNo:generateSerialNo('sacKesim'), submitToken:input.token, status:'active', tarih:new Date().toLocaleDateString('tr-TR'),
+            stokId:stock.id, sourceCode:stock.kodu, sourcePartNo:stock.partNo || null, sourceName:stock.cinsi, sourceEn:Number(stock.en), sourceBoy:Number(stock.boy), sourceMm:Number(stock.mm), quantity:v.quantity, consumedKg:v.weight,
+            orderId:order?.id || null, orderNo:order?.orderNo || '', alreadyDeducted:v.alreadyDeducted, weightAlreadyDeducted:v.weightAlreadyDeducted, note:plainText(input.note), pieces:[], scrapKg:v.scrapKg, movements:[],
+            orderStockBefore:order ? { stokDusuldu:!!order.stokDusuldu, stokDusulenMiktar:order.stokDusulenMiktar || 0, stokDusulenAlan:order.stokDusulenAlan || '', stokDusulenKg:order.stokDusulenKg || 0 } : null };
+        if (!v.alreadyDeducted) cut.movements.push(changeSheetStock(stock,'miktar',-v.quantity,'Sac Kesimi',cut.kesimNo));
+        if (v.weight && !v.weightAlreadyDeducted) cut.movements.push(changeSheetStock(stock,'kg',-v.weight,'Sac Kesimi',cut.kesimNo));
+        if (order && !v.alreadyDeducted) Object.assign(order,{stokDusuldu:true,stokDusulenMiktar:v.quantity,stokDusulenAlan:'miktar',stokDusulenKg:v.weight});
+        if (order) order.sheetCutId = cut.id;
+        registerSheetCutRemainders(cut,stock,v.pieces,input.remainingWeightManual);
+        if (v.scrapKg > 0) {
+            const scrap = { id:createRecordId(), cutId:cut.id, cinsi:stock.cinsi, mm:Number(stock.mm), en:0, boy:0, miktar:0, kg:v.scrapKg, tur:'hurda', sahibi:stock.sahibi || 'Biz', sahibiTipi:stock.sahibiTipi || 'biz', cariId:stock.cariId || '', isEmriId:order?.id || null, isEmriNo:order?.orderNo || '', neden:cut.kesimNo+' · Kesim hurdası', tarih:cut.tarih };
+            db.fireler.push(scrap);cut.scrapId=scrap.id;
+        }
+        db.sacKesimleri.push(cut);addAuditLog('Oluşturuldu','Sac Kesimi',cut.id,`${cut.kesimNo} · ${cut.sourceCode} · ${cut.quantity} adet · ${cut.pieces.length} parça ölçüsü`);
+        return { candidate:db, cut };
+    } finally { db=live; }
+}
+function sheetCutUndoError(cut, saleId = '') {
+    if (cut?.quickSaleId && String(cut.quickSaleId) !== String(saleId)) return 'Bu kesim hızlı satışa bağlı. Hızlı Satış geçmişinden satışı düzeltin veya iptal edin.';
+    if (!cut || cut.status !== 'active') return 'Bu kesim daha önce geri alınmış veya bulunamıyor.';
+    const linkError=getSheetCutLinkError(cut); if(linkError)return linkError;
+    if (!getDBArray('stoklar').some(s => s.id === cut.stokId)) return 'Kaynak stok bulunamadı.';
+    if (cut.orderId) {
+        const order=getDBArray('isEmirleri').find(o => o.id === cut.orderId);
+        if (!order || order.sheetCutId !== cut.id || !order.stokDusuldu || String(order.stokId) !== String(cut.stokId) || Number(order.stokDusulenMiktar) !== cut.quantity) return 'Bağlı iş emrinin stok bilgisi değişmiş. Kesim geri alınamaz.';
+    }
+    if ((cut.movements || []).some(id => !getDBArray('stokHareketleri').some(m => m.id === id))) return 'Kesimin stok hareketi eksik. Önce kayıtları kontrol edin.';
+    for (const p of cut.pieces) {
+        const stock=getDBArray('stoklar').find(s => s.id === p.stockId);
+        if (!stock || stock.originCutId !== cut.id || stock.miktar !== p.quantity || roundMoney(stock.kg) !== p.kg || stock.isPasif) return `${p.code}: parça miktarı değişmiş veya kayıt eksik. Önce bağlı işlemleri geri alın.`;
+        if (getDBArray('sacKesimleri').some(c => c.status === 'active' && c.stokId === stock.id) || getDBArray('isEmirleri').some(o => String(o.stokId) === String(stock.id) && o.durum !== 'İptal') || getDBArray('teklifler').some(q => String(q.stokId) === String(stock.id)) || getDBArray('hizliSatislar').some(s => s.stokId === stock.id && s.status === 'active')) return `${p.code} başka bir işe, teklife veya satışa bağlı. Önce bağlı işlemleri kaldırın veya geri alın.`;
+    }
+    if (cut.scrapId && !getDBArray('fireler').some(f => f.id === cut.scrapId && f.cutId === cut.id && f.kg === cut.scrapKg)) return 'Kesime bağlı hurda kaydı eksik veya değiştirilmiş.';
+    return '';
+}
+function undoSheetCutRecords(id, saleId = '') {
+    const cut=getDBArray('sacKesimleri').find(c => String(c.id) === String(id));
+    const error=sheetCutUndoError(cut, saleId); if (error) throw new Error(error);
+    const stock=db.stoklar.find(s => s.id === cut.stokId), order=db.isEmirleri.find(o => o.id === cut.orderId);
+    const keepDeduction = !cut.alreadyDeducted && order?.durum === 'Teslim Edildi';
+    for (const p of cut.pieces) {
+        const remainder=db.stoklar.find(s => s.id === p.stockId);
+        changeSheetStock(remainder,'miktar',-p.quantity,'Kesim Geri Alma',cut.kesimNo);
+        if (p.kg) changeSheetStock(remainder,'kg',-p.kg,'Kesim Geri Alma',cut.kesimNo);
+        remainder.isPasif=true;remainder.cutVoided=true;
+    }
+    if (!cut.alreadyDeducted && !keepDeduction) changeSheetStock(stock,'miktar',cut.quantity,'Kesim Geri Alma',cut.kesimNo);
+    if (cut.consumedKg && !cut.weightAlreadyDeducted && !keepDeduction) changeSheetStock(stock,'kg',cut.consumedKg,'Kesim Geri Alma',cut.kesimNo);
+    if (order) {
+        if (!keepDeduction) Object.assign(order,cut.orderStockBefore);
+        delete order.sheetCutId;
+    }
+    if (cut.scrapId) db.fireler=db.fireler.filter(f => f.id !== cut.scrapId);
+    cut.status='cancelled';cut.undoKeptOrderDeduction=keepDeduction;cut.closedAt=new Date().toISOString();
+    addAuditLog('Geri Alındı','Sac Kesimi',cut.id,cut.kesimNo+(keepDeduction ? ' · Teslim edilmiş işin stok düşümü korundu.' : ''));
+    return cut;
+}
+async function commitSheetCut(input, undoId='') {
+    if (sheetCutSaving || quickSaleSaving || startupHydrationPending || startupPersistenceBlocked) return {success:false,error:'Kayıt işlemi şu anda hazır değil. Lütfen tekrar deneyin.'};
+    sheetCutSaving=true;
+    const states=[...document.body.children].filter(el => !['SCRIPT','STYLE'].includes(el.tagName)).map(el => [el,el.inert]);
+    states.forEach(([el])=>el.inert=true);
+    const notice=document.createElement('div');notice.className='quick-sale-saving';notice.setAttribute('role','status');notice.textContent='Sac ve parça stokları kaydediliyor…';document.body.append(notice);
+    try { const prepared=prepareSheetCutCandidate(input,undoId);const result=await replaceDatabaseSafely(prepared.candidate);return {...result,cut:result.success?prepared.cut:null}; }
+    catch(e) { return {success:false,error:e.message}; }
+    finally {sheetCutSaving=false;notice.remove();states.forEach(([el,inert])=>el.inert=inert);}
+}
+function openSheetCut(stockId='', orderId='') {
+    if (sheetCutSaving || quickSaleSaving) return;
+    document.getElementById('sheet-cut-stock').innerHTML='<option value="">Sac / parça seçin</option>'+getDBArray('stoklar').filter(s=>!s.isPasif).map(s=>`<option value="${s.id}">${escapeHTML(`${getStockDisplayCode(s)} · ${s.cinsi} · ${s.mm} mm · ${s.ebat}${s.originCutId?' · Kalan Parça':''}`)}</option>`).join('');
+    document.getElementById('sheet-cut-stock').value=stockId;
+    document.getElementById('sheet-cut-token').value=crypto.randomUUID();
+    document.getElementById('sheet-cut-rows').innerHTML='';addSheetCutRow();
+    document.getElementById('sheet-cut-scrap').value=0;document.getElementById('sheet-cut-note').value='';document.getElementById('sheet-cut-error').hidden=true;
+    updateSheetCutOrders();
+    if(orderId){document.getElementById('sheet-cut-order').value=orderId;updateSheetCutSource();}
+    openModal('modal-sheet-cut');
+}
+function updateSheetCutOrders() {
+    const id=document.getElementById('sheet-cut-stock').value;
+    const orders=getDBArray('isEmirleri').filter(o=>String(o.stokId)===id && o.durum!=='İptal' && sheetCutOrderUsage(o)?.field==='miktar' && !getActiveSheetCutForOrder(o.id));
+    document.getElementById('sheet-cut-order').innerHTML='<option value="">Bağımsız kesim (iş emrine bağlı değil)</option>'+orders.map(o=>`<option value="${o.id}">${escapeHTML(`${o.orderNo} · ${o.customerName || ''} · ${sheetCutOrderUsage(o).quantity} adet${o.stokDusuldu?' · Stok daha önce düşüldü':''}`)}</option>`).join('');
+    updateSheetCutSource();
+}
+function updateSheetCutSource() {
+    const id=document.getElementById('sheet-cut-stock').value, orderId=document.getElementById('sheet-cut-order').value;
+    const stock=getDBArray('stoklar').find(s=>String(s.id)===id), order=getDBArray('isEmirleri').find(o=>String(o.id)===orderId);
+    const count=sheetCutOrderUsage(order)?.quantity || 1;
+    document.getElementById('sheet-cut-quantity').value=count;document.getElementById('sheet-cut-quantity').readOnly=!!order;
+    document.getElementById('sheet-cut-weight').value=Number(order?.stokDusulenKg)>0 ? order.stokDusulenKg : stock && !order?.stokDusuldu && Number(stock.miktar)>0 ? roundMoney((Number(stock.kg)||0)*count/Number(stock.miktar)) : '';
+    const weightField=document.getElementById('sheet-cut-weight');weightField.dataset.estimate='false';
+    if(stock && !order && !(Number(stock.kg)>0)) {
+        try {weightField.value=roundMoney(sheetWeightBasis(stock).total*count/Number(stock.miktar));weightField.dataset.estimate='true';} catch(_) {}
+    }
+    document.getElementById('sheet-cut-weight').dataset.manual='false';
+    document.getElementById('sheet-cut-weight').readOnly=Number(order?.stokDusulenKg)>0;
+    document.getElementById('sheet-cut-source-info').textContent=stock ? `${stock.ebat} mm · ${stock.mm} mm kalınlık · Kullanılabilir: ${getAvailableStockQuantity(stock,'miktar',order?.id??null)} adet · Kayıtlı ağırlık: ${stock.kg || 0} KG. ${order?.stokDusuldu ? 'Plaka adedi yeniden düşülmez. Kesime giren KG bilgisini kontrol ederek girin.' : 'Kesilen adet stoktan düşülür. Önerilen KG miktarını kontrol edin.'}` : 'Kesime giren sacı seçin.';
+    if(weightField.dataset.estimate==='true')document.getElementById('sheet-cut-source-info').textContent+=' KG ölçülerden tahmini hesaplandı.';
+    updateSheetCutSummary();
+}
+function addSheetCutRow() {
+    const container=document.getElementById('sheet-cut-rows');if(container.children.length>=50)return;
+    const row=document.createElement('div');row.className='sheet-cut-row';
+    row.innerHTML='<label>En (mm)<input data-field="en" type="number" min="0.01" step="0.01" class="form-control" oninput="updateSheetCutSummary()"></label><label>Boy (mm)<input data-field="boy" type="number" min="0.01" step="0.01" class="form-control" oninput="updateSheetCutSummary()"></label><label>Adet<input data-field="quantity" type="number" min="1" step="1" value="1" class="form-control" oninput="updateSheetCutSummary()"></label><button type="button" class="btn btn-outline" aria-label="Parça satırını kaldır" onclick="this.closest(\'.sheet-cut-row\').remove();updateSheetCutSummary()">Kaldır</button>';
+    container.append(row);updateSheetCutSummary();
+}
+function updateSheetCutSummary() {
+    const output=document.getElementById('sheet-cut-summary');if(!output)return;
+    try {const v=validateSheetCutInput(sheetCutInput());output.textContent=`${v.alreadyDeducted?'Önceden düşülen':'Stoktan düşülecek'}: ${v.quantity} adet · Kalan: ${v.pieces.reduce((n,p)=>n+p.quantity,0)} parça / ${(v.area/1e6).toLocaleString('tr-TR',{maximumFractionDigits:3})} m² · Hurda: ${v.scrapKg} KG`;}
+    catch(e){output.textContent=e.message;}
+}
+async function saveSheetCut() {
+    if(!document.getElementById('modal-sheet-cut').classList.contains('active'))return;
+    const unlock=beginModalSubmit('modal-sheet-cut');if(!unlock)return;
+    try {const result=await commitSheetCut(sheetCutInput());if(!result.success){const error=document.getElementById('sheet-cut-error');error.textContent=result.error;error.hidden=false;error.scrollIntoView?.({block:'nearest'});return;}
+        closeModal('modal-sheet-cut');location.hash='scraps';switchView('scraps');renderAll();
+        showToast({type:result.backupWarning?'warning':'success',title:'Kesim kaydedildi',message:`${result.cut.kesimNo} · Kalan parçalar stokta kullanıma hazır.${result.backupWarning?' Otomatik yedek alınamadı.':''}`});
+    }finally{unlock();}
+}
+function undoSheetCut(id) {
+    const cut=getDBArray('sacKesimleri').find(c=>c.id==id),error=sheetCutUndoError(cut);if(error)return alert(error);
+    confirmAction(`${cut.kesimNo} geri alınsın mı? Oluşan parça kayıtları geri alınacak. Teslim edilmiş işin plaka düşümü korunur.`,async()=>{
+        const result=await commitSheetCut(null,id);if(!result.success)return alert(result.error);renderAll();showToast({type:result.backupWarning?'warning':'success',title:'Kesim geri alındı',message:result.cut.kesimNo+(result.backupWarning?' · Otomatik yedek alınamadı.':'')});
+    },{title:'Kesimi Geri Al',confirmLabel:'Geri Al'});
+}
+function renderSheetCuts() {
+    const body=document.getElementById('sheet-cut-history');if(!body)return;
+    const query=normalizeSearchText(document.getElementById('sheet-cut-search').value);
+    const rows=getDBArray('sacKesimleri').filter(c=>normalizeSearchText([c.kesimNo,c.sourceCode,codeSearchText(getDBArray('stoklar').find(s=>s.id===c.stokId)),c.sourceName,c.orderNo,...c.pieces.map(p=>p.code+' '+codeSearchText(getDBArray('stoklar').find(s=>s.id===p.stockId)))].join(' ')).includes(query)).slice().reverse();
+    const pages=Math.max(1,Math.ceil(rows.length/20));sheetCutPage=Math.max(1,Math.min(pages,sheetCutPage));
+    body.innerHTML=rows.slice((sheetCutPage-1)*20,sheetCutPage*20).map(c=>`<tr><td><strong>${escapeHTML(c.kesimNo)}</strong><br>${escapeHTML(c.tarih)}${c.note?'<br>'+escapeHTML(c.note):''}</td><td>${escapeHTML(getStockDisplayCode(getDBArray('stoklar').find(s=>s.id===c.stokId) || {kodu:c.sourceCode,originCutId:c.sourcePartNo,partNo:c.sourcePartNo}))} · ${escapeHTML(c.sourceName)}<br>${escapeHTML(c.quantity)} adet · ${escapeHTML(c.sourceEn)}×${escapeHTML(c.sourceBoy)} mm${c.orderNo?'<br>'+escapeHTML(c.orderNo):''}</td><td>${c.pieces.map(p=>{const stock=getDBArray('stoklar').find(s=>s.id===p.stockId);return `${escapeHTML(getStockDisplayCode(stock || {kodu:p.code,originCutId:p.partNo,partNo:p.partNo}))} · ${escapeHTML(p.en)}×${escapeHTML(p.boy)} mm · ${escapeHTML(p.quantity)} adet <small>(şu an ${stock?.cutVoided?0:stock?.miktar??'—'} adet)</small>`;}).join('<br>')||'Kalan parça yok'}${c.scrapKg?'<br>Hurda: '+escapeHTML(c.scrapKg)+' KG':''}</td><td>${c.status==='active'?`<span class="badge success">Kayıtlı</span><br><button type="button" class="btn btn-outline" onclick="undoSheetCut(${c.id})">Geri Al</button>`:'Geri alındı'}</td></tr>`).join('')||'<tr><td colspan="4" class="finance-empty">Henüz kesim kaydı yok. Kesim / Kalan Parça ile başlayın.</td></tr>';
+    document.getElementById('sheet-cut-page').textContent=`${rows.length} kayıt · Sayfa ${sheetCutPage} / ${pages}`;document.getElementById('sheet-cut-prev').disabled=sheetCutPage===1;document.getElementById('sheet-cut-next').disabled=sheetCutPage===pages;
+}
+function openOrderSheetCut(id) {
+    const cut=getActiveSheetCutForOrder(id);
+    if(cut)return showSheetCutHistory(cut.id);
+    const order=getDBArray('isEmirleri').find(o=>o.id==id);if(order)openSheetCut(order.stokId,order.id);
+}
+function showSheetCutHistory(id) {
+    const cut=getDBArray('sacKesimleri').find(c=>c.id==id);
+    document.getElementById('sheet-cut-search').value=cut?.kesimNo || '';
+    sheetCutPage=1;location.hash='scraps';switchView('scraps');renderSheetCuts();
+}
+function getSheetCutLinkError(cut,database=db) {
+    if(!Array.isArray(cut.pieces)||!Array.isArray(cut.movements))return 'Kesim parça veya hareket bilgileri eksik.';
+    const stock=(database.stoklar || []).find(s=>s.id===cut.stokId);
+    if(!stock)return 'Kesimin kaynak stoğu bulunamadı.';
+    if(cut.status!=='active')return '';
+    const movements=cut.movements.map(id=>(database.stokHareketleri || []).find(m=>m.id===id));
+    if(movements.some(m=>!m||m.stokId!==cut.stokId))return 'Kesimin kaynak stok hareketi eksik veya farklı stoğa bağlı.';
+    const total=field=>roundMoney(movements.filter(m=>m.alan===field).reduce((n,m)=>n+m.miktar,0));
+    if(total('miktar')!==(cut.alreadyDeducted?0:-cut.quantity)||total('kg')!==(cut.weightAlreadyDeducted?0:-cut.consumedKg))return 'Kesimde düşülen adet veya KG kayıtla eşleşmiyor.';
+    if(cut.orderId){const order=(database.isEmirleri || []).find(o=>o.id===cut.orderId);if(!order||order.sheetCutId!==cut.id||!order.stokDusuldu||String(order.stokId)!==String(cut.stokId)||Number(order.stokDusulenMiktar)!==cut.quantity)return 'Kesimin iş emri bağlantısı veya stok düşümü tutarsız.';}
+    for(const p of cut.pieces){
+        const remainder=(database.stoklar || []).find(s=>s.id===p.stockId), movement=(database.stokHareketleri || []).find(m=>m.id===p.movementId);
+        if(!remainder||remainder.originCutId!==cut.id||!movement||movement.stokId!==p.stockId||movement.alan!=='miktar'||movement.miktar!==p.quantity)return 'Kalan parçanın stok kaydı veya giriş hareketi eksik.';
+        if(p.kg>0 && !(database.stokHareketleri||[]).some(m=>m.stokId===p.stockId&&m.alan==='kg'&&m.ref===cut.kesimNo&&m.miktar===p.kg))return 'Kalan parçanın KG giriş hareketi eksik veya farklı.';
+    }
+    if(cut.scrapId&&!(database.fireler||[]).some(f=>f.id===cut.scrapId&&f.cutId===cut.id&&f.kg===cut.scrapKg))return 'Kesime bağlı hurda kaydı eksik veya miktarı farklı.';
+    return '';
+}
+function updateSheetCutQuantity() {
+    const weight=document.getElementById('sheet-cut-weight');
+    const stock=getDBArray('stoklar').find(s=>String(s.id)===document.getElementById('sheet-cut-stock').value);
+    if(weight.dataset.manual!=='true'&&!weight.readOnly&&stock&&Number(stock.miktar)>0) {let total=Number(stock.kg)||0;if(weight.dataset.estimate==='true'){try{total=sheetWeightBasis(stock).total;}catch(_){}}weight.value=roundMoney(total*Number(document.getElementById('sheet-cut-quantity').value)/Number(stock.miktar));}
+    updateSheetCutSummary();
+}
+
+// Rectangular corner cutting yields two non-overlapping remnants per source sheet.
+function rectangularSheetRemainders(stock, cutEn, cutBoy, quantity) {
+    const width=Number(stock.en),height=Number(stock.boy);
+    let en=Number(cutEn),boy=Number(cutBoy);quantity=Number(quantity);
+    if (![width,height,en,boy].every(n=>Number.isFinite(n)&&n>0) || !Number.isSafeInteger(quantity) || quantity<1) throw new Error('Önce malzeme, plaka adedi ve kesilen ölçüleri girin.');
+    if (!(en<=width && boy<=height)) [en,boy]=[boy,en];
+    if (!(en<=width && boy<=height)) throw new Error('Kesilen ölçüler kaynak saca sığmıyor.');
+    const pieces=[];
+    if(height>boy)pieces.push({en:width,boy:height-boy,quantity});
+    if(width>en)pieces.push({en:width-en,boy,quantity});
+    return pieces;
+}
+// A measured sale consumes whole source sheets and registers usable remnants atomically.
+function quickSaleCutInput(input, stock) {
+    const en=Number(input.cut.en), boy=Number(input.cut.boy), count=Number(input.quantity);
+    if (![en,boy].every(n => Number.isFinite(n) && n>0) || !Number.isSafeInteger(count) || count<1) throw new Error('Kesilen ölçüleri ve kullanılan plaka adedini girin.');
+    if (!((en<=Number(stock.en) && boy<=Number(stock.boy)) || (boy<=Number(stock.en) && en<=Number(stock.boy)))) throw new Error('Kesilen ölçü kaynak saca sığmıyor.');
+    const mode=input.cut.remainderMode || 'manual';
+    if(!['auto','manual','none'].includes(mode))throw new Error('Kalan parçanın nasıl kaydedileceğini seçin.');
+    let pieces=mode==='auto' ? rectangularSheetRemainders(stock,en,boy,count) : input.cut.pieces;
+    if (!Array.isArray(pieces)) throw new Error('Kalan parçaları kontrol edin.');
+    if(mode==='none' && pieces.length)throw new Error('Kalan yok seçiliyken kalan parça satırı bulunamaz.');
+    if(mode!=='none' && !pieces.length && en*boy<Number(stock.en)*Number(stock.boy))throw new Error('Kalan parçalar boş. Otomatik hesaplamayı seçin veya gerçek kalan ölçüleri girin. Kullanılabilir parça kalmadıysa bunu ayrıca seçin.');
+    const remainderArea=pieces.reduce((n,p)=>n+Number(p.en)*Number(p.boy)*Number(p.quantity),0);
+    if (!Number.isFinite(remainderArea) || remainderArea+en*boy*count>Number(stock.en)*Number(stock.boy)*count) throw new Error('Kesilen alan ve kalan parçalar kaynak sacın alanını aşıyor.');
+    const basis=sheetWeightBasis(stock,input.cut.density),weight=roundMoney(basis.total*count/Number(stock.miktar));
+    const manual=input.cut.remainingKg !== undefined && input.cut.remainingKg !== '';
+    if (manual) {
+        const kg=Number(input.cut.remainingKg);
+        if(!Number.isFinite(kg)||kg<=0||kg>weight||!pieces.length||!(remainderArea>0))throw new Error('Tartılan kalan KG, kesime giren ağırlığı aşamaz. Önce kalan parçaları ekleyin.');
+        let assigned=0;
+        pieces=pieces.map((p,i)=>{const share=i===pieces.length-1?roundMoney(kg-assigned):roundMoney(kg*Number(p.en)*Number(p.boy)*Number(p.quantity)/remainderArea);assigned=roundMoney(assigned+share);return {...p,kg:share};});
+    }
+    return { token:input.token+'-cut',stockId:stock.id,quantity:count,weight,remainingWeightManual:manual,scrapKg:0,pieces,note:`Hızlı satış · ${en} × ${boy} mm · ${plainText(input.description)}` };
+}
+function addQuickSaleCutRow(piece={}, refresh=true) {
+    const row=document.createElement('div');row.className='sheet-cut-row';
+    row.innerHTML='<label>En (mm)<input class="form-control" type="number" min="0.01" step="any" data-field="en"></label><label>Boy (mm)<input class="form-control" type="number" min="0.01" step="any" data-field="boy"></label><label>Adet<input class="form-control" type="number" min="1" step="1" data-field="quantity"></label><button type="button" class="btn btn-outline" aria-label="Kalan parçayı kaldır">×</button>';
+    for(const key of ['en','boy','quantity'])row.querySelector(`[data-field="${key}"]`).value=piece[key] || (key==='quantity'?1:'');
+    row.oninput=updateQuickSaleWeight;row.querySelector('button').onclick=()=>{row.remove();updateQuickSaleWeight();};document.getElementById('quick-sale-cut-rows').append(row);if(refresh)updateQuickSaleWeight();
+}
+function suggestQuickSaleRemainders() {
+    document.getElementById('quick-sale-remainder-mode').value='auto';
+    updateQuickSaleWeight();
+}
+function updateQuickSaleRemainderMode() {
+    if(document.getElementById('quick-sale-remainder-mode').value==='none') {
+        document.getElementById('quick-sale-cut-rows').innerHTML='';
+        document.getElementById('quick-sale-cut-remaining-kg').value='';
+    }
+    updateQuickSaleWeight();
+}
+
+// Density presets are approximate: SSAB structural steel, Outokumpu cold rolled stainless,
+// Hydro aluminium. Units: all dimensions mm, density kg/m³, result kg.
+function sheetDensity(material, selected='') {
+    if(selected !== '') {
+        const value=Number(selected);
+        if(![7850,7900,2700].includes(value)) throw new Error('Geçerli malzeme grubu seçin.');
+        return value;
+    }
+    const name=String(material||'').toLocaleLowerCase('tr-TR');
+    if(/alüminyum|aluminyum|aluminium|aluminum/.test(name))return 2700;
+    if(/paslanmaz|inox|stainless|\b(?:304|316|430)\b/.test(name))return 7900;
+    if(/\bst\s*(?:37|44|52)\b|\bs(?:235|275|355)\b|dkp|hrp|siyah sac|galvaniz|karbon|çelik/.test(name))return 7850;
+    throw new Error('Malzeme cinsi tanınmadı. Hesap için malzeme grubunu seçin.');
+}
+function sheetWeightBasis(stock, selected='') {
+    if(!stock)throw new Error('Önce sacı seçin.');
+    const dims=[stock.en,stock.boy,stock.mm,stock.miktar].map(Number);
+    if(!dims.every(n=>Number.isFinite(n)&&n>0))throw new Error('Stok kartında en, boy, kalınlık ve plaka adedi bulunmalıdır.');
+    if(Number(stock.kg)>0)return {total:Number(stock.kg),label:stock.weightBasis==='estimate'?'Tahmini KG üzerinden':'Kayıtlı KG üzerinden',density:stock.weightDensity||null};
+    const density=sheetDensity(stock.cinsi,selected);
+    const total=roundMoney(dims.reduce((a,b)=>a*b,1)*density/1e9);
+    if(!Number.isFinite(total)||total<=0)throw new Error('Ölçülerden hesaplanan ağırlık çok küçük veya geçersiz.');
+    return {total,label:'Ölçüden tahmini',density};
+}
+function updateQuickSaleWeight() {
+    const target=document.getElementById('quick-sale-weight-summary');if(!target)return;
+    const get=n=>document.getElementById('quick-sale-'+n).value;
+    const mode=get('remainder-mode'),container=document.getElementById('quick-sale-cut-rows');
+    document.getElementById('quick-sale-add-remainder').hidden=mode!=='manual';
+    document.getElementById('quick-sale-cut-remaining-kg').disabled=mode==='none';
+    if(mode==='auto')container.innerHTML='';
+    if(mode==='none')container.innerHTML='';
+    try {
+        let stock=getDBArray('stoklar').find(s=>String(s.id)===get('stock'));
+        const old=getDBArray('hizliSatislar').find(s=>String(s.id)===get('edit-id')&&s.status==='active');
+        // Editing previews the same restored source quantities as the atomic commit.
+        if(stock&&old?.stokId===stock.id){stock={...stock};if(old.sheetCutId){const c=getDBArray('sacKesimleri').find(c=>c.id===old.sheetCutId);if(c){stock.miktar+=c.quantity;stock.kg+=c.consumedKg;}}else{stock[old.stokAlan]=Number(stock[old.stokAlan]||0)+old.stokMiktar;if(old.stockKg)stock.kg+=old.stockKg;if(old.stockPlateQty)stock.miktar+=old.stockPlateQty;}}
+        const basis=sheetWeightBasis(stock,get('cut-density')),qty=Number(get('quantity')),en=Number(get('cut-en')),boy=Number(get('cut-boy'));
+        if(!Number.isSafeInteger(qty)||qty<1||en<=0||boy<=0)throw new Error('Kesilen en, boy ve plaka adedini girin; KG hesabı burada görünecek.');
+        const weight=roundMoney(basis.total*qty/Number(stock.miktar)),area=Number(stock.en)*Number(stock.boy)*qty;
+        if(!((en<=stock.en&&boy<=stock.boy)||(boy<=stock.en&&en<=stock.boy)))throw new Error('Kesilen ölçü kaynak saca sığmıyor.');
+        const cut=roundMoney(weight*en*boy*qty/area);
+        if(mode==='auto') {
+            rectangularSheetRemainders(stock,en,boy,qty).forEach(p=>addQuickSaleCutRow(p,false));
+            container.querySelectorAll('input').forEach(el=>el.readOnly=true);
+            container.querySelectorAll('button').forEach(el=>el.hidden=true);
+        }else container.querySelectorAll('input').forEach(el=>el.readOnly=false);
+        if(mode==='manual')container.querySelectorAll('button').forEach(el=>el.hidden=false);
+        const rows=[...document.querySelectorAll('#quick-sale-cut-rows .sheet-cut-row')];
+        const remainderArea=rows.reduce((sum,row)=>sum+['en','boy','quantity'].reduce((a,k)=>a*Number(row.querySelector('[data-field="'+k+'"]').value),1),0);
+        if(!Number.isFinite(remainderArea)||remainderArea+en*boy*qty>area)throw new Error('Kesilen ve kalan alan kaynak sacı aşıyor.');
+        const manual=get('cut-remaining-kg')!=='';
+        const remain=mode==='none'?0:manual?Number(get('cut-remaining-kg')):rows.length?roundMoney(weight*remainderArea/area):0;
+        if(!Number.isFinite(remain)||remain<0||remain>weight)throw new Error('Kalan KG, kesime giren KG aralığında olmalıdır.');
+        const kg=n=>n.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})+' kg';
+        target.textContent=`${basis.label}${basis.density?' · '+basis.density+' kg/m³':''}\nKesime giren: ${kg(weight)} · Kesilen bölüm (tahmini): ${kg(cut)}\nStoğa dönecek kalan: ${kg(remain)}${manual?' (elle girilen tartım)':' (tahmini)'}${mode==='none'?' — kullanılabilir kalan yok olarak kaydedilecek.':!rows.length&&cut<weight?' — kalan ölçülerini girmeden satış kaydedilemez.':''}\nDelikler ve kesim kaybı kesilen bölüm tahmininden ayrıca düşülmez.`;
+    }catch(e){target.textContent=e.message;}
+}
+
+function calculateNewSheetWeight(apply=false) {
+    const get=n=>document.getElementById('input-stok-'+n).value;
+    const target=document.getElementById('new-sheet-weight-info');
+    try {
+        const basis=sheetWeightBasis({en:get('en'),boy:get('boy'),mm:get('mm'),miktar:get('miktar'),cinsi:get('cinsi'),kg:0});
+        target.textContent='Ölçüden tahmini toplam: '+basis.total.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})+' KG. Tartım varsa ağırlık alanına onu yazın.';
+        const field=document.getElementById('input-stok-kg');
+        if(apply || field.dataset.basis==='estimate'){field.value=basis.total;field.dataset.basis='estimate';}
+        return true;
+    }catch(e){target.textContent=e.message;return false;}
+}
+
+// Physical pieces keep distinct IDs for stock usage, but share their original stock card code.
+function getRootSheetStock(stock, database = db) {
+    const byId = new Map((database.stoklar || []).map(s => [String(s.id), s]));
+    const cuts = new Map((database.sacKesimleri || []).map(c => [String(c.id), c]));
+    const seen = new Set();
+    while (stock?.originCutId) {
+        if (seen.has(String(stock.id))) return null;
+        seen.add(String(stock.id));
+        stock = byId.get(String(stock.sourceStockId || cuts.get(String(stock.originCutId))?.stokId));
+    }
+    return stock?.kodu ? stock : null;
+}
+function nextSheetPartNo(root, database = db) {
+    return 1 + (database.stoklar || []).reduce((max, stock) =>
+        stock.kodu === root.kodu ? Math.max(max, Number(stock.partNo) || 0) : max, 0);
+}
+function getStockDisplayCode(stock) {
+    return stock ? (stock.kodu || '-') + (stock.originCutId && stock.partNo ? ` · Parça ${stock.partNo}` : '') : '-';
+}
+function migrateStockIdentity(database) {
+    const stocks = database.stoklar || [];
+    for (const stock of stocks) {
+        if (!stock.originCutId) continue;
+        const root = getRootSheetStock(stock, database);
+        if (!root) { stock.identityReviewRequired = true; continue; }
+        if (!stock.identityMigration) stock.identityMigration = {version:8, previousCode:stock.kodu};
+        stock.kodu = root.kodu;
+        stock.rootStockId = root.id;
+        if (!Number.isSafeInteger(stock.partNo) || stock.partNo < 1) stock.partNo = nextSheetPartNo(root, database);
+        stock.identityReviewRequired = false;
+    }
+    const byId = new Map(stocks.map(s => [String(s.id), s]));
+    for (const cut of database.sacKesimleri || []) {
+        const source = byId.get(String(cut.stokId));
+        if (source && !source.identityReviewRequired) {
+            if (cut.sourceCode !== source.kodu && cut.previousSourceCode === undefined) cut.previousSourceCode = cut.sourceCode;
+            cut.sourceCode = source.kodu;
+            cut.sourcePartNo = source.partNo || null;
+        }
+        for (const piece of cut.pieces || []) {
+            const stock = byId.get(String(piece.stockId));
+            if (!stock || stock.identityReviewRequired) continue;
+            if (piece.code !== stock.kodu && piece.previousCode === undefined) piece.previousCode = piece.code;
+            piece.code = stock.kodu;
+            piece.partNo = stock.partNo;
+        }
+    }
+}
+
+// Legacy root values were entered by this business as TL/kg, despite the former plate label.
+// Retain original values for traceability and repair generated remnants via their source chain.
+function migrateStockKgCosts(database) {
+    const stocks=database.stoklar || [], byId=new Map(stocks.map(s=>[String(s.id),s]));
+    const resolved=new Set(), visiting=new Set();
+    function resolve(stock) {
+        const key=String(stock.id);if(resolved.has(key))return !stock.costReviewRequired;
+        if(visiting.has(key))return false;
+        visiting.add(key);
+        const previous=stock.maliyet;
+        let valid=true;
+        if(stock.originCutId) {
+            const cut=(database.sacKesimleri||[]).find(c=>String(c.id)===String(stock.originCutId));
+            const parent=byId.get(String(stock.sourceStockId || cut?.stokId));
+            valid=!!parent && parent!==stock && resolve(parent);
+            if(valid)stock.maliyet=parent.maliyet;
+        }
+        stock.costUnit='kg';stock.costReviewRequired=!valid;
+        stock.costMigration={version:7,previousValue:previous,sourceStockId:stock.sourceStockId || null};
+        visiting.delete(key);resolved.add(key);return valid;
+    }
+    stocks.forEach(resolve);
+    for(const cut of database.sacKesimleri || []) {
+        for(const piece of cut.pieces || []) {
+            const stock=byId.get(String(piece.stockId));
+            if(stock && !stock.costReviewRequired){piece.previousCost=piece.cost;piece.cost=stock.maliyet;piece.costUnit='kg';}
+        }
+    }
+}
+function getStockPlateWeight(stock) {
+    if(!stock)return 0;
+    if(Number(stock.miktar)>0 && Number(stock.kg)>0)return Number(stock.kg)/Number(stock.miktar);
+    const ownCut=getDBArray('sacKesimleri').find(c=>String(c.id)===String(stock.originCutId));
+    const piece=ownCut?.pieces?.find(p=>String(p.stockId)===String(stock.id));
+    if(Number(piece?.quantity)>0 && Number(piece.kg)>0)return Number(piece.kg)/Number(piece.quantity);
+    const cut=getDBArray('sacKesimleri').find(c=>String(c.stokId)===String(stock.id)&&Number(c.quantity)>0&&Number(c.consumedKg)>0);
+    if(cut)return Number(cut.consumedKg)/Number(cut.quantity);
+    try{return sheetWeightBasis({...stock,kg:0,miktar:1}).total;}catch(_){return 0;}
+}
+function getStockPlateCost(stock) {
+    return !stock || stock.sahibiTipi==='musteri' ? 0 : roundMoney((Number(stock.maliyet)||0)*getStockPlateWeight(stock));
+}
+function getStockTotalCost(stock) {
+    return stock.sahibiTipi==='musteri' ? 0 : roundMoney((Number(stock.maliyet)||0)*(Number(stock.kg)||0));
+}
+
+function resetSheetPurchaseForm() {
+    const set=(n,v='')=>document.getElementById('sheet-purchase-'+n).value=v;
+    document.querySelectorAll('#sheet-purchase-lines .sheet-purchase-line:not([data-first])').forEach(row=>row.remove());
+    for(const key of ['material','mm','en','boy','weight','price','paid'])set(key);
+    set('total-mode','calculated');set('document-total','');set('quantity',1);set('tax',0);set('payment','none');set('date',toDateInputValue(new Date()));set('token',crypto.randomUUID());
+    document.getElementById('sheet-purchase-weight').dataset.basis='manual';
+    document.querySelector('#sheet-purchase-lines .sheet-purchase-line').dataset.stockId='';
+    document.getElementById('sheet-purchase-cash').innerHTML='<option value="">Hesap seçin</option>'+getDBArray('kasaHesaplari').filter(isCashAccountActive).map(k=>`<option value="${k.id}">${escapeHTML(k.ad)}</option>`).join('');
+    document.getElementById('sheet-purchase-error').hidden=true;
+}
+function sheetPurchaseInput() {
+    const get=n=>document.getElementById('sheet-purchase-'+n).value;
+    return {totalMode:get('total-mode'),documentTotal:get('document-total'),lines:readSheetPurchaseLines(),token:get('token'),cariId:document.getElementById('input-islem-cari-id').value,material:get('material'),mm:get('mm'),en:get('en'),boy:get('boy'),quantity:get('quantity'),weight:get('weight'),price:get('price'),tax:get('tax'),date:get('date'),payment:get('payment'),paid:get('paid'),cashId:get('cash'),weightBasis:document.getElementById('sheet-purchase-weight').dataset.basis,description:document.getElementById('input-islem-aciklama').value,attachment:getAttachmentFromInputs('input-islem-ek','input-islem-ek-not')};
+}
+function updateSheetPurchaseSummary(preserveAmountInput=false) {
+    const get=n=>document.getElementById('sheet-purchase-'+n).value;
+    renderPurchaseCodeHints();
+    const lines=readSheetPurchaseLines(),base=roundMoney(lines.reduce((sum,line)=>sum+roundMoney(Number(line.weight)*Number(line.price)),0)),tax=roundMoney(lines.reduce((sum,line)=>sum+roundMoney(roundMoney(Number(line.weight)*Number(line.price))*Number(line.tax)/100),0)),calculatedTotal=roundMoney(base+tax),manual=get('total-mode')==='document',parsed=manual?parseSheetPurchaseDocumentTotal(get('document-total')):calculatedTotal,total=Number.isFinite(parsed)?parsed:0,mode=get('payment'),paid=mode==='none'?0:mode==='full'?total:roundMoney(get('paid'));
+    document.getElementById('sheet-purchase-document-total-label').hidden=true;
+    document.getElementById('sheet-purchase-paid-label').hidden=mode!=='partial';document.getElementById('sheet-purchase-cash-label').hidden=mode==='none';
+    document.getElementById('sheet-purchase-summary').textContent=`${lines.length} kalem · ${roundMoney(lines.reduce((sum,line)=>sum+Number(line.weight||0),0))} KG · Kalem hesabı (KDV dahil): ${formatCurrency(calculatedTotal)}${manual?' · Belge toplamı: '+(Number.isFinite(parsed)?formatCurrency(total):'Tutar girin')+' · Tutar farkı: '+(Number.isFinite(parsed)?formatCurrency(roundMoney(total-calculatedTotal)):'—'):''} · Ödenecek kalan: ${manual&&!Number.isFinite(parsed)?'—':formatCurrency(total-paid)}`;
+    if(document.getElementById('input-islem-tipi').value==='sac_alimi'&&!preserveAmountInput)document.getElementById('input-islem-tutar').value=manual?(Number.isFinite(parsed)?String(total):get('document-total')):total||'';
+}
+function calculateSheetPurchaseWeight(button) {
+    const row=button?.closest('.sheet-purchase-line');
+    const field=n=>row&&!row.dataset.first?row.querySelector('[data-field="'+n+'"]'):document.getElementById('sheet-purchase-'+n);
+    try{const get=n=>field(n).value;
+        const basis=sheetWeightBasis({cinsi:get('material'),mm:get('mm'),en:get('en'),boy:get('boy'),miktar:get('quantity'),kg:0});
+        field('weight').value=basis.total;field('weight').dataset.basis='estimate';updateSheetPurchaseSummary();
+    }catch(e){alert(e.message);}
+}
+function sheetPurchaseUndoError(movement) {
+    if(!movement?.sheetPurchase || movement.reversedBy)return 'Bu alım bulunamadı veya daha önce geri alındı.';
+    const linkError=getSheetPurchaseLinkError(movement);if(linkError)return linkError;
+    const p=movement.sheetPurchase;
+    for(const line of sheetPurchaseLines(p)) {
+        const stock=getDBArray('stoklar').find(s=>s.id===line.stockId);
+        if(!stock || stock.purchaseMovementId!==movement.id || stock.isPasif || Number(stock.miktar)!==line.quantity || roundMoney(stock.kg)!==line.weight)return 'Alınan sacın miktarı değişmiş. Önce bağlı kullanımları geri alın.';
+        if(getDBArray('sacKesimleri').some(c=>c.status==='active'&&c.stokId===stock.id)||getDBArray('isEmirleri').some(o=>String(o.stokId)===String(stock.id)&&o.durum!=='İptal')||getDBArray('teklifler').some(q=>String(q.stokId)===String(stock.id))||getDBArray('hizliSatislar').some(q=>q.status==='active'&&q.stokId===stock.id))return 'Sac kesime, satışa, teklife veya iş emrine bağlı. Önce bağlı işlemleri geri alın.';
+    }
+    if(movement.bakiyeDegisimi!==-p.total||roundMoney(movement.tutar)!==p.total)return 'Alımın cari tutarı tutarsız.';
+    if(p.paid>0){const payment=getDBArray('islemler').find(m=>m.id===p.paymentId),cash=getDBArray('kasaHareketleri').find(m=>m.id===p.cashMovementId);
+        if(!payment||payment.reversedBy||payment.bakiyeDegisimi!==p.paid||payment.sheetPurchasePaymentFor!==movement.id||!cash||cash.reversedBy||cash.tip!=='cikis'||cash.tutar!==p.paid||cash.refId!==payment.id)return 'Alıma bağlı ödeme kaydı eksik veya değiştirilmiş.';}
+    return '';
+}
+function reverseSheetPurchaseRecords(original) {
+    const error=sheetPurchaseUndoError(original);if(error)throw Error(error);
+    const p=original.sheetPurchase,cari=db.cariler.find(c=>c.id===original.cariId);if(!cari)throw Error('Tedarikçi bulunamadı.');
+    const reversal=addCariMovement(cari,{tip:'Sac Alımı Geri Alma',tutar:p.total,bakiyeDegisimi:p.total,reversalOf:original.id,aciklama:p.code});original.reversedBy=reversal.id;
+    if(p.paid>0){const payment=db.islemler.find(m=>m.id===p.paymentId);const rev=addCariMovement(cari,{tip:'Sac Alımı Ödemesi Geri Alma',tutar:p.paid,bakiyeDegisimi:-p.paid,reversalOf:payment.id,aciklama:p.code});payment.reversedBy=rev.id;const cash=reverseCashMovement(p.cashMovementId,p.code+' alımı geri alındı');if(!cash)throw Error('Ödeme geri alınamadı.');rev.kasaHareketId=cash.id;}
+    for(const line of sheetPurchaseLines(p)){const stock=db.stoklar.find(s=>s.id===line.stockId);changeSheetStock(stock,'miktar',-line.quantity,'Sac Alımı Geri Alma',p.code);changeSheetStock(stock,'kg',-line.weight,'Sac Alımı Geri Alma',p.code);stock.isPasif=true;stock.purchaseVoided=true;}
+    addAuditLog('Geri Alındı','Sac Alımı',original.id,p.code);
+}
+function prepareSheetPurchaseCandidate(input,editId='',cancel=false) {
+    const live=db;try{
+        db=JSON.parse(JSON.stringify(live));const previous=editId?db.islemler.find(m=>String(m.id)===String(editId)):null;
+        if(editId&&!previous)throw Error('Alım kaydı bulunamadı.');
+        if(cancel){reverseSheetPurchaseRecords(previous);return {candidate:db,movement:previous};}
+        if(!input?.token||db.islemler.some(m=>m.sheetPurchase?.token===input.token))throw Error('Bu alım zaten kaydedildi. Cari geçmişini kontrol edin.');
+        const cari=db.cariler.find(c=>String(c.id)===String(input.cariId)&&!c.isPasif&&!c.systemRole);if(!cari)throw Error('Aktif tedarikçi carisi seçin.');
+        const rawLines=input.lines===undefined?[input]:input.lines;
+        if(!Array.isArray(rawLines)||rawLines.length<1||rawLines.length>100)throw Error('1 ile 100 arasında sac kalemi girin.');
+        const lines=rawLines.map((line,index)=>validateSheetPurchaseLine(line,index));
+        if(plainText(input.description).length>300)throw Error('Açıklamayı kontrol edin.');
+        if(!/^\d{4}-\d{2}-\d{2}$/.test(input.date||'')||financeDay(input.date)===null)throw Error('Geçerli alış tarihi girin.');
+        const base=roundMoney(lines.reduce((sum,line)=>sum+line.base,0)),taxAmount=roundMoney(lines.reduce((sum,line)=>sum+line.taxAmount,0)),calculatedTotal=roundMoney(base+taxAmount);
+        const totalMode=input.totalMode||'calculated';if(!['calculated','document'].includes(totalMode))throw Error('Alış toplamının nasıl belirleneceğini seçin.');
+        const total=totalMode==='document'?parseSheetPurchaseDocumentTotal(input.documentTotal):calculatedTotal,totalAdjustment=roundMoney(total-calculatedTotal);
+        if(!Number.isFinite(total)||total<=0||total>1e12)throw Error('Alış tutarı geçersiz.');
+        if(!['none','partial','full'].includes(input.payment))throw Error('Ödeme durumunu seçin.');
+        const paid=input.payment==='none'?0:input.payment==='full'?total:roundMoney(input.paid);
+        if(input.payment==='partial'&&(!Number.isFinite(Number(input.paid))||paid<=0||paid>=total))throw Error('Kısmi ödeme toplamdan küçük ve sıfırdan büyük olmalıdır.');
+        const account=paid>0?db.kasaHesaplari.find(k=>String(k.id)===String(input.cashId)&&isCashAccountActive(k)):null;if(paid>0&&!account)throw Error('Ödemenin çıktığı aktif kasa/banka hesabını seçin.');
+        if(previous)reverseSheetPurchaseRecords(previous);
+        const previousLines=previous ? sheetPurchaseLines(previous.sheetPurchase) : [];
+        const reusedStockIds=new Set();
+        const stocks=lines.map((line,index)=>{
+            const raw=rawLines[index];
+            const existingId=raw.existingStockId === undefined ? previousLines[index]?.stockId : raw.existingStockId;
+            const priorLine=existingId ? previousLines.find(p=>String(p.stockId)===String(existingId)) : null;
+            if(existingId && (!priorLine || reusedStockIds.has(String(existingId))))throw Error('Düzeltilen sac kaleminin stok bağlantısı geçersiz.');
+            if(priorLine)reusedStockIds.add(String(existingId));
+            const oldStock=priorLine ? db.stoklar.find(s=>s.id===priorLine.stockId) : null;
+            const stock={id:createRecordId(),kodu:oldStock && thicknessCodeKey(oldStock.mm)===thicknessCodeKey(line.mm) ? oldStock.kodu : stockCodeForThickness(line.mm, true),cinsi:line.material,mm:line.mm,en:line.en,boy:line.boy,ebat:line.en+'x'+line.boy,miktar:line.quantity,kg:line.weight,maliyet:line.price,costUnit:'kg',weightBasis:line.weightBasis,sahibiTipi:'biz',sahibi:'Biz',cariId:'',supplierId:cari.id,kritikSeviye:0,tarih:toTRDateFromInput(input.date),isPasif:false};
+            if(oldStock){stock.codeAliases=getCodeAliases(oldStock);rememberDisplayCode(stock,oldStock.kodu);}
+            db.stoklar.push(stock);line.stockId=stock.id;line.stockCode=stock.kodu;return stock;
+        });
+        const code='ALM-'+stocks[0].kodu;
+        const purchase={...lines[0],lines,token:input.token,code,base,taxAmount,total,calculatedTotal,totalMode,totalAdjustment,documentTotal:totalMode==='document'?total:null,paid,payment:input.payment,cashId:account?.id||null,date:input.date,description:plainText(input.description)};
+        const details=lines.map(line=>`${line.material} ${line.mm} mm ${line.en}×${line.boy} · ${line.quantity} plaka · ${line.weight} KG × ${formatCurrency(line.price)}/KG`).join(' / ');
+        const movement=addCariMovement(cari,{tip:'Sac Mal Alımı',tutar:total,bakiyeDegisimi:-total,isSuccess:false,isGelir:false,tarih:stocks[0].tarih,aciklama:`${code} · ${details}${totalMode==='document'?' · Belge toplamı '+formatCurrency(total)+' · Tutar farkı '+formatCurrency(totalAdjustment):''}${input.description?' · '+plainText(input.description):''}`,sheetPurchase:purchase,ek:input.attachment||previous?.ek||null});
+        lines.forEach((line,index)=>{const stock=stocks[index];stock.purchaseMovementId=movement.id;line.stockMovements=['miktar','kg'].map(alan=>addStokMovement(stock,{alan,miktar:stock[alan],onceki:0,sonraki:stock[alan],tip:'Sac Alımı',ref:code,tarih:stocks[0].tarih}).id);});
+        purchase.stockMovements=lines[0].stockMovements;
+        if(paid>0){const payment=addCariMovement(cari,{tip:'Ödeme Yaptık (Sac Alımı)',tutar:paid,bakiyeDegisimi:paid,isSuccess:true,isGelir:false,tarih:stocks[0].tarih,aciklama:code,sheetPurchasePaymentFor:movement.id});const cash=addCashMovement(account.id,{tip:'cikis',tutar:paid,kaynak:'sac-alimi',refId:payment.id,tarih:stocks[0].tarih,aciklama:cari.adi+' · '+code});if(!cash)throw Error('Ödeme kaydedilemedi.');payment.kasaHareketId=cash.id;purchase.paymentId=payment.id;purchase.cashMovementId=cash.id;}
+        if(previous)previous.correctedBy=movement.id;addAuditLog('Oluşturuldu','Sac Alımı',movement.id,code+' · '+formatCurrency(total));return {candidate:db,movement};
+    }finally{db=live;}
+}
+async function commitSheetPurchase(input,editId='',cancel=false) {
+    if(sheetCutSaving||quickSaleSaving||startupHydrationPending||startupPersistenceBlocked)return {success:false,error:'Bir kayıt işlemi devam ediyor veya veriler hazır değil.'};
+    sheetCutSaving=true;const surfaces=[...document.body.children].filter(e=>!['SCRIPT','STYLE'].includes(e.tagName)),states=surfaces.map(e=>[e,e.inert]);surfaces.forEach(e=>e.inert=true);const notice=document.createElement('div');notice.className='quick-sale-saving';notice.textContent='Sac alımı ve stok kaydediliyor…';notice.setAttribute('role','status');document.body.append(notice);
+    try{const prepared=prepareSheetPurchaseCandidate(input,editId,cancel);const result=await replaceDatabaseSafely(prepared.candidate);return {...result,movement:result.success?prepared.movement:null};}catch(e){return {success:false,error:e.message};}finally{sheetCutSaving=false;notice.remove();states.forEach(([e,value])=>e.inert=value);}
+}
+async function saveSheetPurchase() {
+    const unlock=beginModalSubmit('modal-islem');if(!unlock)return;
+    try{const input=sheetPurchaseInput();const previous=getDBArray('islemler').find(m=>String(m.id)===document.getElementById('input-islem-edit-id').value);if(previous?.ek&&!document.getElementById('input-islem-ek').files?.length)input.attachment={...previous.ek,note:plainText(document.getElementById('input-islem-ek-not').value)};const result=await commitSheetPurchase(input,document.getElementById('input-islem-edit-id').value);if(!result.success){const el=document.getElementById('sheet-purchase-error');el.textContent=result.error;el.hidden=false;el.scrollIntoView?.({block:'nearest'});return;}
+        scheduleAttachmentArchive(input.attachment,'Cari Islemler',getDBArray('cariler').find(c=>c.id===result.movement.cariId)?.adi||'Tedarikçi');closeModal('modal-islem');renderAll();showToast({type:result.backupWarning?'warning':'success',title:'Sac alımı kaydedildi',message:result.movement.sheetPurchase.code+' · Stok ve tedarikçi hesabı güncellendi.'+(result.backupWarning?' Otomatik yedek alınamadı.':'')});
+    }finally{unlock();}
+}
+function openEditSheetPurchase(movement) {
+    if(movement.reversedBy)return alert('Bu alım daha önce geri alındı.');const cari=getDBArray('cariler').find(c=>c.id===movement.cariId);if(!cari)return alert('Tedarikçi bulunamadı.');
+    openIslemModal(cari.id,cari.adi);document.getElementById('input-islem-edit-id').value=movement.id;document.getElementById('input-islem-tipi').value='sac_alimi';const p=movement.sheetPurchase;
+    const lines=sheetPurchaseLines(p);document.querySelector('#sheet-purchase-lines .sheet-purchase-line').dataset.stockId=lines[0].stockId;for(const key of ['material','mm','en','boy','quantity','weight','price','tax'])document.getElementById('sheet-purchase-'+key).value=lines[0][key];for(const line of lines.slice(1))addSheetPurchaseLine(line);for(const key of ['date','payment','paid'])document.getElementById('sheet-purchase-'+key).value=p[key];document.getElementById('sheet-purchase-total-mode').value=p.totalMode||'calculated';document.getElementById('sheet-purchase-document-total').value=p.totalMode==='document'?Number(p.total).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2}):'';document.getElementById('sheet-purchase-cash').value=p.cashId||'';document.getElementById('sheet-purchase-weight').dataset.basis=p.weightBasis;document.getElementById('input-islem-aciklama').value=p.description||'';document.getElementById('input-islem-ek-not').value=movement.ek?.note||'';document.getElementById('islem-existing-attachment-note').hidden=!movement.ek;document.getElementById('islem-edit-notice').hidden=false;document.getElementById('btn-islem-save').textContent='Düzeltmeyi Kaydet';document.getElementById('input-islem-tipi').disabled=true;document.getElementById('modal-islem-title').textContent=cari.adi+' · Sac Alımını Düzelt';updateIslemTipiInfo();markModalFormClean('modal-islem');
+}
+function cancelSheetPurchase(id) {
+    const original=getDBArray('islemler').find(m=>String(m.id)===String(id));const error=sheetPurchaseUndoError(original);if(error)return alert(error);
+    confirmAction('Sac alımı geri alınsın mı? Alınan stok kaldırılacak; tedarikçi borcu ve bu alımda yapılan ödeme geri alınacak.',async()=>{const result=await commitSheetPurchase(null,id,true);if(!result.success)return alert(result.error);renderAll();showToast({type:result.backupWarning?'warning':'success',title:'Sac alımı geri alındı',message:original.sheetPurchase.code+(result.backupWarning?' · Otomatik yedek alınamadı.':'')});},{title:'Sac Alımını Geri Al',confirmLabel:'Geri Al'});
+}
+
+// Validate purchase links independently of current stock usage: purchased plates may already be cut.
+function getSheetPurchaseLinkError(movement,database=db) {
+    const p=movement?.sheetPurchase;if(!p)return 'Sac alım bilgisi eksik.';
+    if(!(database.cariler||[]).some(c=>c.id===movement.cariId))return 'Sac alımının tedarikçisi bulunamadı.';
+    const lines=sheetPurchaseLines(p);if(!lines.length||lines.length>100||new Set(lines.map(line=>line.stockId)).size!==lines.length)return 'Sac alımı kalemleri eksik veya tekrarlı.';
+    let base=0,tax=0;
+    for(const line of lines){
+        const stock=(database.stoklar||[]).find(s=>s.id===line.stockId);
+        if(!stock||stock.purchaseMovementId!==movement.id||stock.supplierId!==movement.cariId||stock.sahibiTipi!=='biz')return 'Sac alımının stok veya tedarikçi bağlantısı tutarsız.';
+        let checked;try{checked=validateSheetPurchaseLine(line);}catch(_){return 'Sac alımı kaleminin KG, ölçü veya fiyatı geçersiz.';}
+        if(line.base!==checked.base||line.taxAmount!==checked.taxAmount||line.total!==checked.total)return 'KG, KG fiyatı ve KDV tutarı eşleşmiyor.';
+        base=roundMoney(base+line.base);tax=roundMoney(tax+line.taxAmount);
+        if(!Array.isArray(line.stockMovements)||line.stockMovements.length!==2)return 'Sac alımının stok giriş hareketleri eksik.';
+        for(const [index,field] of ['miktar','kg'].entries()){
+            const row=(database.stokHareketleri||[]).find(r=>r.id===line.stockMovements[index]),amount=field==='kg'?line.weight:line.quantity;
+            if(!row||row.stokId!==stock.id||row.alan!==field||row.miktar!==amount||row.onceki!==0||row.sonraki!==amount||row.ref!==p.code)return 'Sac alımının stok giriş hareketleri tutarsız.';
+        }
+        if(movement.reversedBy&&(!stock.purchaseVoided||!stock.isPasif||stock.miktar!==0||stock.kg!==0))return 'Geri alınan alımın stoku hâlâ aktif.';
+        if(!movement.reversedBy&&(stock.purchaseVoided||stock.isPasif))return 'Sac alımının stok kartı pasif.';
+    }
+    const calculatedTotal=roundMoney(base+tax),mode=p.totalMode||'calculated',adjustment=p.totalAdjustment??0;
+    if(!['calculated','document'].includes(mode)||!Number.isFinite(adjustment)||!Number.isFinite(p.total)||p.total<=0||p.total>1e12||(p.calculatedTotal!==undefined&&p.calculatedTotal!==calculatedTotal)||(mode==='calculated'&&adjustment!==0)||(mode==='document'&&p.documentTotal!==p.total)||p.base!==base||p.taxAmount!==tax||p.total!==roundMoney(calculatedTotal+adjustment)||movement.tutar!==p.total||movement.bakiyeDegisimi!==-p.total)return 'Kalem hesabı, belge tutarı farkı ve cari toplamı eşleşmiyor.';
+    if(!Number.isFinite(p.paid)||p.paid<0||p.paid>p.total||!['none','partial','full'].includes(p.payment)||(p.payment==='none'&&p.paid!==0)||(p.payment==='full'&&p.paid!==p.total)||(p.payment==='partial'&&(p.paid<=0||p.paid>=p.total)))return 'Sac alımının ödeme tutarı tutarsız.';
+    if(p.paid>0){
+        const payment=(database.islemler||[]).find(m=>m.id===p.paymentId),cash=(database.kasaHareketleri||[]).find(m=>m.id===p.cashMovementId);
+        if(!payment||payment.cariId!==movement.cariId||payment.tutar!==p.paid||payment.bakiyeDegisimi!==p.paid||payment.sheetPurchasePaymentFor!==movement.id||payment.kasaHareketId!==p.cashMovementId||!cash||cash.kaynak!=='sac-alimi'||cash.tip!=='cikis'||cash.tutar!==p.paid||cash.refId!==payment.id||cash.kasaId!==p.cashId||!(database.kasaHesaplari||[]).some(k=>k.id===p.cashId))return 'Sac alımının ödeme ve kasa bağlantısı tutarsız.';
+        if(Boolean(payment.reversedBy)!==Boolean(movement.reversedBy)||Boolean(cash.reversedBy)!==Boolean(movement.reversedBy))return 'Sac alımının geri alınan ödeme bağlantısı tutarsız.';
+    }else if(p.paymentId||p.cashMovementId)return 'Ödenmeyen sac alımında ödeme bağlantısı var.';
+    return '';
+}
+
+// Legacy purchases contain a single line directly on the purchase object.
+function sheetPurchaseLines(purchase) { return Array.isArray(purchase.lines)?purchase.lines:[purchase]; }
+function validateSheetPurchaseLine(line,index=0) {
+    const quantity=Number(line.quantity),weight=roundMoney(line.weight),price=roundMoney(line.price),mm=Number(line.mm),en=Number(line.en),boy=Number(line.boy),tax=Number(line.tax),material=plainText(line.material);
+    if(!thicknessCodeKey(line.mm)||!Number.isSafeInteger(quantity)||quantity<1||quantity>10000||![mm,en,boy,Number(line.weight),Number(line.price)].every(n=>Number.isFinite(n)&&n>0)||weight<=0||price<=0)throw Error(`${index+1}. kalem: Geçerli ölçüler, tam plaka adedi, KG ve KG alış fiyatı girin.`);
+    if(![0,20].includes(tax))throw Error(`${index+1}. kalem: KDV %0 veya %20 olmalıdır.`);
+    if(!material||material.length>120)throw Error(`${index+1}. kalem: Sac cinsini girin.`);
+    const base=roundMoney(weight*price),taxAmount=roundMoney(base*tax/100),total=roundMoney(base+taxAmount);
+    if(!Number.isFinite(total)||total<=0||total>1e12)throw Error(`${index+1}. kalem: Alış tutarı geçersiz.`);
+    return {material,quantity,weight,price,mm,en,boy,tax,base,taxAmount,total,weightBasis:line.weightBasis==='estimate'?'estimate':'manual'};
+}
+function readSheetPurchaseLines() {
+    return [...document.querySelectorAll('#sheet-purchase-lines .sheet-purchase-line')].map(row=>{
+        const field=n=>row.dataset.first?document.getElementById('sheet-purchase-'+n):row.querySelector(`[data-field="${n}"]`);
+        return {existingStockId:row.dataset.stockId || '',...Object.fromEntries(['material','mm','en','boy','quantity','weight','price','tax'].map(n=>[n,field(n).value])),weightBasis:field('weight').dataset.basis||'manual'};
+    });
+}
+function addSheetPurchaseLine(values={}) {
+    const container=document.getElementById('sheet-purchase-lines');if(container.children.length>=100)return alert('En fazla 100 sac kalemi eklenebilir.');
+    const row=document.createElement('section');row.className='sheet-purchase-line';row.dataset.stockId=values.stockId || '';
+    const input=(key,label,placeholder='',wide=false)=>`<label class="${wide?'quick-sale-wide':''}">${label}<input data-field="${key}" class="form-control" ${key==='material'?'maxlength="120"':'type="number" min="0.01" step="'+(key==='quantity'?'1':'any')+'"'} placeholder="${placeholder}" oninput="${key==='weight'?"this.dataset.basis='manual';":''}updateSheetPurchaseSummary()"></label>`;
+    row.innerHTML=`<p class="stock-code-hint" aria-live="polite"></p><div class="sheet-purchase-line-heading"><strong></strong><button type="button" class="btn btn-outline" onclick="this.closest('.sheet-purchase-line').remove();renumberSheetPurchaseLines();updateSheetPurchaseSummary()" aria-label="Bu sac kalemini kaldır">Kalemi kaldır</button></div><div class="quick-sale-fields">${input('material','Sac cinsi / kalite','ST37',true)}${input('mm','Kalınlık (mm)')}${input('quantity','Plaka adedi')}${input('en','En (mm)','1500')}${input('boy','Boy (mm)','3000')}${input('weight','Bu kalemin toplam ağırlığı (KG)')}${input('price','KG alış fiyatı (₺, KDV hariç)')}<label>KDV<select data-field="tax" class="form-control" onchange="updateSheetPurchaseSummary()"><option value="0">%0</option><option value="20">%20</option></select></label></div><button type="button" class="btn btn-outline" onclick="calculateSheetPurchaseWeight(this)">Bu kalemin tahmini KG değerini hesapla</button>`;
+    const first=readSheetPurchaseLines()[0];
+    for(const key of ['material','mm','en','boy','quantity','weight','price','tax'])row.querySelector(`[data-field="${key}"]`).value=values[key]??(key==='quantity'?1:['material','en','boy','price','tax'].includes(key)?first[key]:'');
+    row.querySelector('[data-field="weight"]').dataset.basis=values.weightBasis||'manual';container.append(row);renumberSheetPurchaseLines();updateSheetPurchaseSummary();
+}
+function renumberSheetPurchaseLines() {document.querySelectorAll('#sheet-purchase-lines .sheet-purchase-line').forEach((row,index)=>row.querySelector('.sheet-purchase-line-heading strong').textContent=`${index+1}. Sac kalemi`);}
+
+// Accept Turkish thousands/decimal notation without treating 47.287 as 47 TL.
+function parseSheetPurchaseDocumentTotal(value) {
+    if(typeof value==='number')return Number.isFinite(value)?roundMoney(value):NaN;
+    const text=String(value??'').trim();let normalized;
+    if(/^\d{1,3}(\.\d{3})+(,\d{1,2})?$/.test(text))normalized=text.replaceAll('.','').replace(',','.');
+    else if(/^\d+(,\d{1,2})?$/.test(text))normalized=text.replace(',','.');
+    else if(/^\d+\.\d{1,2}$/.test(text))normalized=text;
+    else return NaN;
+    return roundMoney(Number(normalized));
+}
+
+function handleCariAmountInput() {
+    if(document.getElementById('input-islem-tipi').value!=='sac_alimi')return updateTahsilatSummary();
+    document.getElementById('sheet-purchase-total-mode').value='document';
+    document.getElementById('sheet-purchase-document-total').value=document.getElementById('input-islem-tutar').value;
+    updateSheetPurchaseSummary(true);
+}
+function useCalculatedSheetPurchaseTotal() {
+    document.getElementById('sheet-purchase-total-mode').value='calculated';
+    document.getElementById('sheet-purchase-document-total').value='';
+    updateSheetPurchaseSummary();
+}
+
+// Record IDs remain the links between modules. Display codes have independent, durable counters.
+function getCodeAliases(record) {
+    return [...new Set([...(Array.isArray(record?.codeAliases) ? record.codeAliases : []), record?.identityMigration?.previousCode].filter(value => typeof value === 'string' && value))];
+}
+function rememberDisplayCode(record, code) {
+    if (code && code !== record.kodu) record.codeAliases = [...new Set([...getCodeAliases(record), code])];
+}
+function codeSearchText(record) { return [record?.kodu, ...getCodeAliases(record)].join(' '); }
+function thicknessCodeKey(value) {
+    const text = String(value ?? '').trim().replace(',', '.');
+    const n = Number(text);
+    return /^\d+(\.\d+)?$/.test(text) && Number.isFinite(n) && n > 0 && n < 10000 && !String(n).includes('e') ? String(n) : null;
+}
+function numberingBucket(config, year = new Date().getFullYear()) {
+    return config.prefix + (config.useYear ? '-' + year : '');
+}
+function nextDisplaySequence(database, type, config, bucket) {
+    const source = NUMBERING_RECORD_SOURCES[type];
+    const pattern = new RegExp('^' + escapeRegExp(bucket) + '-(\\d+)$');
+    let next = Number(config.series?.[bucket]) || 1;
+    // Import the older single counter only for the series it actually belongs to.
+    if (!config.activeSeries || config.activeSeries === bucket) next = Math.max(next, config.next || 1);
+    for (const record of database[source.collection] || []) {
+        for (const code of [record[source.field], ...getCodeAliases(record)]) {
+            const match = String(code || '').match(pattern);
+            if (match && Number.isSafeInteger(Number(match[1]))) next = Math.max(next, Number(match[1]) + 1);
+        }
+    }
+    if (!Number.isSafeInteger(next) || next < 1 || next >= Number.MAX_SAFE_INTEGER) throw Error('Numara sınırına ulaşıldı.');
+    return next;
+}
+function formatDatabaseSerial(database, type, increment = false, prefixOverride = '') {
+    database.ayarlar ||= {};
+    const settings = mergeNumberingSettings(database.ayarlar.numaralandirma);
+    const config = settings[type];
+    if (!config || type === 'stok') throw Error('Stok kodu için sac kalınlığı gereklidir.');
+    if (prefixOverride) config.prefix = prefixOverride;
+    const bucket = numberingBucket(config), next = nextDisplaySequence(database, type, config, bucket);
+    const code = bucket + '-' + String(next).padStart(config.pad, '0');
+    if (increment) {
+        config.series[bucket] = next + 1;
+        config.activeSeries = bucket;
+        config.next = next + 1;
+        database.ayarlar.numaralandirma = settings;
+    }
+    return code;
+}
+function stockCodeForThickness(mm, increment = false, database = db, prefixOverride = '') {
+    const key = thicknessCodeKey(mm);
+    if (!key) throw Error('Stok kodu için sıfırdan büyük bir sac kalınlığı girin.');
+    database.ayarlar ||= {};
+    const settings = mergeNumberingSettings(database.ayarlar.numaralandirma), config = settings.stok;
+    const bucket = (prefixOverride || config.prefix) + '-' + key + 'MM';
+    const pattern = new RegExp('^' + escapeRegExp(bucket) + '-(\\d+)$');
+    let next = Number(config.series[bucket]) || 1;
+    for (const stock of database.stoklar || []) {
+        for (const code of [stock.kodu, ...getCodeAliases(stock)]) {
+            const match = String(code || '').match(pattern);
+            if (match && Number.isSafeInteger(Number(match[1]))) next = Math.max(next, Number(match[1]) + 1);
+        }
+    }
+    if (!Number.isSafeInteger(next) || next < 1 || next >= Number.MAX_SAFE_INTEGER) throw Error('Stok numara sınırına ulaşıldı.');
+    if (increment) {
+        config.series[bucket] = next + 1;
+        config.next += 1;
+        database.ayarlar.numaralandirma = settings;
+    }
+    return bucket + '-' + String(next).padStart(2, '0');
+}
+function migrateReadableCodes(database) {
+    database.ayarlar ||= {};
+    const old = mergeNumberingSettings(database.ayarlar.numaralandirma);
+    for (const [type, defaults] of Object.entries(defaultNumberingSettings)) {
+        const config = old[type], previousBucket = numberingBucket(config);
+        config.series[previousBucket] = Math.max(config.series[previousBucket] || 1, config.next);
+        Object.assign(config, {prefix:defaults.prefix, pad:defaults.pad, useYear:defaults.useYear});
+        if (previousBucket !== numberingBucket(config)) { config.activeSeries = previousBucket; config.next = 1; }
+    }
+    database.ayarlar.numaralandirma = old;
+    const mappings = [], roots = new Map();
+    const sortedStocks = [...(database.stoklar || [])].sort((a,b) => Number(a.id)-Number(b.id));
+    for (const stock of sortedStocks) {
+        if (stock.originCutId) continue;
+        const key = thicknessCodeKey(stock.mm);
+        if (!key) { stock.codeReviewRequired = true; continue; }
+        const from = stock.kodu || '', family = key + '|' + (from || 'id:' + stock.id);
+        const alreadyFormatted = new RegExp('^STK-' + escapeRegExp(key) + 'MM-\\d+$').test(from);
+        const to = roots.get(family) || (alreadyFormatted ? from : stockCodeForThickness(key, true, database));
+        roots.set(family, to); stock.kodu = to; stock.codeReviewRequired = false;
+        rememberDisplayCode(stock, from);
+        if (from !== to) mappings.push({type:'stok', id:stock.id, from, to});
+    }
+    for (const stock of sortedStocks) {
+        if (!stock.originCutId) continue;
+        const root = getRootSheetStock(stock, database);
+        if (!root || root.codeReviewRequired) { stock.codeReviewRequired = true; continue; }
+        const from = stock.kodu || '';
+        stock.kodu = root.kodu; stock.rootStockId = root.id; stock.codeReviewRequired = false;
+        rememberDisplayCode(stock, from);
+        stock.codeAliases = [...new Set([...getCodeAliases(stock), ...getCodeAliases(root)])];
+        if (from !== stock.kodu) mappings.push({type:'stok', id:stock.id, from, to:stock.kodu});
+    }
+    for (const cari of [...(database.cariler || [])].sort((a,b) => Number(a.id)-Number(b.id))) {
+        if (/^CAR-\d+$/.test(cari.kodu || '')) continue;
+        const from = cari.kodu || '';
+        cari.kodu = formatDatabaseSerial(database, 'cari', true);
+        rememberDisplayCode(cari, from);
+        mappings.push({type:'cari', id:cari.id, from, to:cari.kodu});
+    }
+    database.codeMigration = {version:9, mappings};
+}
+function renderStockCodeHint(edit = false) {
+    const input = document.getElementById(edit ? 'input-duzenle-stok-mm' : 'input-stok-mm');
+    const output = document.getElementById(edit ? 'edit-stock-code-hint' : 'new-stock-code-hint');
+    if (!input || !output) return;
+    const stock = edit ? getDBArray('stoklar').find(s => String(s.id) === document.getElementById('input-duzenle-stok-id').value) : null;
+    try {
+        const changed = stock && thicknessCodeKey(stock.mm) !== thicknessCodeKey(input.value);
+        output.textContent = stock && !changed ? 'Stok kodu: ' + stock.kodu : stock ?
+            `Kalınlık düzeltmesi: ${stock.kodu} → ${stockCodeForThickness(input.value)}. Eski kodla arama korunur.` :
+            'Otomatik stok kodu: ' + stockCodeForThickness(input.value);
+    } catch (_) { output.textContent = 'Stok kodu kalınlığa göre otomatik oluşturulur.'; }
+}
+function renderPurchaseCodeHints() {
+    const previewDB = {stoklar:getDBArray('stoklar'), ayarlar:JSON.parse(JSON.stringify(db.ayarlar || {}))};
+    document.querySelectorAll('#sheet-purchase-lines .sheet-purchase-line').forEach(row => {
+        const output = row.querySelector('.stock-code-hint');
+        if (!output) return;
+        const input = row.dataset.first ? document.getElementById('sheet-purchase-mm') : row.querySelector('[data-field="mm"]');
+        const previous = getDBArray('stoklar').find(s => String(s.id) === row.dataset.stockId);
+        try {
+            const changed = previous && thicknessCodeKey(previous.mm) !== thicknessCodeKey(input.value);
+            const code = previous && !changed ? previous.kodu : stockCodeForThickness(input.value, true, previewDB);
+            output.textContent = changed ? `Kalınlık düzeltmesi: ${previous.kodu} → ${code}. Eski kod korunur.` : 'Stok kodu: ' + code;
+        } catch (_) { output.textContent = 'Kalınlık girildiğinde stok kodu oluşur.'; }
+    });
+}
+function renderNumberingExamples() {
+    document.querySelectorAll('[data-numbering-preview]').forEach(output => {
+        const type = output.dataset.numberingPreview, prefix = document.getElementById(output.dataset.prefixInput)?.value.trim().toUpperCase();
+        if (!/^[A-Z][A-Z0-9]{0,11}$/.test(prefix || '')) { output.textContent = 'En fazla 12 harf/rakam kullanın.'; return; }
+        output.textContent = type === 'stok' ? 'Örnek: ' + stockCodeForThickness(10, false, db, prefix) + ' · her kalınlığa ayrı sıra' : 'Sıradaki: ' + formatDatabaseSerial(db, type, false, prefix);
+    });
+    const body = document.getElementById('code-migration-list');
+    if (body) body.innerHTML = (db.codeMigration?.mappings || []).map(m => `<tr><td>${m.type==='stok'?'Stok':'Cari'}</td><td>${escapeHTML(m.from || '—')}</td><td>${escapeHTML(m.to)}</td></tr>`).join('') || '<tr><td colspan="3">Dönüştürülen eski kod yok.</td></tr>';
+}
+
+async function backupBeforeReadableCodes(data) {
+    const raw = typeof data === 'string' ? JSON.parse(data) : data;
+    if (!raw || Number(raw.schemaVersion) >= 9 || !((raw.stoklar || []).length || (raw.cariler || []).length)) return;
+    const original = typeof data === 'string' ? data : JSON.stringify(data);
+    if (window.electronAPI?.sendBackup) {
+        const result = await createSafetyBackup(original);
+        if (!result.success) throw Error('Kod düzenlemesi öncesi güvenlik yedeği alınamadı. Veriler değiştirilmedi. ' + (result.error || ''));
+    } else {
+        localStorage.setItem(DB_KEY + '-before-readable-codes', original);
     }
 }

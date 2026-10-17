@@ -1,6 +1,20 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { randomUUID } = require('crypto');
+const { createBackupMonitor } = require('./backup-status');
+let mainWindow = null;
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) app.quit();
+let backupMonitor;
+function getBackupMonitor() {
+    if (!backupMonitor) backupMonitor = createBackupMonitor({
+        statusPath: path.join(app.getPath('userData'), 'backup-status.json'),
+        listBackups: () => getBackupFiles(path.join(app.getPath('documents'), 'AkLazerYedek')),
+        validate: validateDatabasePayload
+    });
+    return backupMonitor;
+}
 const { pathToFileURL } = require('url');
 
 const MAX_DATABASE_BYTES = 50 * 1024 * 1024;
@@ -143,23 +157,24 @@ function getBackupFiles(rootPath) {
     });
 }
 
-function writeRotatingBackup(data) {
+function writeRotatingBackup(data, kind = 'auto') {
     const date = new Date();
     const year = String(date.getFullYear());
     const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const hour = String(date.getHours()).padStart(2, '0');
-    const minute = String(date.getMinutes()).padStart(2, '0');
     const backupRoot = path.join(app.getPath('documents'), 'AkLazerYedek');
-    const backupDir = path.join(backupRoot, year, month);
-    const filePath = path.join(backupDir, `yedek-${year}-${month}-${day}-${hour}-${minute}.json`);
+    const safety = kind === 'safety';
+    const backupDir = safety ? path.join(backupRoot, 'Guvenlik', year, month) : path.join(backupRoot, year, month);
+    const timestamp = date.toISOString().replace(/[:.]/g, '-');
+    const filePath = path.join(backupDir, `yedek-${safety ? 'guvenlik-' : ''}${timestamp}-${randomUUID()}.json`);
 
     writeTextFileAtomic(filePath, data);
 
     const files = getBackupFiles(backupRoot)
+        .filter(file => file !== filePath && path.basename(file).startsWith('yedek-guvenlik-') === safety)
         .map(file => ({ file, mtime: fs.statSync(file).mtimeMs }))
         .sort((a, b) => b.mtime - a.mtime);
-    files.slice(60).forEach(item => fs.rmSync(item.file, { force: true }));
+    // Keep safety snapshots separate from routine saves, including after restore/reset.
+    files.slice((safety ? 20 : 60) - 1).forEach(item => fs.rmSync(item.file, { force: true }));
     return filePath;
 }
 
@@ -269,6 +284,8 @@ function createWindow() {
             preload: path.join(__dirname, 'preload.js')
         }
     });
+    mainWindow = win;
+    win.on('closed', () => { if (mainWindow === win) mainWindow = null; });
 
     win.loadFile('index.html');
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -279,14 +296,21 @@ function createWindow() {
     // win.webContents.openDevTools(); // Açık tutulabilir istenirse
 }
 
+function focusMainWindow() {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.show();
+        mainWindow.focus();
+    } else if (app.isReady()) createWindow();
+}
+
+if (hasSingleInstanceLock) app.on('second-instance', focusMainWindow);
+
 app.whenReady().then(() => {
+    if (!hasSingleInstanceLock) return;
     createWindow();
 
-    app.on('activate', () => {
-        if (BrowserWindow.getAllWindows().length === 0) {
-            createWindow();
-        }
-    });
+    app.on('activate', focusMainWindow);
 
     ipcMain.handle('app-surumu', async event => {
         try {
@@ -335,15 +359,23 @@ app.whenReady().then(() => {
         }
     });
 
+    ipcMain.handle('yedek-durumu', async event => {
+        try { assertTrustedSender(event); return getBackupMonitor().read(); }
+        catch (error) { return { success: false, error: error.message }; }
+    });
+
     // Otomatik Yedekleme Handler
-    ipcMain.handle('veri-degisti', async (event, data) => {
+    ipcMain.handle('veri-degisti', async (event, data, options = {}) => {
+        let trusted = false;
+        const kind = options?.safety === true ? 'safety' : 'auto';
         try {
             assertTrustedSender(event);
-            const filePath = writeRotatingBackup(validateDatabasePayload(data));
-            return { success: true, path: filePath };
+            trusted = true;
+            const filePath = writeRotatingBackup(validateDatabasePayload(data), kind);
+            return { success: true, path: filePath, backupStatus: getBackupMonitor().record({ success: true, path: filePath }, kind) };
         } catch (error) {
             console.error("Otomatik yedekleme hatası:", error);
-            return { success: false, error: error.message };
+            return { success: false, error: error.message, ...(trusted ? { backupStatus: getBackupMonitor().record({ success: false, error: error.message }, kind) } : {}) };
         }
     });
 
@@ -399,8 +431,10 @@ app.whenReady().then(() => {
 
     // Manuel Yedek Handler
     ipcMain.handle('manuel-yedek', async (event, data) => {
+        let trusted = false;
         try {
             assertTrustedSender(event);
+            trusted = true;
             const validatedData = validateDatabasePayload(data);
             const { filePath } = await dialog.showSaveDialog({
                 title: 'Yedek Dosyasını Kaydet',
@@ -410,12 +444,12 @@ app.whenReady().then(() => {
 
             if (filePath) {
                 writeTextFileAtomic(filePath, validatedData);
-                return { success: true, path: filePath };
+                return { success: true, path: filePath, backupStatus: getBackupMonitor().record({ success: true, path: filePath }, 'manual') };
             }
             return { success: false, canceled: true };
         } catch (error) {
             console.error("Manuel yedekleme hatası:", error);
-            return { success: false, error: error.message };
+            return { success: false, error: error.message, ...(trusted ? { backupStatus: getBackupMonitor().record({ success: false, error: error.message }, 'manual') } : {}) };
         }
     });
 

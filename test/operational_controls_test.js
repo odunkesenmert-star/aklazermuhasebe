@@ -229,12 +229,12 @@ setTimeout(async () => {
         set('input-fatura-matrah', 100);
         set('input-fatura-kdv-orani', 20);
         dom.window.updateInvoiceTaxPreview('matrah');
-        set('input-fatura-odeme-durumu', 'kismi');
+        set('input-fatura-odeme-durumu', 'odenmedi');
         set('input-fatura-seri', 'A / 000001');
         set('input-fatura-vergi-no', '1234567890');
         dom.window.saveFatura();
         const invoice = db.faturalar.find(item => item.faturaNo === 'FTR-TEST-001');
-        assert(invoice?.faturaTarihi === '16.07.2026' && invoice.vadeTarihi === '15.08.2026' && invoice.matrah === 100 && invoice.kdvTutari === 20 && invoice.tutar === 120 && invoice.odemeDurumu === 'kismi' && invoice.seriSira === 'A / 000001', 'Fatura tarih, vade, vergi kırılımı, seri ve ödeme durumuyla kaydediliyor.');
+        assert(invoice?.faturaTarihi === '16.07.2026' && invoice.vadeTarihi === '15.08.2026' && invoice.matrah === 100 && invoice.kdvTutari === 20 && invoice.tutar === 120 && invoice.odemeDurumu === 'odenmedi' && invoice.seriSira === 'A / 000001', 'Fatura tarih, vade, vergi kırılımı, seri ve ödeme durumuyla kaydediliyor.');
 
         console.log('\n--- Personel, çek/senet, Excel ve ek kontrolleri ---');
         set('input-personel-id', '');

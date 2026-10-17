@@ -88,11 +88,11 @@ setTimeout(() => {
         set('input-stok-kg', 2000);
         set('input-stok-en', 1500);
         set('input-stok-boy', 3000);
-        set('input-stok-maliyet', 1000);
+        set('input-stok-maliyet', 10); // 100 KG/plaka × 10 TL/KG = 1000 TL/plaka
         set('input-stok-kritik', 2);
         dom.window.saveStok();
         const stock = db.stoklar[0];
-        assert(stock && stock.miktar === 20 && stock.maliyet === 1000, 'Stok miktarı ve birim maliyeti doğru kaydediliyor.');
+        assert(stock && stock.miktar === 20 && stock.maliyet === 10, 'Stok miktarı ve birim maliyeti doğru kaydediliyor.');
 
         console.log('\n--- Satış, iş emri, teslim ve fatura ---');
         dom.window.renderCariler();

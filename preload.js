@@ -1,7 +1,8 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
-    sendBackup: (data) => ipcRenderer.invoke('veri-degisti', data),
+    getBackupStatus: () => ipcRenderer.invoke('yedek-durumu'),
+    sendBackup: (data, options = {}) => ipcRenderer.invoke('veri-degisti', data, { safety: options?.safety === true }),
     manualBackup: (data) => ipcRenderer.invoke('manuel-yedek', data),
     restoreBackup: () => ipcRenderer.invoke('yedek-geri-yukle'),
     loadDBFromFile: () => ipcRenderer.invoke('db-dosyadan-yukle'),

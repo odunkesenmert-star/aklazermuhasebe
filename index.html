@@ -5,19 +5,33 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;">
     <title>AK LAZER ERP - Lazer Kesim Yönetim Sistemi</title>
-    <link rel="stylesheet" href="style.css?v=1.3.37">
-    <link rel="stylesheet" href="node_modules/@fortawesome/fontawesome-free/css/all.min.css?v=1.3.37">
-    <script src="node_modules/chart.js/dist/chart.umd.min.js?v=1.3.37"></script>
-    <script src="app.js?v=1.3.37" defer></script>
+    <link rel="stylesheet" href="style.css?v=1.5.21">
+    <link rel="stylesheet" href="node_modules/@fortawesome/fontawesome-free/css/all.min.css?v=1.5.21">
+    <script src="node_modules/chart.js/dist/chart.umd.min.js?v=1.5.21"></script>
+    <script src="app.js?v=1.5.21" defer></script>
 </head>
 <body>
+    <button type="button" class="workspace-menu-backdrop" aria-label="Menüyü kapat" onclick="toggleWorkspaceMenu(false)" hidden></button>
+    <div id="modal-workspace-search" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="workspace-search-title">
+        <div class="modal-content workspace-search-dialog">
+            <div class="workspace-search-heading"><div><span class="section-kicker">HIZLI ERİŞİM</span><h2 id="workspace-search-title">Nereye gitmek istersiniz?</h2></div><button type="button" class="btn-close" onclick="closeModal('modal-workspace-search')" aria-label="Aramayı kapat"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></div>
+            <div class="modal-body workspace-search-body">
+                <label class="sr-only" for="workspace-search-input">Cari, iş emri, fatura, stok veya menü ara</label>
+                <div class="workspace-search-field"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><input type="search" id="workspace-search-input" class="form-control" placeholder="Örneğin: cari adı, EMR-000001, yeni fatura" autocomplete="off" oninput="renderWorkspaceSearch()" aria-describedby="workspace-search-count"></div>
+                <p id="workspace-search-count" role="status" aria-live="polite"></p>
+                <div id="workspace-search-results" class="workspace-search-results"></div>
+            </div>
+            <div class="workspace-search-footer"><span><kbd>↑</kbd> <kbd>↓</kbd> Gezin <kbd>Enter</kbd> Aç</span><span><kbd>Esc</kbd> Kapat</span></div>
+        </div>
+    </div>
     <a class="skip-link" href="#main-content">Ana içeriğe geç</a>
     <div class="app-container">
         <!-- Sidebar -->
-        <aside class="sidebar">
-            <div class="sidebar-header">
+        <aside class="sidebar" id="workspace-sidebar" aria-label="Modüller">
+            <div class="sidebar-header"><button type="button" class="sidebar-close" aria-label="Modül menüsünü kapat" onclick="toggleWorkspaceMenu(false)"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
                 <img class="logo-mark" src="assets/ak-lazer-logo-ui.png" alt="AK LAZER">
-            </div>
+            <span class="sidebar-product-label">İŞLETME YÖNETİMİ</span></div>
+            <button type="button" class="sidebar-create" onclick="navigateTo('quotation')"><i class="fa-solid fa-plus" aria-hidden="true"></i> Yeni teklif oluştur</button>
             <nav class="sidebar-nav" aria-label="Ana menü">
                 <ul class="nav-menu">
                     <li class="nav-home-item"><button type="button" class="nav-item nav-item-home active" data-target="dashboard" aria-current="page" onclick="location.hash='dashboard'">
@@ -39,7 +53,7 @@
                                 <i class="fa-solid fa-boxes-stacked" aria-hidden="true"></i><span>Stoklar</span><strong id="nav-badge-stock" class="nav-count-badge nav-count-badge-alert" hidden>0</strong>
                             </button></li>
                             <li><button type="button" class="nav-item" data-target="scraps" data-page-title="Fireler / Parçalar" onclick="location.hash='scraps'">
-                                <i class="fa-solid fa-recycle" aria-hidden="true"></i><span>Fire / Parçalar</span>
+                                <i class="fa-solid fa-recycle" aria-hidden="true"></i><span>Kalan Parça / Hurda</span>
                             </button></li>
                         </ul>
                     </li>
@@ -49,11 +63,15 @@
                             <i class="fa-solid fa-chevron-down nav-section-chevron" aria-hidden="true"></i>
                         </button>
                         <ul class="nav-group-items" id="nav-group-finance" hidden>
+                            <li><button type="button" class="nav-item" data-target="quicksales" onclick="location.hash='quicksales'"><i class="fa-solid fa-bolt" aria-hidden="true"></i><span>Hızlı Satış</span></button></li>
                             <li><button type="button" class="nav-item" data-target="accounts" data-page-title="Cari Hesaplar" onclick="location.hash='accounts'">
                                 <i class="fa-solid fa-users" aria-hidden="true"></i><span>Cariler</span>
                             </button></li>
                             <li><button type="button" class="nav-item" data-target="invoices" onclick="location.hash='invoices'">
                                 <i class="fa-solid fa-file-invoice" aria-hidden="true"></i><span>Faturalar</span>
+                            </button></li>
+                            <li><button type="button" class="nav-item" data-target="collections" onclick="location.hash='collections'">
+                                <i class="fa-solid fa-hand-holding-dollar" aria-hidden="true"></i><span>Tahsilat Takibi</span>
                             </button></li>
                             <li><button type="button" class="nav-item" data-target="cashbank" onclick="location.hash='cashbank'">
                                 <i class="fa-solid fa-building-columns" aria-hidden="true"></i><span>Kasa / Banka</span>
@@ -72,6 +90,9 @@
                             <i class="fa-solid fa-chevron-down nav-section-chevron" aria-hidden="true"></i>
                         </button>
                         <ul class="nav-group-items" id="nav-group-reports" hidden>
+                            <li><button type="button" class="nav-item" data-target="accountcheck" onclick="location.hash='accountcheck'">
+                                <i class="fa-solid fa-scale-balanced" aria-hidden="true"></i><span>Hesap Kontrolü</span>
+                            </button></li>
                             <li><button type="button" class="nav-item" data-target="profitability" data-page-title="Kârlılık Raporu" onclick="location.hash='profitability'">
                                 <i class="fa-solid fa-chart-line" aria-hidden="true"></i><span>İş Kârlılığı</span>
                             </button></li>
@@ -97,8 +118,8 @@
                 </ul>
             </nav>
             <div class="sidebar-version" aria-label="Uygulama sürümü">
-                <span class="sidebar-version-label">Sürüm</span>
-                <strong id="app-version">v1.3.37</strong>
+                <span class="sidebar-version-label"><i class="fa-solid fa-desktop" aria-hidden="true"></i> AK LAZER ERP</span>
+                <strong id="app-version">v1.5.21</strong>
             </div>
         </aside>
 
@@ -106,16 +127,19 @@
         <main class="main-content" id="main-content" tabindex="-1">
             <!-- Header -->
             <header class="top-header">
-                <div class="header-title" id="page-title">Gösterge Paneli</div>
+                <div class="header-location"><button type="button" class="btn btn-outline sidebar-mobile-toggle" id="sidebar-mobile-toggle" aria-label="Menüyü aç" aria-expanded="false" aria-controls="workspace-sidebar" onclick="toggleWorkspaceMenu()"><i class="fa-solid fa-bars" aria-hidden="true"></i></button><div class="header-title" id="page-title">Gösterge Paneli</div></div>
+                <button type="button" class="workspace-search-trigger" id="workspace-search-trigger" onclick="openWorkspaceSearch()" aria-label="Programda ara (Ctrl veya Command K)"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><span>Cari, iş emri veya menü ara…</span><kbd>⌘ / Ctrl K</kbd></button>
                 <div class="header-actions">
+                    <button type="button" class="btn btn-outline workspace-density" id="workspace-density" onclick="toggleWorkspaceDensity()" aria-pressed="false" title="Tablo satır aralığını değiştir"><i class="fa-solid fa-bars-staggered" aria-hidden="true"></i><span>Rahat</span></button>
+                    <button type="button" class="btn btn-outline header-icon-button" id="workspace-theme" onclick="toggleWorkspaceTheme()" aria-label="Koyu görünüme geç" title="Koyu görünüme geç"><i class="fa-solid fa-moon" aria-hidden="true"></i></button>
                     <div style="position: relative; display: inline-block;">
                         <button class="btn btn-outline header-icon-button" onclick="openNotifications()" aria-label="Bekleyen iş bildirimlerini aç" title="Bekleyen işler"><i class="fa-solid fa-bell" aria-hidden="true"></i></button>
                         <span id="notification-badge" class="badge" style="position: absolute; top: -5px; right: -5px; background-color: var(--alert); color: white; border-radius: 50%; padding: 2px 6px; font-size: 10px; display: none;">0</span>
                     </div>
-                    <div class="user-profile" id="btn-user-profile" style="cursor: pointer; display: flex; align-items: center;" onclick="openAyarlarModal()">
+                    <button type="button" class="user-profile" id="btn-user-profile" onclick="openAyarlarModal()" aria-label="Firma ayarlarını aç">
                         <img id="header-avatar" src="" alt="User">
-                        <span id="header-firma-adi" style="margin-left: 10px; font-weight: 500; font-size: 14px; color: var(--text-primary);">Firma Adı</span>
-                    </div>
+                        <span id="header-firma-adi">Firma Adı</span>
+                    </button>
                 </div>
             </header>
 
@@ -127,21 +151,24 @@
                     <section class="dashboard-command-bar" aria-labelledby="dashboard-overview-title">
                         <div class="dashboard-command-copy">
                             <div class="dashboard-command-meta">
-                                <span class="section-kicker">Bugünün çalışma alanı</span>
+                                <span class="section-kicker">GENEL BAKIŞ</span>
                                 <span id="dashboard-status-chip" class="dashboard-status-chip" aria-live="polite"><i class="fa-solid fa-circle-check" aria-hidden="true"></i><span id="dashboard-status-text">Akış dengede</span></span>
                             </div>
                             <div class="dashboard-command-title-row">
-                                <h2 id="dashboard-overview-title">İşletme Özeti</h2>
+                                <h2 id="dashboard-overview-title">İşletmenize bir bakış</h2>
                                 <button type="button" class="btn btn-outline dashboard-privacy-button" id="btn-toggle-stats" onclick="toggleStats()" aria-pressed="false" aria-label="Finansal rakamları göster"><i class="fa-solid fa-eye-slash" aria-hidden="true"></i> Göster</button>
                             </div>
                             <p id="dashboard-date-label">Güncel finans ve operasyon görünümü</p>
                         </div>
                         <div class="dashboard-quick-actions" aria-label="Hızlı işlemler">
-                            <button type="button" class="btn btn-primary dashboard-quick-action" onclick="navigateTo('quotation')"><i class="fa-solid fa-file-circle-plus" aria-hidden="true"></i> Yeni Teklif</button>
+                            <button type="button" class="btn btn-primary dashboard-quick-action" onclick="openQuickSale()"><i class="fa-solid fa-bolt" aria-hidden="true"></i> Hızlı Satış</button>
+                            <button type="button" class="btn btn-outline dashboard-quick-action" onclick="navigateTo('quotation')"><i class="fa-solid fa-file-circle-plus" aria-hidden="true"></i> Yeni Teklif</button>
                             <button type="button" class="btn btn-outline dashboard-quick-action" onclick="openModal('modal-cari')"><i class="fa-solid fa-user-plus" aria-hidden="true"></i> Yeni Cari</button>
                             <button type="button" class="btn btn-outline dashboard-quick-action" onclick="openGiderModal()"><i class="fa-solid fa-receipt" aria-hidden="true"></i> Gider Ekle</button>
                         </div>
                     </section>
+
+                    <div class="backup-status-strip" id="dashboard-backup-status" role="status" aria-live="polite"></div>
 
                     <div class="stats-grid dashboard-kpi-grid" aria-label="Temel göstergeler">
                         <button type="button" class="stat-card dashboard-kpi-card dashboard-kpi-income clickable-card" onclick="openStatModal('gelir')">
@@ -446,28 +473,28 @@
                             <div class="quote-summary">
                                 <div class="summary-item" id="summary-cut-container">
                                     <span id="summary-cut-label">Kesim Bedeli:</span>
-                                    <span id="summary-cut">₺0.00</span>
+                                    <span id="summary-cut">₺0,00</span>
                                 </div>
                                 <div class="summary-item">
                                     <span>Malzeme Bedeli:</span>
-                                    <span id="summary-mat">₺0.00</span>
+                                    <span id="summary-mat">₺0,00</span>
                                 </div>
                                 <div class="summary-item text-alert">
                                     <span>İskonto:</span>
-                                    <span id="summary-discount">₺0.00</span>
+                                    <span id="summary-discount">₺0,00</span>
                                 </div>
                                 <hr>
                                 <div class="summary-item total">
                                     <span>Ara Toplam:</span>
-                                    <span id="summary-sub">₺0.00</span>
+                                    <span id="summary-sub">₺0,00</span>
                                 </div>
                                 <div class="summary-item">
                                     <span id="summary-tax-label">KDV (%20):</span>
-                                    <span id="summary-tax">₺0.00</span>
+                                    <span id="summary-tax">₺0,00</span>
                                 </div>
                                 <div class="summary-item grand-total text-primary">
                                     <span>Genel Toplam:</span>
-                                    <span id="summary-total">₺0.00</span>
+                                    <span id="summary-total">₺0,00</span>
                                 </div>
                             </div>
                             <div class="quote-actions mt-4">
@@ -571,6 +598,53 @@
                     </div>
                 </div>
 
+                <div id="view-quicksales" class="view">
+                    <div class="flex-between mb-4"><p class="finance-note">İsimsiz veya tek seferlik peşin satışlar</p><button type="button" class="btn btn-primary" onclick="openQuickSale()"><i class="fa-solid fa-plus" aria-hidden="true"></i> Yeni Hızlı Satış</button></div>
+                    <div id="quick-sales-summary" class="finance-summary-grid" aria-live="polite"></div>
+                    <div class="finance-panel">
+                        <div class="finance-filters">
+                            <label>Satış ara<input id="quick-sales-search" type="search" class="form-control" placeholder="Satış no, açıklama, isim, tutar" oninput="filterQuickSales()"></label>
+                            <label>Başlangıç<input id="quick-sales-from" type="date" class="form-control" onchange="filterQuickSales()"></label>
+                            <label>Bitiş<input id="quick-sales-to" type="date" class="form-control" onchange="filterQuickSales()"></label>
+                            <label>Durum<select id="quick-sales-status" class="form-control" onchange="filterQuickSales()"><option value="active">Geçerli satışlar</option><option value="all">Tüm geçmiş</option><option value="cancelled">İptal edilenler</option><option value="corrected">Düzeltilen eski kayıtlar</option></select></label>
+                        </div>
+                        <div class="finance-table-scroll" tabindex="0" aria-label="Hızlı satış geçmişi"><table class="data-table finance-table"><thead><tr><th scope="col">Satış / Tarih</th><th scope="col">Açıklama / Müşteri</th><th scope="col">Tahsilat hesabı</th><th scope="col">Tutar</th><th scope="col">Durum</th><th scope="col">İşlemler</th></tr></thead><tbody id="quick-sales-tbody"></tbody></table></div>
+                        <div class="finance-pagination"><span id="quick-sales-page-info"></span><div><button type="button" id="quick-sales-prev" class="btn btn-outline" onclick="changeQuickSalesPage(-1)">Önceki</button><button type="button" id="quick-sales-next" class="btn btn-outline" onclick="changeQuickSalesPage(1)">Sonraki</button></div></div>
+                    </div>
+                </div>
+
+                <div id="view-collections" class="view">
+                    <div id="collections-summary" class="finance-summary-grid" aria-label="Açık fatura özeti"></div>
+                    <div class="finance-panel">
+                        <div class="finance-filters">
+                            <label>Müşteri / fatura ara<input id="collections-search" class="form-control" type="search" placeholder="Firma, cari kodu veya fatura no" oninput="filterCollections()"></label>
+                            <label>Müşteri<select id="collections-cari" class="form-control" onchange="filterCollections()"><option value="">Tüm müşteriler</option></select></label>
+                            <label>Vade durumu<select id="collections-status" class="form-control" onchange="filterCollections()">
+                                <option value="all">Tüm açık faturalar</option><option value="overdue">Gecikenler</option><option value="today">Bugün vadesi gelen</option><option value="soon">Önümüzdeki 7 gün</option><option value="future">Daha ileri vadeli</option><option value="undated">Vadesi belirtilmeyen</option><option value="unknown">Ödeme geçmişi eksik</option>
+                            </select></label>
+                            <label>Sıralama<select id="collections-sort" class="form-control" onchange="filterCollections()"><option value="due">Vade: en eski önce</option><option value="customer">Müşteri adı</option><option value="amount">Kalan: yüksekten düşüğe</option></select></label>
+                        </div>
+                        <p class="finance-note">Tutarlar faturaya bağlı ödemelerden hesaplanır. Cari hesaba yapılan genel tahsilatlar ayrıca değerlendirilmelidir.</p>
+                        <div class="finance-table-scroll" tabindex="0" aria-label="Tahsilat takip tablosu">
+                            <table class="data-table finance-table"><thead><tr><th scope="col">Müşteri / Fatura</th><th scope="col">Vade</th><th scope="col">Durum</th><th scope="col" class="numeric-column">Kalan Tutar</th><th scope="col">İşlemler</th></tr></thead><tbody id="collections-tbody"></tbody></table>
+                        </div>
+                        <div class="finance-pagination"><span id="collections-page-info" aria-live="polite"></span><div><button id="collections-prev" class="btn btn-outline" type="button" onclick="changeCollectionsPage(-1)">Önceki</button><button id="collections-next" class="btn btn-outline" type="button" onclick="changeCollectionsPage(1)">Sonraki</button></div></div>
+                    </div>
+                </div>
+                <div id="view-accountcheck" class="view">
+                    <div id="account-check-summary" class="finance-summary-grid" aria-label="Hesap kontrolü özeti"></div>
+                    <div class="finance-panel">
+                        <div class="finance-filters">
+                            <label>Durum<select id="account-check-filter" class="form-control" onchange="renderAccountChecks()"><option value="all">Tüm bulgular</option><option value="error">Tutarsızlıklar</option><option value="review">İncelenecek kayıtlar</option></select></label>
+                            <button type="button" class="btn btn-outline" onclick="renderAccountChecks()"><i class="fa-solid fa-rotate" aria-hidden="true"></i> Yeniden Kontrol Et</button>
+                            <span id="account-check-time" class="finance-note" aria-live="polite"></span>
+                        </div>
+                        <p class="finance-note">Cari ve kasa bakiyeleri, fatura bağlantıları ve ters kayıtlar kontrol edilir. Eski devir bilgisi olmayan hesaplarda farkın kaynağı kesinleştirilemez. Bu ekran hiçbir kaydı değiştirmez.</p>
+                        <div id="account-check-results" aria-live="polite"></div>
+                        <button id="account-check-more" type="button" class="btn btn-outline" onclick="showMoreAccountChecks()" hidden>Daha Fazla Göster</button>
+                    </div>
+                </div>
+
                 <!-- Accounts View -->
                 <div id="view-accounts" class="view">
                     <div class="accounts-toolbar workspace-toolbar" aria-label="Cari liste araçları">
@@ -586,7 +660,7 @@
                         <div class="workspace-list-row">
                             <div class="search-box account-search-box">
                                 <i class="fa-solid fa-magnifying-glass"></i>
-                                <input type="text" id="cari-search" class="form-control" placeholder="Firma adı veya kod..." oninput="handleHighVolumeSearch('accounts')">
+                                <input type="text" id="cari-search" aria-label="Cari adı veya kodu ara" class="form-control" placeholder="Firma adı veya kod..." oninput="handleHighVolumeSearch('accounts')">
                             </div>
                             <div class="workspace-list-actions">
                                 <span id="accounts-selection-count" class="selection-count">Seçim yok</span>
@@ -720,7 +794,8 @@
                                     <th>Miktar (Plaka)</th>
                                     <th>Ağırlık (KG)</th>
                                     <th>Sahibi</th>
-                                    <th>Maliyet</th>
+                                    <th>KG Birim Fiyatı (₺)</th>
+                                    <th>Toplam Maliyet (₺)</th>
                                     <th>İşlem</th>
                                 </tr>
                             </thead>
@@ -757,13 +832,19 @@
                 <!-- Scraps View -->
                 <div id="view-scraps" class="view">
                     <div class="flex-between mb-4">
-                        <h2>Fireler ve Artık Parçalar</h2>
+                        <h2>Kalan Parçalar ve Hurda</h2>
                         <div style="display:flex; gap:8px; flex-wrap:wrap;">
                             <span id="scraps-selection-count" class="selection-count">Seçim yok</span>
                             <button type="button" class="btn btn-outline bulk-icon-action bulk-icon-action-excel" onclick="exportSelectedListToExcel('scraps')" aria-label="Seçilen fire kayıtlarını Excel'e aktar" title="Seçilenleri Excel'e aktar"><i class="fa-solid fa-file-excel" aria-hidden="true"></i></button>
                             <button type="button" class="btn btn-outline bulk-icon-action bulk-icon-action-print" onclick="printList('scraps')" aria-label="Seçilen fire kayıtlarını yazdır" title="Seçilenleri yazdır"><i class="fa-solid fa-print" aria-hidden="true"></i></button>
-                            <button class="btn btn-primary" onclick="openFireModal()"><i class="fa-solid fa-plus"></i> Yeni Fire Ekle</button>
+                            <button class="btn btn-outline" onclick="openFireModal()">Bağımsız Fire / Hurda</button><button type="button" class="btn btn-primary" onclick="openSheetCut()"><i class="fa-solid fa-scissors" aria-hidden="true"></i> Kesim / Kalan Parça</button>
                         </div>
+                    </div>
+                    <div class="finance-panel sheet-cut-panel">
+                        <h3>Kesim Geçmişi</h3><p class="finance-note">Kalan parçalar aynı stok kodunun altında parça numarasıyla izlenir ve yeni işlerde seçilebilir. Burada kesim kayıtlarını ve bağlantılarını görebilirsiniz.</p>
+                        <label for="sheet-cut-search">Kesim, stok veya iş emri ara</label><input id="sheet-cut-search" type="search" class="form-control" oninput="sheetCutPage=1;renderSheetCuts()" placeholder="Kod veya malzeme adı">
+                        <div class="finance-table-scroll"><table class="data-table"><thead><tr><th>Kesim / Tarih</th><th>Kaynak / İş emri</th><th>Kalan parçalar</th><th>Durum / İşlem</th></tr></thead><tbody id="sheet-cut-history"></tbody></table></div>
+                        <div class="finance-pagination"><span id="sheet-cut-page"></span><div><button type="button" class="btn btn-outline" id="sheet-cut-prev" onclick="sheetCutPage--;renderSheetCuts()">Önceki</button><button type="button" class="btn btn-outline" id="sheet-cut-next" onclick="sheetCutPage++;renderSheetCuts()">Sonraki</button></div></div>
                     </div>
                     <div class="account-statement-panel report-date-panel" data-report-date-panel="scraps">
                         <div class="account-statement-copy">
@@ -1659,11 +1740,8 @@
             <div class="form-row">
                 <div class="form-group">
                     <label>Ödeme Durumu</label>
-                    <select id="input-fatura-odeme-durumu" class="form-control">
-                        <option value="odenmedi">Ödenmedi</option>
-                        <option value="kismi">Kısmi Ödendi</option>
-                        <option value="odendi">Ödendi</option>
-                    </select>
+                    <input id="input-fatura-odeme-durumu" type="hidden" value="odenmedi">
+                    <div class="form-control" aria-label="Ödeme durumu otomatik hesaplanır">Ödemelerden otomatik hesaplanır</div>
                 </div>
                 <div class="form-group">
                     <label>Seri / Sıra</label>
@@ -1746,34 +1824,35 @@
             </div>
             <div class="form-group">
                 <label>Malzeme Cinsi / Kalitesi</label>
-                <input type="text" id="input-stok-cinsi" class="form-control" placeholder="Örn: S235 DKP Sac">
+                <input type="text" id="input-stok-cinsi" oninput="calculateNewSheetWeight()" class="form-control" placeholder="Örn: S235 DKP Sac">
             </div>
             <div class="form-row">
                 <div class="form-group">
                     <label>Kalınlık (mm)</label>
-                    <input type="number" id="input-stok-mm" class="form-control" placeholder="Örn: 5">
+                    <input type="number" id="input-stok-mm" min="0.001" step="any" oninput="calculateNewSheetWeight();renderStockCodeHint()" class="form-control" placeholder="Örn: 5"><p id="new-stock-code-hint" class="stock-code-hint" aria-live="polite">Stok kodu kalınlığa göre otomatik oluşturulur.</p>
                 </div>
                 <div class="form-group">
                     <label>Miktar (Plaka/Adet)</label>
-                    <input type="number" id="input-stok-miktar" class="form-control">
+                    <input type="number" id="input-stok-miktar" oninput="calculateNewSheetWeight()" class="form-control">
                 </div>
                 <div class="form-group">
                     <label>Ağırlık (KG) *</label>
-                    <input type="number" id="input-stok-kg" class="form-control" placeholder="Örn: 120" required>
+                    <input type="number" id="input-stok-kg" oninput="this.dataset.basis='manual'" class="form-control" placeholder="Örn: 120" required>
                 </div>
             </div>
             <div class="form-row">
                 <div class="form-group">
                     <label>En (mm)</label>
-                    <input type="number" id="input-stok-en" class="form-control" placeholder="1500">
+                    <input type="number" id="input-stok-en" oninput="calculateNewSheetWeight()" class="form-control" placeholder="1500">
                 </div>
                 <div class="form-group">
                     <label>Boy (mm)</label>
-                    <input type="number" id="input-stok-boy" class="form-control" placeholder="3000">
+                    <input type="number" id="input-stok-boy" oninput="calculateNewSheetWeight()" class="form-control" placeholder="3000">
                 </div>
             </div>
+            <p id="new-sheet-weight-info" class="finance-note" aria-live="polite"></p><button type="button" class="btn btn-outline" onclick="calculateNewSheetWeight(true)">Ölçülerden KG hesapla ve kullan</button>
             <div class="form-group" id="stok-maliyet-container">
-                <label>Birim Maliyet (₺/plaka)</label>
+                <label>KG Alış Fiyatı (₺/kg)</label>
                 <input type="number" id="input-stok-maliyet" class="form-control" value="0">
             </div>
             <div class="form-group">
@@ -1855,7 +1934,7 @@
             <div class="form-row">
                 <div class="form-group">
                     <label>Kalınlık (mm)</label>
-                    <input type="number" id="input-duzenle-stok-mm" class="form-control">
+                    <input type="number" id="input-duzenle-stok-mm" min="0.001" step="any" oninput="renderStockCodeHint(true)" class="form-control"><p id="edit-stock-code-hint" class="stock-code-hint" aria-live="polite"></p>
                 </div>
                 <div class="form-group">
                     <label>Miktar (Plaka)</label>
@@ -1871,7 +1950,7 @@
                 <div class="form-group"><label>Boy (mm)</label><input type="number" id="input-duzenle-stok-boy" class="form-control" min="0"></div>
             </div>
             <div class="form-group" id="duzenle-stok-maliyet-container">
-                <label>Bize Maliyeti (₺ / Plaka)</label>
+                <label>KG Alış Fiyatı (₺/kg)</label>
                 <input type="number" id="input-duzenle-stok-maliyet" class="form-control">
             </div>
             <div class="form-group">
@@ -1961,19 +2040,60 @@
                 <label>İşlem Tipi</label>
                 <select id="input-islem-tipi" class="form-control" onchange="updateIslemTipiInfo()">
                     <optgroup label="Bize Ödenecek / Alacak">
-                        <option value="tahsilat">Müşteriden Tahsilat Aldık (Borç Kapandı)</option>
+                        <option value="tahsilat">Müşteriden Tahsilat Aldık</option>
                         <option value="fatura_kes">Müşteriye Fatura Kestik / Belgeledik</option>
                     </optgroup>
                     <optgroup label="Bizim Ödeyeceğimiz / Borç">
+                        <option value="sac_alimi">Sac Levha Aldık (KG ve Stok Girişi)</option>
                         <option value="mal_alimi">Firmadan Mal/Hizmet Aldık (Biz Borçlandık)</option>
-                        <option value="odeme_yaptik">Firmaya Ödeme Yaptık (Borcumuz Kapandı)</option>
+                        <option value="odeme_yaptik">Firmaya Ödeme Yaptık</option>
                     </optgroup>
                 </select>
             </div>
             <div id="islem-tipi-info" style="padding:10px 12px; border-radius:8px; font-size:13px; color:var(--text-muted); background:rgba(255,255,255,0.05); margin-bottom:12px;"></div>
+            <input id="sheet-purchase-token" type="hidden">
+            <section id="sheet-purchase-fields" hidden>
+                <p class="finance-note">Alınan sac işletmeye ait stok olarak kaydedilir. KG alış fiyatı KDV hariçtir.</p>
+                <div id="sheet-purchase-lines">
+                    <section class="sheet-purchase-line" data-first="true">
+                        <div class="sheet-purchase-line-heading"><strong>1. Sac kalemi</strong></div><p class="stock-code-hint" aria-live="polite"></p>
+                        <div class="quick-sale-fields">
+                    <label class="quick-sale-wide">Sac cinsi / kalite<input id="sheet-purchase-material" class="form-control" maxlength="120" placeholder="ST37" oninput="updateSheetPurchaseSummary()"></label>
+                    <label>Kalınlık (mm)<input id="sheet-purchase-mm" class="form-control" type="number" min="0.01" step="any"></label>
+                    <label>Plaka adedi<input id="sheet-purchase-quantity" class="form-control" type="number" min="1" step="1"></label>
+                    <label>En (mm)<input id="sheet-purchase-en" class="form-control" type="number" min="0.01" step="any" placeholder="1500"></label>
+                    <label>Boy (mm)<input id="sheet-purchase-boy" class="form-control" type="number" min="0.01" step="any" placeholder="3000"></label>
+                    <label>Toplam ağırlık (KG)<input id="sheet-purchase-weight" class="form-control" type="number" min="0.01" step="0.01" oninput="this.dataset.basis='manual';updateSheetPurchaseSummary()"></label>
+                    <label>KG alış fiyatı (₺, KDV hariç)<input id="sheet-purchase-price" class="form-control" type="number" min="0.01" step="0.01" oninput="updateSheetPurchaseSummary()"></label>
+                    <label>KDV<select id="sheet-purchase-tax" class="form-control" onchange="updateSheetPurchaseSummary()"><option value="0">%0</option><option value="20">%20</option></select></label>
+                        </div>
+                        <button type="button" class="btn btn-outline" onclick="calculateSheetPurchaseWeight()">Bu kalemin tahmini KG değerini hesapla</button>
+                    </section>
+                </div>
+                <button type="button" class="btn btn-outline" onclick="addSheetPurchaseLine()"><i class="fa-solid fa-plus" aria-hidden="true"></i> Farklı kalınlık / ölçü ekle</button>
+                <p class="finance-note">Her farklı kalınlık veya ölçü için ayrı kalem ekleyin. KG alanına yalnızca o kalemin toplam ağırlığını yazın.</p>
+                <div class="quick-sale-fields">
+                    <label>Alış tarihi<input id="sheet-purchase-date" class="form-control" type="date"></label>
+                    <label class="quick-sale-wide">Ödeme durumu<select id="sheet-purchase-payment" class="form-control" onchange="updateSheetPurchaseSummary()"><option value="none">Ödenmedi</option><option value="partial">Kısmen ödendi</option><option value="full">Tamamı ödendi</option></select></label>
+                    <label id="sheet-purchase-paid-label" hidden>Ödenen tutar (₺)<input id="sheet-purchase-paid" class="form-control" type="number" min="0.01" step="0.01" oninput="updateSheetPurchaseSummary()"></label>
+                    <label id="sheet-purchase-cash-label" hidden>Ödemenin çıktığı kasa / banka<select id="sheet-purchase-cash" class="form-control"></select></label>
+                </div>
+                <div class="quick-sale-fields sheet-purchase-total-controls" hidden>
+                    <label class="quick-sale-wide">Alış toplamı<select id="sheet-purchase-total-mode" class="form-control" onchange="updateSheetPurchaseSummary()"><option value="calculated">KG × fiyat + KDV ile hesapla</option><option value="document">Belgedeki / anlaşılan toplamı gir</option></select></label>
+                    <label class="quick-sale-wide" id="sheet-purchase-document-total-label" hidden>Tedarikçiye toplam borç (₺, KDV dahil)<input id="sheet-purchase-document-total" class="form-control" type="text" inputmode="decimal" placeholder="Örn: 47.287,00" oninput="updateSheetPurchaseSummary()"><small>Bu alışın tamamının tutarıdır. KG bilgileri ve girdiğiniz KG fiyatları değişmez; hesapla arasındaki fark ayrıca saklanır.</small></label>
+                </div>
+                <div id="sheet-purchase-summary" class="quick-sale-summary" aria-live="polite"></div>
+                <p class="finance-note">Bu işlem hem stok hem borç oluşturur. Aynı alımı ayrıca stok girişi veya mal alımı olarak tekrar kaydetmeyin.</p>
+                <p id="sheet-purchase-error" class="text-error" role="alert" hidden></p>
+            </section>
+            <div class="form-group" id="payment-invoice-container" hidden>
+                <label for="input-islem-payment-invoice-id">İlgili Fatura</label>
+                <select id="input-islem-payment-invoice-id" class="form-control" onchange="selectPaymentInvoice()"></select>
+                <p class="dashboard-muted-text" id="payment-invoice-summary"></p>
+            </div>
             <div id="tahsilat-summary" class="transaction-summary" style="display:none;">
                 <div class="transaction-summary-row">
-                    <span>Müşterinin Toplam Borcu</span>
+                    <span id="tahsilat-balance-label">Müşterinin Toplam Borcu</span>
                     <strong id="tahsilat-current-balance">₺0,00</strong>
                 </div>
                 <div class="transaction-summary-row">
@@ -1984,13 +2104,13 @@
                     <span>Tahsilattan Sonra Kalan</span>
                     <strong id="tahsilat-remaining-balance">₺0,00</strong>
                 </div>
-                <button type="button" class="btn btn-secondary btn-small w-100" onclick="fillFullTahsilatAmount()">Tamamını Tahsil Et</button>
+                <button type="button" class="btn btn-secondary btn-small w-100" onclick="fillFullTahsilatAmount()">Kalanın Tamamını Gir</button>
             </div>
             <div class="form-group" id="fatura-no-container" style="display:none;">
                 <label>Fatura No *</label>
                 <input type="text" id="input-islem-fatura-no" class="form-control" placeholder="Örn: FTR-2026-0042">
             </div>
-            <div class="form-group" id="fatura-order-container" style="display:none;">
+            <div class="form-group" id="islem-fatura-order-container" style="display:none;">
                 <label>Faturalandırılacak Teslim Edilmiş İş</label>
                 <select id="input-islem-order-id" class="form-control" onchange="applySelectedOrderToInvoice()">
                     <option value="">Serbest fatura / iş emri seçme</option>
@@ -2004,8 +2124,9 @@
                 <input type="text" id="input-islem-aciklama" class="form-control" placeholder="Örn: Mayıs ayı faturası">
             </div>
             <div class="form-group">
-                <label>Tutar (₺)</label>
-                <input type="number" id="input-islem-tutar" class="form-control" placeholder="Örn: 5000" oninput="updateTahsilatSummary()">
+                <label id="input-islem-tutar-label">Tutar (₺)</label>
+                <input type="number" id="input-islem-tutar" class="form-control" placeholder="Örn: 5000" oninput="handleCariAmountInput()">
+                <div id="sheet-purchase-amount-help" hidden><p class="finance-note">Bu alış için KDV dahil toplam borcu buraya yazabilirsiniz. Girdiğiniz tutar korunur; KG ve ölçüler değişmez.</p><button type="button" class="btn btn-outline" onclick="useCalculatedSheetPurchaseTotal()">KG hesabındaki tutarı kullan</button></div>
             </div>
             <div class="form-group" id="islem-kasa-container">
                 <label>Kasa / Banka *</label>
@@ -2082,6 +2203,70 @@
         </div>
     </div>
 
+    <div id="modal-sheet-cut" class="modal-overlay"><div class="modal-content glass-panel">
+        <div class="flex-between mb-4"><h3>Sac Kesimi / Kalan Parça</h3><button type="button" class="btn-close" aria-label="Kapat" onclick="requestCloseModal('modal-sheet-cut')"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></div>
+        <input type="hidden" id="sheet-cut-token">
+        <div class="quick-sale-fields">
+            <label class="quick-sale-wide">Kesilen sac / parça<select id="sheet-cut-stock" class="form-control" onchange="updateSheetCutOrders()"></select></label>
+            <label class="quick-sale-wide">Bağlı iş emri<select id="sheet-cut-order" class="form-control" onchange="updateSheetCutSource()"></select></label>
+            <label>Kesime giren adet<input id="sheet-cut-quantity" type="number" min="1" step="1" class="form-control" oninput="updateSheetCutQuantity()"></label>
+            <label>Kesime giren toplam ağırlık (KG)<input id="sheet-cut-weight" type="number" min="0" step="0.01" class="form-control" oninput="this.dataset.manual='true';updateSheetCutSummary()" placeholder="Ağırlık tutulmuyorsa 0"></label>
+        </div>
+        <p id="sheet-cut-source-info" class="finance-note"></p>
+        <div class="flex-between sheet-cut-heading"><h4>Kalan kullanılabilir parçalar</h4><button type="button" class="btn btn-outline" onclick="addSheetCutRow()">+ Parça Ekle</button></div>
+        <p class="finance-note">Ölçüleri milimetre olarak girin. Birden fazla parça ekleyebilirsiniz. Kalan yoksa satırları kaldırın.</p>
+        <div id="sheet-cut-rows"></div>
+        <div class="quick-sale-fields"><label>Hurda ağırlığı (KG, isteğe bağlı)<input id="sheet-cut-scrap" type="number" min="0" step="0.01" value="0" class="form-control" oninput="updateSheetCutSummary()"></label><label>Not<input id="sheet-cut-note" maxlength="300" class="form-control" placeholder="Örn. Raf A / Kesim açıklaması"></label></div>
+        <div id="sheet-cut-summary" class="quick-sale-summary" aria-live="polite"></div>
+        <p class="finance-note">Kalan parçaların ağırlığı alan oranıyla hesaplanır. KG alış fiyatı değişmez; toplam maliyet kalan KG × KG alış fiyatıdır. Ölçüler, kalan gerçek kullanılabilir alanı temsil etmelidir; program kesim yerleşimi hesaplamaz.</p>
+        <p id="sheet-cut-error" class="text-error" role="alert" hidden></p>
+        <div class="modal-actions"><button type="button" class="btn btn-outline" onclick="requestCloseModal('modal-sheet-cut')">Vazgeç</button><button type="button" class="btn btn-primary modal-submit-action" onclick="saveSheetCut()">Kesimi ve Parçaları Kaydet</button></div>
+    </div></div>
+
+    <div id="modal-quick-sale" class="modal-overlay">
+        <div class="modal-content glass-panel">
+            <div class="flex-between mb-4"><h3 id="quick-sale-title">Yeni Hızlı Satış</h3><button type="button" class="btn-close" onclick="requestCloseModal('modal-quick-sale')" aria-label="Pencereyi kapat"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></div>
+            <input id="quick-sale-edit-id" type="hidden"><input id="quick-sale-token" type="hidden">
+            <div class="quick-sale-fields">
+                <label class="quick-sale-wide">Satış açıklaması<input id="quick-sale-description" class="form-control" maxlength="300" placeholder="Örn. Parça kesimi" required></label>
+                <label>Toplam tutar (KDV dahil)<input id="quick-sale-total" type="number" class="form-control" min="0.01" step="0.01" inputmode="decimal" placeholder="0,00" required oninput="updateQuickSaleSummary()"></label>
+                <label>Tahsilat hesabı<select id="quick-sale-cash" class="form-control" required></select></label>
+                <label>Satış tarihi<input id="quick-sale-date" type="date" class="form-control" required></label>
+                <label>KDV oranı<select id="quick-sale-tax" class="form-control" onchange="updateQuickSaleSummary()"><option value="20">%20</option><option value="0">%0</option></select></label>
+                <label class="quick-sale-wide"><span>Müşteri adı <small class="text-muted">(isteğe bağlı)</small></span><input id="quick-sale-name" class="form-control" maxlength="120" placeholder="Boş bırakabilirsiniz"></label>
+            </div>
+            <details id="quick-sale-stock-details" class="quick-sale-stock"><summary>Stoktan malzeme düş</summary><div class="quick-sale-fields">
+                <label class="quick-sale-wide">İşletmeye ait malzeme<select id="quick-sale-stock" class="form-control" onchange="updateQuickSaleStockHint()"></select></label>
+                <label class="quick-sale-wide">Malzeme kullanımı<select id="quick-sale-mode" class="form-control" onchange="updateQuickSaleStockHint()"><option value="whole">Adet / KG ile düş</option><option value="cut">Ölçüyle kes — kalan parçayı sakla</option></select></label>
+                <label>Miktar / kullanılan plaka adedi<input id="quick-sale-quantity" oninput="updateQuickSaleWeight();updateQuickSaleSummary()" type="number" class="form-control" min="0.01" step="0.01" inputmode="decimal"></label>
+                <label>Birim<select id="quick-sale-unit" class="form-control" onchange="updateQuickSaleStockHint()"><option value="miktar">Adet</option><option value="kg">KG</option></select></label>
+            </div><div id="quick-sale-cut-fields" hidden>
+                <label>KG hesabı için malzeme grubu<select id="quick-sale-cut-density" class="form-control" onchange="updateQuickSaleWeight()"><option value="">Malzeme cinsinden otomatik</option><option value="7850">ST37 / Karbon çeliği</option><option value="7900">Paslanmaz (yaklaşık)</option><option value="2700">Alüminyum (yaklaşık)</option></select></label>
+                <div class="quick-sale-fields"><label>Kesilen en (mm)<input id="quick-sale-cut-en" oninput="updateQuickSaleWeight()" class="form-control" type="number" min="0.01" step="any" placeholder="1500"></label><label>Kesilen boy (mm)<input id="quick-sale-cut-boy" oninput="updateQuickSaleWeight()" class="form-control" type="number" min="0.01" step="any" placeholder="800"></label></div>
+                <p class="finance-note">Her plakadan bu ölçüde bir dikdörtgen kesilir. Birden fazla küçük parça kesiyorsanız, hepsini kapsayan alanı girin.</p>
+                <label>Kalan sacı kaydet<select id="quick-sale-remainder-mode" class="form-control" onchange="updateQuickSaleRemainderMode()"><option value="auto">Düz kenar kesimi — kalanları otomatik hesapla</option><option value="manual">Gerçek kalan ölçülerini kendim gireceğim</option><option value="none">Kullanılabilir kalan parça yok — tamamını düş</option></select></label>
+                <p class="finance-note">Otomatik hesap köşeden düz kesim varsayar ve kesim payını içermez. Aşağıdaki ölçüleri kontrol edin. Farklı bir kesim yaptıysanız gerçek kalan ölçülerini girme seçeneğini kullanın. Kalanlar aynı stok kodunun altında izlenir.</p>
+                <div id="quick-sale-weight-summary" class="finance-note" role="status" aria-live="polite" style="white-space:pre-line"></div>
+                <label>Kalan parçaların tartılan toplamı (KG, isteğe bağlı)<input id="quick-sale-cut-remaining-kg" class="form-control" type="number" min="0" step="0.01" placeholder="Boşsa ölçüye göre hesaplanır" oninput="updateQuickSaleWeight()"></label>
+                <div id="quick-sale-cut-rows"></div><button id="quick-sale-add-remainder" type="button" class="btn btn-outline" onclick="addQuickSaleCutRow()">+ Kalan parça ekle</button>
+            </div><p id="quick-sale-stock-hint" class="finance-note"></p></details>
+            <div id="quick-sale-summary" class="quick-sale-summary" aria-live="polite"></div>
+            <p class="finance-note">Tutarın tamamı seçilen hesaba tahsil edilir. Veresiye veya kısmi ödeme için ayrı bir cari hesabı kullanın.</p>
+            <p id="quick-sale-error" role="alert" class="text-error" hidden></p>
+            <div class="modal-actions"><button type="button" class="btn btn-outline" onclick="requestCloseModal('modal-quick-sale')">Vazgeç</button><button type="button" class="btn btn-primary modal-submit-action" onclick="saveQuickSale()">Satışı Kaydet</button></div>
+        </div>
+    </div>
+
+    <div id="modal-collection-reminder" class="modal-overlay">
+        <div class="modal-content glass-panel" style="max-width:640px;">
+            <div class="flex-between mb-4"><h3>Tahsilat Hatırlatması</h3><button type="button" class="btn-close" onclick="closeModal('modal-collection-reminder')" aria-label="Pencereyi kapat"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></div>
+            <p class="finance-note">Metni kontrol edip kopyalayabilirsiniz. Otomatik mesaj gönderilmez.</p>
+            <label for="collection-reminder-text">Müşteriye gönderilecek metin</label>
+            <textarea id="collection-reminder-text" class="form-control" rows="9"></textarea>
+            <div class="modal-actions"><button type="button" class="btn btn-outline" onclick="closeModal('modal-collection-reminder')">Kapat</button><button type="button" class="btn btn-primary" onclick="copyCollectionReminder()"><i class="fa-solid fa-copy" aria-hidden="true"></i> Metni Kopyala</button></div>
+        </div>
+    </div>
+
     <!-- Cari Ekstre (Hesap Detay) Modal -->
     <div id="modal-cari-ekstre" class="modal-overlay">
         <div class="modal-content glass-panel" style="max-width: 900px; width: 90%;">
@@ -2099,9 +2284,11 @@
                 </div>
                 <div class="stat-details">
                     <h3>Güncel Bakiye</h3>
-                    <div class="stat-value" id="ekstre-bakiye-deger">₺0.00</div>
+                    <div class="stat-value" id="ekstre-bakiye-deger">₺0,00</div>
                 </div>
             </div>
+
+            <div id="cari-payment-overview" class="cari-payment-overview" aria-label="Müşteri ödeme özeti"></div>
 
             <div class="flex-between align-center" style="margin-bottom:12px;">
                 <h4 style="color:var(--primary); font-weight:600; margin:0;">Hesap Hareketleri & İşlem Geçmişi</h4>
@@ -2255,19 +2442,24 @@
                     <section class="settings-panel" id="settings-panel-numbering" role="tabpanel" aria-labelledby="settings-tab-numbering" hidden>
                         <div class="settings-section-heading">
                             <div class="settings-section-icon"><i class="fa-solid fa-hashtag" aria-hidden="true"></i></div>
-                            <div><h4>Otomatik Numara Ön Ekleri</h4><p>Yeni kayıtlarda oluşan kodların kısa ve tutarlı görünmesini sağlar.</p></div>
+                            <div><h4>Kayıt Kodları</h4><p>Yeni kayıtlarda oluşan kodların kısa ve tutarlı görünmesini sağlar.</p></div>
                         </div>
                         <div class="settings-number-grid">
-                            <div class="form-group"><label for="input-num-cari-prefix">Cari</label><input type="text" id="input-num-cari-prefix" class="form-control" placeholder="C"></div>
-                            <div class="form-group"><label for="input-num-stok-prefix">Stok</label><input type="text" id="input-num-stok-prefix" class="form-control" placeholder="STK"></div>
-                            <div class="form-group"><label for="input-num-teklif-prefix">Teklif</label><input type="text" id="input-num-teklif-prefix" class="form-control" placeholder="TEK"></div>
-                            <div class="form-group"><label for="input-num-isemri-prefix">İş Emri</label><input type="text" id="input-num-isemri-prefix" class="form-control" placeholder="EMR"></div>
-                            <div class="form-group"><label for="input-num-fatura-prefix">Fatura</label><input type="text" id="input-num-fatura-prefix" class="form-control" placeholder="FTR"></div>
-                            <div class="form-group"><label for="input-num-ceksenet-prefix">Çek / Senet</label><input type="text" id="input-num-ceksenet-prefix" class="form-control" placeholder="CS"></div>
-                            <div class="form-group"><label for="input-num-vade-prefix">Vade Planı</label><input type="text" id="input-num-vade-prefix" class="form-control" placeholder="VP"></div>
-                            <div class="form-group"><label for="input-num-kasa-prefix">Kasa</label><input type="text" id="input-num-kasa-prefix" class="form-control" placeholder="KASA"></div>
+<div class="form-group"><label for="input-num-satis-prefix">Hızlı Satış</label><input type="text" id="input-num-satis-prefix" class="form-control" maxlength="12" oninput="renderNumberingExamples()" placeholder="SAT"><small data-numbering-preview="hizliSatis" data-prefix-input="input-num-satis-prefix"></small></div>
+<div class="form-group"><label for="input-num-kesim-prefix">Kesim</label><input type="text" id="input-num-kesim-prefix" class="form-control" maxlength="12" oninput="renderNumberingExamples()" placeholder="KES"><small data-numbering-preview="sacKesim" data-prefix-input="input-num-kesim-prefix"></small></div>
+<div class="form-group"><label for="input-num-hareket-prefix">Hesap Hareketi</label><input type="text" id="input-num-hareket-prefix" class="form-control" maxlength="12" oninput="renderNumberingExamples()" placeholder="HRK"><small data-numbering-preview="hareket" data-prefix-input="input-num-hareket-prefix"></small></div>
+
+                            <div class="form-group"><label for="input-num-cari-prefix">Cari</label><input type="text" id="input-num-cari-prefix" class="form-control" placeholder="CAR" maxlength="12" oninput="renderNumberingExamples()"><small data-numbering-preview="cari" data-prefix-input="input-num-cari-prefix"></small></div>
+                            <div class="form-group"><label for="input-num-stok-prefix">Stok</label><input type="text" id="input-num-stok-prefix" class="form-control" placeholder="STK" maxlength="12" oninput="renderNumberingExamples()"><small data-numbering-preview="stok" data-prefix-input="input-num-stok-prefix"></small></div>
+                            <div class="form-group"><label for="input-num-teklif-prefix">Teklif</label><input type="text" id="input-num-teklif-prefix" class="form-control" placeholder="TEK" maxlength="12" oninput="renderNumberingExamples()"><small data-numbering-preview="teklif" data-prefix-input="input-num-teklif-prefix"></small></div>
+                            <div class="form-group"><label for="input-num-isemri-prefix">İş Emri</label><input type="text" id="input-num-isemri-prefix" class="form-control" placeholder="EMR" maxlength="12" oninput="renderNumberingExamples()"><small data-numbering-preview="isEmri" data-prefix-input="input-num-isemri-prefix"></small></div>
+                            <div class="form-group"><label for="input-num-fatura-prefix">Fatura</label><input type="text" id="input-num-fatura-prefix" class="form-control" placeholder="FTR" maxlength="12" oninput="renderNumberingExamples()"><small data-numbering-preview="fatura" data-prefix-input="input-num-fatura-prefix"></small></div>
+                            <div class="form-group"><label for="input-num-ceksenet-prefix">Çek / Senet</label><input type="text" id="input-num-ceksenet-prefix" class="form-control" placeholder="CS" maxlength="12" oninput="renderNumberingExamples()"><small data-numbering-preview="cekSenet" data-prefix-input="input-num-ceksenet-prefix"></small></div>
+                            <div class="form-group"><label for="input-num-vade-prefix">Vade Planı</label><input type="text" id="input-num-vade-prefix" class="form-control" placeholder="VP" maxlength="12" oninput="renderNumberingExamples()"><small data-numbering-preview="odemePlani" data-prefix-input="input-num-vade-prefix"></small></div>
+                            <div class="form-group"><label for="input-num-kasa-prefix">Kasa</label><input type="text" id="input-num-kasa-prefix" class="form-control" placeholder="KASA" maxlength="12" oninput="renderNumberingExamples()"><small data-numbering-preview="kasa" data-prefix-input="input-num-kasa-prefix"></small></div>
                         </div>
-                        <div class="settings-info-note"><i class="fa-solid fa-circle-info" aria-hidden="true"></i><span>Değişiklikler yalnızca bundan sonra oluşturulan kayıt numaralarında kullanılır.</span></div>
+                        <div class="settings-info-note"><i class="fa-solid fa-circle-info" aria-hidden="true"></i><span>Ön ek değişiklikleri yeni kayıtlarda kullanılır. Stokta her kalınlık ayrı sıra izler; kalan parçalar aynı kodu korur. İşlem numaraları her yıl yeniden başlar.</span></div>
+                    <details class="settings-code-history"><summary>İlk geçişteki kod eşleştirmeleri</summary><div class="table-responsive"><table><thead><tr><th>Kayıt</th><th>Eski kod</th><th>Yeni kod</th></tr></thead><tbody id="code-migration-list"></tbody></table></div></details>
                     </section>
 
                     <section class="settings-panel" id="settings-panel-backup" role="tabpanel" aria-labelledby="settings-tab-backup" hidden>
@@ -2275,6 +2467,7 @@
                             <div class="settings-section-icon"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i></div>
                             <div><h4>Veri Yedekleme</h4><p>Güncelleme veya bilgisayar değişikliği öncesinde güvenli bir yedek oluşturun.</p></div>
                         </div>
+                        <div class="backup-status-strip" id="settings-backup-status" role="status" aria-live="polite"></div>
                         <div class="settings-backup-actions">
                             <button class="settings-backup-card" onclick="createManualBackup()">
                                 <span class="settings-backup-icon"><i class="fa-solid fa-download" aria-hidden="true"></i></span>
@@ -2305,7 +2498,7 @@
                         <div class="update-status-card" id="update-status-card" data-state="idle" aria-live="polite">
                             <span class="update-status-icon" id="update-status-icon"><i class="fa-solid fa-circle-info" aria-hidden="true"></i></span>
                             <div class="update-status-copy">
-                                <span class="update-version-line">Yüklü sürüm <strong id="update-current-version">v1.3.37</strong><span id="update-latest-version" hidden></span></span>
+                                <span class="update-version-line">Yüklü sürüm <strong id="update-current-version">v1.5.21</strong><span id="update-latest-version" hidden></span></span>
                                 <strong id="update-status-title">Sürüm kontrolü hazır</strong>
                                 <small id="update-status-copy">Kontrol başlatıldığında yalnızca AK LAZER sürüm adresine bağlanılır.</small>
                             </div>

@@ -34,7 +34,7 @@ async function createApp(loadResponse, options = {}) {
             savedPayloads.push(data);
             return { success: true };
         },
-        sendBackup: async () => ({ success: true })
+        sendBackup: async () => options.backupFailure ? ({success:false,error:'Yedek diski dolu'}) : ({ success: true })
     };
 
     const script = dom.window.document.createElement('script');
@@ -101,7 +101,38 @@ async function createApp(loadResponse, options = {}) {
     assert.strictEqual(freshDatabase.ayarlar.numaralandirma.fatura.next, 1, 'A new install must start invoice numbering at FTR-YYYY-0001.');
     assert.strictEqual(freshDatabase.ayarlar.numaralandirma.kasa.next, 2, 'The next cash account must follow the built-in KASA-001 account.');
 
-    console.log('Açılış ve kalıcı veri önceliği testleri geçti.');
+    let resolveDisk;
+    const slowDisk = await createApp(new Promise(resolve => { resolveDisk = resolve; }), { localDatabase });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.strictEqual(slowDisk.dom.window.document.querySelector('.app-container').inert, true, 'The workspace must wait for authoritative disk data before accepting input.');
+    const earlySave = await slowDisk.dom.window.eval('saveDB(true)');
+    assert.strictEqual(earlySave.success, false);
+    assert.strictEqual(slowDisk.savedPayloads.length, 0, 'A save during startup must never overwrite the unread disk database.');
+    resolveDisk({ success: true, data: JSON.stringify(diskDatabase) });
+    await slowDisk.dom.window.eval('hydrateDBFromFileIfNeeded()');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.strictEqual(slowDisk.dom.window.eval('db.cariler[0].adi'), 'Diskteki Gerçek Cari');
+    assert.strictEqual(slowDisk.dom.window.document.querySelector('.app-container').inert, false);
+    assert.strictEqual(slowDisk.dom.window.document.querySelector('.startup-status'), null);
+    assert.strictEqual((await slowDisk.dom.window.eval('saveDB(true)')).success, true);
+
+    const backupFailed = await createApp({success:true,data:JSON.stringify(diskDatabase)}, {localDatabase,backupFailure:true});
+    const blockedMigration = await backupFailed.dom.window.eval('hydrateDBFromFileIfNeeded()');
+    assert.strictEqual(blockedMigration.success,false,'Failed safety backup must block readable-code migration.');
+    assert.strictEqual(backupFailed.savedPayloads.length,0,'A migration without a safety backup must not overwrite the original disk database.');
+    assert.strictEqual(backupFailed.dom.window.eval('startupPersistenceBlocked'),true);
+    assert.strictEqual(backupFailed.storage.snapshot().AkLazerDB,JSON.stringify(localDatabase),'Existing cache is untouched after a failed migration backup.');
+    assert.strictEqual((await backupFailed.dom.window.eval('saveDB(true)')).success,false);
+    backupFailed.dom.window.close();
+
+    const unreadable = await createApp({success:false,error:'Okunamayan dosya'}, {localDatabase});
+    assert.strictEqual((await unreadable.dom.window.eval('hydrateDBFromFileIfNeeded()')).success, false);
+    assert.strictEqual((await unreadable.dom.window.eval('saveDB(true)')).success, false);
+    assert.strictEqual(unreadable.savedPayloads.length, 0, 'An unreadable database must remain untouched.');
+
+    for (const instance of [existing,migratedLocal,cacheLimited,fresh,slowDisk,unreadable]) instance.dom.window.close();
+
+    console.log('Açılış: disk önceliği, geciken yüklemede kayıt kilidi, bozuk dosyanın korunması, önbellek sınırı ve yeni kurulum testleri geçti.');
 })().catch(error => {
     console.error(error);
     process.exitCode = 1;

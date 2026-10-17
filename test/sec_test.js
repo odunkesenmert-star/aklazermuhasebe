@@ -219,7 +219,7 @@ setTimeout(() => {
     assert(moduleLinkedInvoice?.orderId === 302 && moduleLinkedInvoice?.cariBakiyeDegisimi === 0, "Invoices module stores the work-order link and zero additional balance effect.");
     assert(db.isEmirleri.find(o => o.id === 302)?.faturaKesildi === true, "Invoices module marks the selected work order as invoiced.");
     assert(invoicePreview.includes('Teslim edilmiş 6000 TL iş') && invoicePreview.includes('6.000,00'), "Invoice document includes the linked order description and total.");
-    assert(invoicePreview.includes('Resmi e-Fatura/e-Arşiv'), "Invoice document makes the official e-invoice limitation clear.");
+    assert(invoicePreview.includes('Resmî fatura yerine geçmez'), "Invoice document makes the official e-invoice limitation clear.");
 
     // Test 8: Tax exempt quote keeps KDV at 0%
     console.log("Test 8: Tax exempt quote calculation");
@@ -334,7 +334,7 @@ setTimeout(() => {
     const previewText = previewFrame?.srcdoc || '';
     assert(previewText.includes('Diger Cari'), "Print preview includes the selected customer.");
     assert(!previewText.includes('Test Cari'), "Print preview excludes unselected customers when a row is selected.");
-    assert(previewText.includes('Kapsam: Seçilen kayıtlar'), "Print preview labels the scope as selected records.");
+    assert(previewText.includes('Hesap Sahibi'), "Single-account statement identifies the account owner without redundant scope metadata.");
 
     // Test 11: A single selected account prints a dated sales statement, not one merged balance row
     console.log("Test 11: Selected account statement itemizes dated sales");
@@ -417,7 +417,7 @@ setTimeout(() => {
     assert(statementText.includes('KDV %20'), "Statement keeps the VAT rate alongside the related description.");
     assert(!statementText.includes('KDV %20:') && !statementText.includes('Ekstre Bilgisi'), "Statement keeps row VAT details rate-only and removes the explanatory note.");
     assert(statementText.includes('İskonto %7,76') && statementText.includes('1.000,00'), "Statement keeps discount detail alongside the related description.");
-    assert(statementText.includes('Toplam Borç') && statementText.includes('27.972,00'), "Statement summarizes total debt from the printed ledger.");
+    assert(statementText.includes('GENEL TOPLAM (DEVİR DAHİL)') && statementText.includes('27.972,00'), "Statement summarizes total debt from the printed ledger.");
     assert(statementText.includes('22.06.2026 10:15') && statementText.includes('Banka havalesi'), "Statement prints dated collection rows in the ledger.");
     assert(statementText.includes('EFT ödemesi') && statementText.includes('7.500,00') && statementText.includes('20.472,00'), "Statement summarizes customer collections and remaining balance from the printed rows.");
 
@@ -429,7 +429,7 @@ setTimeout(() => {
     assert(rangedStatementText.includes('Seçilen tarih öncesi bakiye') && rangedStatementText.includes('27.972,00'), "Statement carries previous sales into the opening balance.");
     assert(!rangedStatementText.includes('İlk kesim işi') && !rangedStatementText.includes('İkinci kesim işi'), "Statement hides sales outside the selected date range.");
     assert(rangedStatementText.includes('Banka havalesi') && rangedStatementText.includes('EFT ödemesi'), "Statement keeps collections inside the selected date range.");
-    assert(rangedStatementText.includes('Toplam Borç') && rangedStatementText.includes('Toplam Tahsilat') && rangedStatementText.includes('Bakiye') && rangedStatementText.includes('20.472,00'), "Statement shows the three-column totals and closing balance for the selected period.");
+    assert(rangedStatementText.includes('GENEL TOPLAM (DEVİR DAHİL)') && rangedStatementText.includes('TAHSİLAT') && rangedStatementText.includes('Bakiye') && rangedStatementText.includes('20.472,00'), "Statement shows the three-column totals and closing balance for the selected period.");
     dom.window.document.getElementById('account-print-date-start').value = '';
     dom.window.document.getElementById('account-print-date-end').value = '';
 
@@ -443,8 +443,8 @@ setTimeout(() => {
     const orderText = orderFrame?.srcdoc || '';
     assert(orderText.includes('İş Emri Dökümü'), "Selected work order print opens the detailed work-order document.");
     assert(orderText.includes('İkinci kesim işi'), "Work-order document includes the selected work description.");
-    assert(orderText.includes('İsk. Oranı') && orderText.includes('İskonto Oranı') && orderText.includes('%7,76'), "Work-order document shows the discount rate.");
-    assert(orderText.includes('KDV Oranı') && orderText.includes('%20'), "Work-order document shows the VAT rate.");
+    assert(orderText.includes('İskonto (%7,76)') && orderText.includes('%7,76'), "Work-order document shows the discount rate.");
+    assert(orderText.includes('KDV (%20)') && orderText.includes('%20'), "Work-order document shows the VAT rate.");
     assert(orderText.includes('Genel Toplam') && orderText.includes('14.272,00'), "Work-order document summarizes the selected order total.");
     assert(!orderText.includes('<th>Durum</th>'), "Work-order document does not fall back to the generic status list.");
 
@@ -722,7 +722,7 @@ setTimeout(() => {
         cinsi: 'Karlilik Test Saci',
         miktar: 10,
         kg: 1000,
-        maliyet: 1000,
+        maliyet: 10, // TL/kg: 100 kg per plate gives 1000 TL per plate.
         sahibiTipi: 'biz'
     }];
     db.isEmirleri = [{
@@ -785,7 +785,7 @@ setTimeout(() => {
     assert(!customerQuotePrint.includes('Teklif No: Taslak') && !customerQuotePrint.includes('Ad Soyad'), "Draft quote print hides the empty document number and name-surname prompts.");
     assert(!customerQuotePrint.includes('Hazırlayan / İmza') && !customerQuotePrint.includes('Müşteri Onayı / İmza'), "Quote print does not include signature fields.");
     assert(!customerQuotePrint.includes('Teklif Toplamı') && !customerQuotePrint.includes('İşin Kapsamı'), "Quote print keeps the top section minimal.");
-    assert(customerQuotePrint.includes('Genel Toplam') && customerQuotePrint.includes('Banka ve IBAN bilgileri'), "Quote print keeps the standard total and empty bank detail fields.");
+    assert(customerQuotePrint.includes('Genel Toplam') && !customerQuotePrint.includes('Banka ve IBAN bilgileri'), "Quote print keeps the standard total and omits unfilled bank fields.");
 
     // Test 23: Approve button saves the quote and creates one linked work order atomically
     console.log("Test 23: Auto-save quote while creating work order");
