@@ -1,6 +1,6 @@
 {
   "name": "prolazer-erp",
-  "version": "1.5.22",
+  "version": "1.5.23",
   "description": "Profesyonel Lazer Kesim Muhasebe ve Yönetim Sistemi",
   "main": "main.js",
   "scripts": {
@@ -27,7 +27,7 @@
     "test:quick-sales": "node test/quick_sales_test.js && node test/quick_sale_cut_test.js",
     "test:sheet-cut": "node test/sheet_cut_test.js && node test/sheet_weight_test.js && node test/kg_cost_test.js && node test/stock_identity_test.js && node test/readable_codes_test.js && node test/stock_consistency_test.js && node test/stock_ledger_test.js",
     "test:sheet-purchase": "node test/sheet_purchase_test.js",
-    "test:audit": "node test/audit_fixes_test.js"
+    "test:audit": "node test/audit_fixes_test.js && node test/audit_fixes_2_test.js"
   },
   "author": "Mert",
   "license": "ISC",

@@ -1096,7 +1096,8 @@ function addCashMovement(kasaId, movement = {}) {
     if (!kasaId) return null;
     if (!Array.isArray(db.kasaHareketleri)) db.kasaHareketleri = [];
     const kasa = getDBArray('kasaHesaplari').find(k => k.id == kasaId);
-    if (!kasa) return null;
+    // A passive account must keep its zero balance, including reversals of its old movements.
+    if (!kasa || !isCashAccountActive(kasa)) return null;
 
     const tutar = roundMoney(movement.tutar);
     if (tutar <= 0) return null;
@@ -1155,6 +1156,19 @@ function getCashAccountUsage(accountId) {
 
 function isCashAccountActive(account) {
     return account?.isPasif !== true;
+}
+
+// Explains why money cannot move on an account; empty when the account can be used.
+function getCashAccountBlockReason(kasaId) {
+    const account = getDBArray('kasaHesaplari').find(item => String(item.id) === String(kasaId));
+    if (!account) return 'Kasa/banka hesabı bulunamadı.';
+    if (!isCashAccountActive(account)) return `${account.ad || 'Hesap'} pasif. Bu hesapla işlem yapmak için önce Kasa / Banka bölümünden hesabı aktifleştirin.`;
+    return '';
+}
+
+function getCashMovementBlockReason(movementId) {
+    const movement = getDBArray('kasaHareketleri').find(item => String(item.id) === String(movementId));
+    return movement ? getCashAccountBlockReason(movement.kasaId) : '';
 }
 
 // Atomic saves replace db with a copy, so the archive result is applied to whatever live
@@ -2568,7 +2582,7 @@ function exportReportToExcel(type, selectedOnly = false) {
 
     const tableHead = report.headers.map(h => `<th>${escapeHTML(h)}</th>`).join('');
     const tableBody = rows.map(row => `
-        <tr>${reportRowValues(row).map(cell => `<td>${escapeHTML(cell)}</td>`).join('')}</tr>
+        <tr>${reportRowValues(row).map(getExcelCellHTML).join('')}</tr>
     `).join('');
     const firmaAdi = getCompanyName();
     const exportDate = new Date().toLocaleDateString('tr-TR');
@@ -2582,6 +2596,8 @@ function exportReportToExcel(type, selectedOnly = false) {
                 th { background: #e5e7eb; font-weight: 700; border: 1px solid #9ca3af; }
                 td { border: 1px solid #d1d5db; }
                 th, td { padding: 8px; mso-number-format: "\\@"; }
+                td.money { mso-number-format: "\\#\\,\\#\\#0\\.00"; text-align: right; }
+                td.number { mso-number-format: General; text-align: right; }
             </style>
         </head>
         <body>
@@ -2602,6 +2618,20 @@ function exportReportToExcel(type, selectedOnly = false) {
     const suffix = selectedOnly ? 'secilen' : 'tum';
     const fileName = `${report.title.toLowerCase().replace(/\s+/g, '-')}-${suffix}-${getReportDateSlug()}.xls`;
     downloadTextFile(fileName, `\uFEFF${html}`, 'application/vnd.ms-excel;charset=utf-8;');
+}
+
+// Amounts keep their Turkish display text but carry the numeric value so Excel can total them.
+function parseExportMoney(value) {
+    const match = String(value ?? '').trim().match(/^([+-])?₺(-)?(\d{1,3}(?:\.\d{3})*),(\d{2})$/);
+    if (!match) return null;
+    const amount = Number(`${match[3].replace(/\./g, '')}.${match[4]}`);
+    return (match[1] === '-') !== (match[2] === '-') ? -amount : amount;
+}
+function getExcelCellHTML(cell) {
+    if (typeof cell === 'number' && Number.isFinite(cell)) return `<td class="number" x:num="${cell}">${escapeHTML(cell)}</td>`;
+    const money = parseExportMoney(cell);
+    if (money !== null) return `<td class="money" x:num="${money}">${escapeHTML(cell)}</td>`;
+    return `<td>${escapeHTML(cell)}</td>`;
 }
 
 window.exportListToCSV = function(type) {
@@ -5293,7 +5323,7 @@ window.saveIslem = function() {
 
         if (!Number.isFinite(tutar) || tutar <= 0) return alert("Geçerli bir tutar girin!");
         if (!original && financeDay(tarihInput) === null) return alert('Geçerli bir işlem tarihi seçin.');
-        if (!original && financeDay(tarihInput) > financeDay(toDateInputValue(new Date()))) return alert('İşlem tarihi bugünden ileri olamaz. Gelecekteki ödemeler için Vade Planı kullanın.');
+        if (!original && isFutureFinanceDate(tarihInput)) return alert('İşlem tarihi bugünden ileri olamaz. Gelecekteki ödemeler için Vade Planı kullanın.');
         const islemTarihi = getIslemDateTime(tarihInput);
         if (original && tip === 'fatura_kes') return alert('Fatura hareketleri cari geçmişinden düzeltilemez. Faturalar bölümünü kullanın.');
         if (tip === 'fatura_kes' && !faturaNo.trim()) return alert("Fatura kesmek için Fatura No girmek zorunludur!");
@@ -5306,6 +5336,14 @@ window.saveIslem = function() {
         }
         if ((tip === 'tahsilat' || tip === 'odeme_yaptik') && !getDBArray('kasaHesaplari').some(kasa => kasa.id == kasaId)) {
             return alert('Seçilen kasa/banka hesabı bulunamadı.');
+        }
+        if (tip === 'tahsilat' || tip === 'odeme_yaptik') {
+            const accountBlock = getCashAccountBlockReason(kasaId);
+            if (accountBlock) return alert(accountBlock);
+        }
+        if (original?.kasaHareketId) {
+            const originalBlock = getCashMovementBlockReason(original.kasaHareketId);
+            if (originalBlock) return alert(`Eski hareketin hesabı geri alınamıyor. ${originalBlock}`);
         }
 
         const cari = db.cariler.find(c => c.id === cariId);
@@ -5773,6 +5811,8 @@ window.reverseCariMovement = function(id) {
 
     const cari = findCariByReference(original.cariId, original.firma);
     if (!cari) return alert('Cari bulunamadığı için hareket geri alınamadı.');
+    const cashBlock = original.kasaHareketId ? getCashMovementBlockReason(original.kasaHareketId) : '';
+    if (cashBlock) return alert(cashBlock);
     confirmAction(`${original.tip || 'Cari işlemi'} geri alınsın mı?\n\nCari ve kasa/banka etkisi ters kayıtla düzeltilecek.`, () => {
         if (!getDBArray('islemler').includes(original) || !canReverseCariMovement(original) ||
             findCariByReference(original.cariId, original.firma) !== cari) {
@@ -6830,9 +6870,21 @@ function calculatePayroll(personel, data = {}) {
     return { brut: roundMoney(brut), kesinti, mesai, prim: roundMoney(prim), ekOdeme, avans: roundMoney(avans), net };
 }
 
+// A payroll period keeps the wage it was calculated with; later raises must not rewrite it.
+function getPayrollSalaryBasis(personel, record = null) {
+    if (record && String(record.personelId) === String(personel?.id) && Number.isFinite(Number(record.bazUcret)) && record.bazUcret !== null) {
+        return { ...personel, maas: Number(record.bazUcret), maasTipi: record.maasTipi || personel?.maasTipi || 'aylik' };
+    }
+    return personel;
+}
+
 function getPayrollCalculationFromRecord(record) {
+    if (Number.isFinite(Number(record.netMaas)) && record.netMaas !== null && record.netMaas !== undefined) {
+        const avans = roundMoney(record.avans || 0);
+        return { brut: roundMoney(record.brutMaas || 0), kesinti: roundMoney(record.kesinti || 0), mesai: roundMoney((Number(record.mesaiSaat) || 0) * (Number(record.mesaiSaatUcreti) || 0)), prim: roundMoney(record.prim || 0), ekOdeme: roundMoney(record.ekOdeme || 0), avans, net: roundMoney(record.netMaas) };
+    }
     const personel = getPersonelById(record.personelId);
-    return calculatePayroll(personel, record);
+    return calculatePayroll(getPayrollSalaryBasis(personel, record), record);
 }
 
 function syncPayrollExpense(record, previousRecord = null) {
@@ -6965,7 +7017,8 @@ function getPersonnelReportRows() {
 function updatePayrollPreview() {
     const data = getPayrollInputs();
     const personel = getPersonelById(data.personelId);
-    const calc = calculatePayroll(personel, data);
+    const editing = getDBArray('personelPuantajlari').find(r => String(r.id) === String(document.getElementById('input-puantaj-id')?.value || ''));
+    const calc = calculatePayroll(getPayrollSalaryBasis(personel, editing), data);
     const set = (id, value) => {
         const el = document.getElementById(id);
         if (el) el.textContent = formatCurrency(value);
@@ -7177,8 +7230,35 @@ window.savePuantaj = function() {
         document.getElementById('input-puantaj-kasa')?.focus();
         return;
     }
+    const editingRecord = id ? getDBArray('personelPuantajlari').find(r => String(r.id) === String(id)) : null;
+    if (id && !editingRecord) return alert('Puantaj kaydı bulunamadı.');
+    const samePeriod = getDBArray('personelPuantajlari').find(r => String(r.personelId) === String(personel.id) && r.donem === data.donem && String(r.id) !== String(id));
+    if (samePeriod) {
+        setFieldError('input-puantaj-ay', 'Bu personelin seçilen dönemde kaydı var. Mevcut kaydı düzenleyin.');
+        document.getElementById('input-puantaj-ay')?.focus();
+        return;
+    }
 
-    const calc = calculatePayroll(personel, data);
+    const salaryBasis = getPayrollSalaryBasis(personel, editingRecord);
+    const calc = calculatePayroll(salaryBasis, data);
+    // The same rule syncPayrollExpense applies: which cash movements this save will reverse or create.
+    const paymentChanged = !!editingRecord && (
+        !!editingRecord.odendi !== odendi ||
+        roundMoney(editingRecord.netMaas || 0) !== roundMoney(calc.net) ||
+        String(editingRecord.kasaId || '') !== String(odendi ? kasaId : '')
+    );
+    if (editingRecord?.kasaHareketId && (!odendi || paymentChanged)) {
+        const previousBlock = getCashMovementBlockReason(editingRecord.kasaHareketId);
+        if (previousBlock) return alert(`Maaşın eski ödemesi geri alınamıyor. ${previousBlock}`);
+    }
+    if (odendi && (!editingRecord?.kasaHareketId || paymentChanged)) {
+        const accountBlock = getCashAccountBlockReason(kasaId);
+        if (accountBlock) {
+            setFieldError('input-puantaj-kasa', accountBlock);
+            document.getElementById('input-puantaj-kasa')?.focus();
+            return;
+        }
+    }
     const payload = {
         personelId: personel.id,
         donem: data.donem,
@@ -7194,6 +7274,8 @@ window.savePuantaj = function() {
         kesinti: calc.kesinti,
         ekOdeme: calc.ekOdeme,
         netMaas: calc.net,
+        bazUcret: roundMoney(salaryBasis?.maas || 0),
+        maasTipi: salaryBasis?.maasTipi || 'aylik',
         odendi,
         kasaId: odendi ? kasaId : null,
         not: plainText(document.getElementById('input-puantaj-not')?.value || '')
@@ -7202,8 +7284,7 @@ window.savePuantaj = function() {
     let record;
     let previousRecord = null;
     if (id) {
-        record = getDBArray('personelPuantajlari').find(r => String(r.id) === String(id));
-        if (!record) return alert('Puantaj kaydı bulunamadı.');
+        record = editingRecord;
         previousRecord = { ...record };
         Object.assign(record, payload);
     } else {
@@ -7242,6 +7323,8 @@ window.savePuantaj = function() {
 window.deletePuantaj = function(id) {
     const record = getDBArray('personelPuantajlari').find(r => String(r.id) === String(id));
     if (!record) return alert('Puantaj / maaş kaydı bulunamadı.');
+    const accountBlock = record.kasaHareketId ? getCashMovementBlockReason(record.kasaHareketId) : '';
+    if (accountBlock) return alert(`Maaş ödemesi geri alınamıyor. ${accountBlock}`);
     confirmAction('Bu puantaj / maaş kaydı silinsin mi? Ödenmişse gider ve kasa etkisi ters kayıtla düzeltilecek.', () => {
         if (record.giderId) {
             db.giderler = getDBArray('giderler').filter(g => String(g.id) !== String(record.giderId));
@@ -7392,6 +7475,11 @@ function printPayrollStatement(rowId) {
     if (!record) return alert('Yazdırılacak maaş kaydı bulunamadı.');
     const personel = getPersonelById(record.personelId);
     const calc = getPayrollCalculationFromRecord(record);
+    // Older records lack the saved wage; show the current one only when it reproduces the paid amount.
+    const savedBasis = record.bazUcret !== undefined && record.bazUcret !== null
+        ? { maas: record.bazUcret, maasTipi: record.maasTipi || personel?.maasTipi }
+        : (personel && roundMoney(calculatePayroll(personel, record).net) === roundMoney(calc.net) ? personel : null);
+    const wageTypeLabel = savedBasis?.maasTipi === 'gunluk' ? 'Günlük' : (savedBasis?.maasTipi === 'saatlik' ? 'Saatlik' : 'Aylık');
     const contentHTML = `
         ${getPrintBrandHTML('Personel Maaş Bordrosu', getPrintMetaHTML([
             ['Dönem', formatMonthLabel(record.donem)],
@@ -7406,8 +7494,8 @@ function printPayrollStatement(rowId) {
             </div>
             <div class="document-card">
                 <div class="document-card-label">Ücret Bilgisi</div>
-                <div class="document-card-value">${escapeHTML(personel?.maasTipi === 'gunluk' ? 'Günlük' : (personel?.maasTipi === 'saatlik' ? 'Saatlik' : 'Aylık'))}</div>
-                <div class="document-card-detail">Baz ücret: ${escapeHTML(formatCurrency(personel?.maas || 0))}</div>
+                <div class="document-card-value">${escapeHTML(savedBasis ? wageTypeLabel : 'Kayıtlı ücret')}</div>
+                <div class="document-card-detail">${savedBasis ? `Baz ücret: ${escapeHTML(formatCurrency(savedBasis.maas || 0))}` : 'Bu dönemin baz ücreti kayıtta yok; tutarlar kayıttan alınmıştır.'}</div>
             </div>
         </div>
         <div class="section-heading"><h2>Puantaj Bilgileri</h2></div>
@@ -7587,8 +7675,11 @@ window.saveGider = function() {
             { id: 'input-gider-tarih', test: value => !!value, message: 'İşlem tarihini seçin.' },
             { id: 'input-gider-kategori', test: value => !!plainText(value), message: 'Kategori zorunludur; uygun değilse “Diğer” yazın.' },
             { id: 'input-gider-tutar', test: value => Number(value) > 0, message: 'Sıfırdan büyük geçerli bir tutar girin.' },
-            { id: 'input-gider-kasa', test: value => getDBArray('kasaHesaplari').some(kasa => kasa.id == value), message: 'Ödeme yapılan kasa veya bankayı seçin.' }
+            { id: 'input-gider-kasa', test: value => getDBArray('kasaHesaplari').some(kasa => kasa.id == value), message: 'Ödeme yapılan kasa veya bankayı seçin.' },
+            { id: 'input-gider-kasa', test: value => !getDBArray('kasaHesaplari').some(kasa => kasa.id == value) || !getCashAccountBlockReason(value), message: getCashAccountBlockReason(kasaId) || 'Aktif bir kasa/banka hesabı seçin.' }
         ])) return;
+        const previousCashBlock = existing?.kasaHareketId ? getCashMovementBlockReason(existing.kasaHareketId) : '';
+        if (previousCashBlock) return alert(`Giderin eski ödemesi geri alınamıyor. ${previousCashBlock}`);
         if (!Number.isFinite(belgeTutari) || tax.toplam <= 0) return;
         const selectedFile = document.getElementById('input-gider-ek')?.files?.[0];
         if (selectedFile && selectedFile.size > MAX_ATTACHMENT_SIZE) return setFieldError('input-gider-ek', 'Dosya en fazla 10 MB olabilir.');
@@ -7599,7 +7690,7 @@ window.saveGider = function() {
         const oldAmount = roundMoney(existing?.tutar || 0);
 
         const gider = existing || { id: createRecordId() };
-        if (existing?.kasaHareketId) reverseCashMovement(existing.kasaHareketId, `Gider güncellendi: ${existing.aciklama || existing.kategori || ''}`);
+        if (existing?.kasaHareketId && !reverseCashMovement(existing.kasaHareketId, `Gider güncellendi: ${existing.aciklama || existing.kategori || ''}`)) throw new Error('Giderin eski kasa/banka hareketi geri alınamadı.');
         Object.assign(gider, {
             tarih: toTRDateFromInput(tarihInput),
             kategori,
@@ -7622,7 +7713,8 @@ window.saveGider = function() {
             kaynak: 'gider', refId: gider.id,
             tarih: `${gider.tarih} 00:00`
         });
-        gider.kasaHareketId = cashMovement?.id || null;
+        if (!cashMovement) throw new Error('Gider ödemesi kasa/banka hesabına yazılamadı.');
+        gider.kasaHareketId = cashMovement.id;
         if (!existing) db.giderler.push(gider);
         scheduleAttachmentArchive(ek, 'Giderler', gider.cariAdi || kategori);
         addAuditLog(existing ? 'Güncellendi' : 'Oluşturuldu', 'Gider', gider.id, `${kategori} / ${formatCurrency(gider.tutar)}`);
@@ -7687,6 +7779,8 @@ window.deleteGider = function(id) {
     const gider = getDBArray('giderler').find(item => item.id === id);
     if (!gider) return alert('Gider kaydı bulunamadı.');
     if (gider.kaynak === 'personel-maas') return alert('Maaş gideri Personel > Maaş / Puantaj bölümünden düzenlenmeli veya silinmelidir.');
+    const accountBlock = gider.kasaHareketId ? getCashMovementBlockReason(gider.kasaHareketId) : '';
+    if (accountBlock) return alert(accountBlock);
     confirmAction('Bu gider kaydı silinsin mi? Kasa/banka çıkışı ters kayıtla geri alınacak.', () => {
         if (!getDBArray('giderler').includes(gider)) return alert('Bu gider daha önce kaldırıldı.');
         if (gider.kasaHareketId && !reverseCashMovement(gider.kasaHareketId, `Gider silindi: ${gider.aciklama || gider.kategori || ''}`)) {
@@ -7727,6 +7821,7 @@ function findMatchingPendingQuote(fingerprint) {
     return [...getDBArray('teklifler')].reverse().find(quote =>
         !quote.orderId &&
         quote.durum !== 'Onaylandı' &&
+        quote.durum !== 'Reddedildi' &&
         getQuoteFingerprint(quote) === fingerprint
     ) || null;
 }
@@ -7745,6 +7840,10 @@ function convertQuoteToOrder(quote) {
     if (!quote) return null;
     if (quote.orderId) {
         alert('Bu teklif daha önce iş emrine dönüştürülmüş.');
+        return null;
+    }
+    if (quote.durum === 'Reddedildi') {
+        alert('Reddedilen teklif iş emrine çevrilemez. Müşteri kabul ettiyse önce teklifi Revize olarak işaretleyin.');
         return null;
     }
 
@@ -7855,6 +7954,8 @@ window.approveSavedQuoteAsOrder = function(id) {
 window.setQuoteStatus = function(id, status) {
     const quote = getDBArray('teklifler').find(q => q.id === id);
     if (!quote) return;
+    if (!['Revize Edildi', 'Reddedildi'].includes(status)) return;
+    if (quote.orderId) return alert(`Bu teklif ${quote.orderNo || 'bir iş emrine'} dönüştürüldü. Durumunu değiştirmek yerine iş emrini yönetin.`);
     quote.durum = status;
     quote.durumTarihi = new Date().toLocaleString('tr-TR');
     saveDB();
@@ -8226,7 +8327,9 @@ window.showQuoteDetail = function(id) {
     `).join('');
     const orderAction = q.orderNo
         ? `<button class="btn btn-outline quote-detail-primary-action" type="button" disabled><i class="fa-solid fa-circle-check"></i><span>İş emri oluşturuldu<small>${escapeHTML(q.orderNo)}</small></span></button>`
-        : `<button class="btn btn-primary quote-detail-primary-action" type="button" onclick="approveSavedQuoteAsOrder(${q.id})"><i class="fa-solid fa-check"></i><span>İş Emrine Çevir<small>Onayla ve üretime aktar</small></span></button>`;
+        : q.durum === 'Reddedildi'
+            ? `<button class="btn btn-outline quote-detail-primary-action" type="button" disabled><i class="fa-solid fa-ban"></i><span>Reddedildi<small>Çevirmek için önce Revize edin</small></span></button>`
+            : `<button class="btn btn-primary quote-detail-primary-action" type="button" onclick="approveSavedQuoteAsOrder(${q.id})"><i class="fa-solid fa-check"></i><span>İş Emrine Çevir<small>Onayla ve üretime aktar</small></span></button>`;
 
     const html = `
         <div class="modal-content glass-panel quote-detail-modal">
@@ -8255,11 +8358,11 @@ window.showQuoteDetail = function(id) {
                 <button class="btn btn-outline" type="button" onclick="loadQuote(${q.id}); closeModal('modal-quote-detail');"><i class="fa-solid fa-pen"></i> Forma Yükle</button>
                 <button class="btn btn-outline" type="button" onclick="printQuoteById(${q.id})"><i class="fa-solid fa-print"></i> Yazdır</button>
             </div>
-            <div class="quote-detail-status-actions" aria-label="Teklif durumu işlemleri">
+            ${q.orderId ? '' : `<div class="quote-detail-status-actions" aria-label="Teklif durumu işlemleri">
                 <span>Durumu güncelle</span>
                 <button class="btn btn-outline" type="button" onclick="setQuoteStatus(${q.id}, 'Revize Edildi')"><i class="fa-solid fa-rotate"></i> Revize</button>
-                <button class="btn btn-danger" type="button" onclick="setQuoteStatus(${q.id}, 'Reddedildi')"><i class="fa-solid fa-ban"></i> Reddet</button>
-            </div>
+                ${q.durum === 'Reddedildi' ? '' : `<button class="btn btn-danger" type="button" onclick="setQuoteStatus(${q.id}, 'Reddedildi')"><i class="fa-solid fa-ban"></i> Reddet</button>`}
+            </div>`}
         </div>`;
     
     let modal = document.getElementById('modal-quote-detail');
@@ -9103,8 +9206,9 @@ function populateKasaOptions(selectedId = '') {
         const el = document.getElementById(id);
         if (el) {
             const current = selectedId || el.value;
+            // Only a record's own saved account may appear while passive; a leftover form choice may not.
             const accountOptions = getDBArray('kasaHesaplari')
-                .filter(kasa => isCashAccountActive(kasa) || String(kasa.id) === String(current))
+                .filter(kasa => isCashAccountActive(kasa) || (selectedId && String(kasa.id) === String(selectedId)))
                 .map(kasa => `<option value="${kasa.id}">${escapeHTML(kasa.ad)} (${escapeHTML(kasa.kodu || '-')}) - ${formatCurrency(kasa.bakiye || 0)}${isCashAccountActive(kasa) ? '' : ' · Pasif'}</option>`)
                 .join('');
             el.innerHTML = `<option value="">${placeholder}</option>` + accountOptions;
@@ -9446,6 +9550,8 @@ window.undoPaymentPlanSettlement = function(id) {
         const originalCash = getDBArray('kasaHareketleri').find(item => String(item.id) === String(plan.kasaHareketId));
         if ((plan.cariIslemId && (!originalCariMovement || originalCariMovement.reversedBy)) ||
             (plan.kasaHareketId && (!originalCash || originalCash.reversedBy))) return alert('Bağlı ödeme hareketi eksik veya daha önce geri alınmış. Plan değiştirilmedi.');
+        const undoBlock = plan.kasaHareketId ? getCashMovementBlockReason(plan.kasaHareketId) : '';
+        if (undoBlock) return alert(undoBlock);
         const cashReversal = plan.kasaHareketId ? reverseCashMovement(plan.kasaHareketId, `Vade ödemesi geri alındı: ${plan.planNo}`) : null;
         if (plan.kasaHareketId && !cashReversal) return alert('Kasa/banka ters kaydı oluşturulamadı.');
         const cariReversal = addCariMovement(cari, {
@@ -9487,6 +9593,8 @@ window.deletePaymentPlan = function(id) {
             const originalCash = getDBArray('kasaHareketleri').find(item => String(item.id) === String(plan.kasaHareketId));
             if ((plan.cariIslemId && (!originalCariMovement || originalCariMovement.reversedBy)) ||
                 (plan.kasaHareketId && (!originalCash || originalCash.reversedBy))) return alert('Bağlı ödeme hareketi eksik veya daha önce geri alınmış. Plan silinmedi.');
+            const deleteBlock = plan.kasaHareketId ? getCashMovementBlockReason(plan.kasaHareketId) : '';
+            if (deleteBlock) return alert(deleteBlock);
             const cashReversal = plan.kasaHareketId ? reverseCashMovement(plan.kasaHareketId, `Vade planı silindi: ${plan.planNo}`) : null;
             if (plan.kasaHareketId && !cashReversal) return alert('Kasa/banka hareketi geri alınamadığı için plan silinmedi.');
             const cariReversal = addCariMovement(cari, {
@@ -9707,6 +9815,8 @@ window.undoManualCashMovement = function(id) {
     if (!movement) return alert('Kasa/banka hareketi bulunamadı.');
     if (movement.kaynak !== 'manuel') return alert('Bağlı hareketler oluşturulduğu modülden düzeltilmelidir.');
     if (movement.reversedBy) return alert('Bu hareket daha önce geri alınmış.');
+    const accountBlock = getCashAccountBlockReason(movement.kasaId);
+    if (accountBlock) return alert(accountBlock);
     confirmAction(`${movement.kasaAdi || 'Hesap'} üzerindeki ${formatCurrency(movement.tutar || 0)} tutarlı ${movement.tip === 'giris' ? 'giriş' : 'çıkış'} geri alınsın mı?\n\nHareket silinmeyecek; denetim izi için ters kayıt oluşturulacak.`, () => {
         if (!getDBArray('kasaHareketleri').includes(movement) || movement.reversedBy) return alert('Bu hareket daha önce geri alındı veya değişti.');
         const reversal = reverseCashMovement(movement.id, 'Manuel kasa hareketi geri alındı');
@@ -10180,6 +10290,7 @@ function syncCekSenetCariEffect(record, kasaId = '') {
         record.kasaId = kasa.id;
         record.kasaHareketId = cashMovement?.id || null;
     } else if (!shouldReflect && alreadyReflected) {
+        if (record.kasaHareketId && getCashMovementBlockReason(record.kasaHareketId)) return false;
         const oldDelta = typeof record.cariBakiyeDegisimi === 'number' ? record.cariBakiyeDegisimi : delta;
         // Link the reversal so the settled movement cannot be undone a second time from the account history.
         const original = getDBArray('islemler').find(item => String(item.id) === String(record.cariIslemId) && !item.reversedBy);
@@ -10316,6 +10427,12 @@ window.saveCekSenet = function() {
         document.getElementById('input-ceksenet-kasa')?.focus();
         return;
     }
+    if (willSettle && getCashAccountBlockReason(kasaId)) {
+        setFieldError('input-ceksenet-kasa', getCashAccountBlockReason(kasaId));
+        document.getElementById('input-ceksenet-kasa')?.focus();
+        return;
+    }
+    const recordBefore = existing ? JSON.parse(JSON.stringify(existing)) : null;
 
     const oldStatus = existing?.durum || '';
     const record = existing || {
@@ -10350,8 +10467,16 @@ window.saveCekSenet = function() {
     }
 
     if (!existing) db.cekSenetler.push(record);
-    if (!existing || hasNewAttachment) scheduleAttachmentArchive(ek, 'Cek Senet', cari.adi);
     syncCekSenetCariEffect(record, kasaId);
+    // Never keep a settled status whose account and cash effect was not written.
+    if (isCekSenetSettled(record) !== !!record.cariYansitildi) {
+        if (existing) {
+            Object.keys(existing).forEach(key => { if (!(key in recordBefore)) delete existing[key]; });
+            Object.assign(existing, recordBefore);
+        } else db.cekSenetler = getDBArray('cekSenetler').filter(item => item !== record);
+        return alert('Çek/senet kapatılamadı: cari veya kasa/banka etkisi yazılamadı. Aktif bir hesap seçip tekrar deneyin.');
+    }
+    if (!existing || hasNewAttachment) scheduleAttachmentArchive(ek, 'Cek Senet', cari.adi);
     addAuditLog(existing ? 'Güncellendi' : 'Oluşturuldu', 'Çek / Senet', record.id, `${record.belgeNo} / ${record.firma} / ${getCekSenetStatusLabel(record.durum)}`);
     saveDB();
     closeModal('modal-ceksenet');
@@ -10409,10 +10534,18 @@ window.updateCekSenetStatus = function(id, status) {
         });
         return;
     }
+    if (record.cariYansitildi && !isCekSenetSettled(nextRecord)) {
+        const accountBlock = record.kasaHareketId ? getCashMovementBlockReason(record.kasaHareketId) : '';
+        if (accountBlock) { renderCekSenetler(); return alert(`Çek/senet tahsilatı geri alınamıyor. ${accountBlock}`); }
+    }
     record.durum = status;
     const wasReflected = record.cariYansitildi === true;
     const oldDelta = Number(record.cariBakiyeDegisimi) || getCekSenetCariDelta(record);
-    syncCekSenetCariEffect(record);
+    if (!syncCekSenetCariEffect(record) && wasReflected) {
+        record.durum = oldStatus;
+        renderCekSenetler();
+        return alert('Çek/senet etkisi geri alınamadı. Cari ve kasa/banka hesabını kontrol edin.');
+    }
     addAuditLog('Durum Değişti', 'Çek / Senet', record.id, `${getCekSenetStatusLabel(oldStatus)} -> ${getCekSenetStatusLabel(status)}`);
     if (!Array.isArray(record.durumGecmisi)) record.durumGecmisi = [];
     record.durumGecmisi.push({ durum: status, tarih: new Date().toLocaleString('tr-TR'), aciklama: `${getCekSenetStatusLabel(oldStatus)} durumundan değiştirildi` });
@@ -10452,14 +10585,20 @@ window.showCekSenetHistory = function(id) {
 window.deleteCekSenet = function(id) {
     const record = getDBArray('cekSenetler').find(item => item.id == id);
     if (!record) return alert('Çek/senet kaydı bulunamadı.');
+    const accountBlock = record.cariYansitildi && record.kasaHareketId ? getCashMovementBlockReason(record.kasaHareketId) : '';
+    if (accountBlock) return alert(`Kapatılmış çek/senet silinemiyor. ${accountBlock}`);
     confirmAction('Bu çek/senet kaydı silinsin mi? Tahsil edilmiş veya ödenmişse cari ve kasa etkileri geri alınacak.', () => {
         if (!getDBArray('cekSenetler').includes(record)) return alert('Bu çek/senet daha önce kaldırıldı.');
         const wasReflected = record.cariYansitildi === true;
         const oldDelta = Number(record.cariBakiyeDegisimi) || getCekSenetCariDelta(record);
         const cashDelta = getCekSenetDirection(record) === 'incoming' ? -record.tutar : record.tutar;
         if (wasReflected) {
+            const previousStatus = record.durum;
             record.durum = 'iptal';
-            syncCekSenetCariEffect(record);
+            if (!syncCekSenetCariEffect(record)) {
+                record.durum = previousStatus;
+                return alert('Çek/senetin cari ve kasa etkisi geri alınamadığı için kayıt silinmedi.');
+            }
         }
         addAuditLog('Silindi', 'Çek / Senet', record.id, `${record.belgeNo} / ${record.firma}`);
         db.cekSenetler = getDBArray('cekSenetler').filter(item => item.id != id);
@@ -11532,6 +11671,12 @@ function financeDay(value) {
     return date.getTime() / 86400000;
 }
 
+// Money already received or paid cannot be dated after today; future amounts belong in plans.
+function isFutureFinanceDate(value) {
+    const day = financeDay(value);
+    return day !== null && day > financeDay(toDateInputValue(new Date()));
+}
+
 function financeCariFor(record, database = db) {
     if (record.cariId != null) return (database.cariler || []).find(c => String(c.id) === String(record.cariId)) || null;
     const matches = (database.cariler || []).filter(c => normalizeLookupText(c.adi) === normalizeLookupText(record.firma));
@@ -11731,6 +11876,18 @@ function buildAccountCheckReport(database = db) {
         const difference = roundMoney(Number(account.bakiye || 0) - sum - (knownOpening ? account.ledgerOpeningBalance : 0));
         if (difference !== 0) add(knownOpening ? 'error' : 'review', 'Kasa / Banka', account.ad, `Kayıtlı bakiye ${formatCurrency(account.bakiye)}; hareket toplamı ${formatCurrency(sum)}; fark ${formatCurrency(difference)}.${knownOpening ? '' : ' Eski açılış bakiyesi veya eksik hareket kontrol edilmeli.'}`, 'cash', account.id);
     }
+    for (const account of accounts) {
+        if (!isCashAccountActive(account) && roundMoney(account.bakiye || 0) !== 0) add('review', 'Kasa / Banka', account.ad, `Pasif hesabın bakiyesi ${formatCurrency(account.bakiye)}. Pasif hesaplar sıfır bakiyeyle kapanmalıdır; hareketleri kontrol edin.`, 'cash', account.id);
+    }
+    for (const record of database.cekSenetler || []) {
+        const label = record.belgeNo || 'Çek / Senet';
+        if (isCekSenetSettled(record) && record.cariYansitildi !== true) add('error', 'Çek / Senet', label, 'Belge tahsil edildi/ödendi görünüyor ancak cari ve kasa/banka etkisi yazılmamış.', 'cheque', record.id);
+        if (record.cariYansitildi === true) {
+            const movement = movementMap.get(String(record.cariIslemId));
+            const cashMovement = cashMap.get(String(record.kasaHareketId));
+            if (!movement || movement.reversedBy || !cashMovement || cashMovement.reversedBy) add('error', 'Çek / Senet', label, 'Kapatılmış belgenin cari veya kasa/banka hareketi eksik ya da geri alınmış.', 'cheque', record.id);
+        }
+    }
     for (const invoice of invoices) {
         const label = invoice.faturaNo || 'Fatura';
         if (!resolveCari(invoice)) add('error','Fatura',label,'Faturanın bağlı olduğu cari bulunamıyor veya isim birden fazla cariye ait.','invoice',invoice.id);
@@ -11814,6 +11971,7 @@ function openAccountCheckFinding(index) {
     if(f.target==='stock'){const stock=getDBArray('stoklar').find(s=>s.id===f.id);document.getElementById('stok-search').value=stock?.kodu||'';location.hash='inventory';switchView('inventory');renderStoklar();return;}
     if(f.target==='order')return openOrderHistory(f.id);
     if (f.target === 'quicksale') { location.hash = 'quicksales'; switchView('quicksales'); return; }
+    if (f.target === 'cheque') { location.hash = 'cheques'; switchView('cheques'); return; }
     if (f.target === 'invoice') return showFaturaDetail(f.id);
     if (f.target === 'cari' && f.id != null) return openCariDetay(f.id);
     const target = f.target === 'cash' ? 'cashbank' : 'accounts';
@@ -11913,6 +12071,8 @@ function reverseQuickSaleRecords(sale, status) {
     if (!sale || sale.status !== 'active') throw new Error('Bu satış daha önce iptal edilmiş veya düzeltilmiş. Listeyi yenileyin.');
     const issue = getQuickSaleLinkError(sale);
     if (issue) throw new Error(issue + ' Hesap Kontrolü bölümünden inceleyin.');
+    const accountBlock = getCashMovementBlockReason(sale.cashMovementId);
+    if (accountBlock) throw new Error(accountBlock);
     const cari = db.cariler.find(c => c.id === sale.cariId);
     for (const id of [sale.debitMovementId, sale.receiptMovementId]) {
         const original = db.islemler.find(m => m.id === id);
@@ -11957,6 +12117,7 @@ function prepareQuickSaleCandidate(input, editId = '', cancel = false) {
         if (!plainText(input.description) || plainText(input.description).length > 300) throw new Error('Satış açıklaması girin (en fazla 300 karakter).');
         if (plainText(input.name).length > 120) throw new Error('Müşteri adı en fazla 120 karakter olabilir.');
         if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date || '') || financeDay(input.date) === null) throw new Error('Geçerli bir satış tarihi seçin.');
+        if (isFutureFinanceDate(input.date)) throw new Error('Satış tarihi bugünden ileri olamaz.');
         const account = db.kasaHesaplari.find(k => String(k.id) === String(input.cashId) && isCashAccountActive(k));
         if (!account) throw new Error('Aktif bir tahsilat hesabı seçin.');
         // Return old stock before checking the replacement's available quantity.
@@ -12670,6 +12831,7 @@ function sheetPurchaseUndoError(movement) {
         if(getDBArray('sacKesimleri').some(c=>c.status==='active'&&c.stokId===stock.id)||getDBArray('isEmirleri').some(o=>String(o.stokId)===String(stock.id)&&o.durum!=='İptal')||getDBArray('teklifler').some(q=>String(q.stokId)===String(stock.id))||getDBArray('hizliSatislar').some(q=>q.status==='active'&&q.stokId===stock.id))return 'Sac kesime, satışa, teklife veya iş emrine bağlı. Önce bağlı işlemleri geri alın.';
     }
     if(movement.bakiyeDegisimi!==-p.total||roundMoney(movement.tutar)!==p.total)return 'Alımın cari tutarı tutarsız.';
+    if(p.paid>0){const accountBlock=getCashMovementBlockReason(p.cashMovementId);if(accountBlock)return accountBlock;}
     if(p.paid>0){const payment=getDBArray('islemler').find(m=>m.id===p.paymentId),cash=getDBArray('kasaHareketleri').find(m=>m.id===p.cashMovementId);
         if(!payment||payment.reversedBy||payment.bakiyeDegisimi!==p.paid||payment.sheetPurchasePaymentFor!==movement.id||!cash||cash.reversedBy||cash.tip!=='cikis'||cash.tutar!==p.paid||cash.refId!==payment.id)return 'Alıma bağlı ödeme kaydı eksik veya değiştirilmiş.';}
     return '';
@@ -12694,6 +12856,7 @@ function prepareSheetPurchaseCandidate(input,editId='',cancel=false) {
         const lines=rawLines.map((line,index)=>validateSheetPurchaseLine(line,index));
         if(plainText(input.description).length>300)throw Error('Açıklamayı kontrol edin.');
         if(!/^\d{4}-\d{2}-\d{2}$/.test(input.date||'')||financeDay(input.date)===null)throw Error('Geçerli alış tarihi girin.');
+        if(isFutureFinanceDate(input.date))throw Error('Alış tarihi bugünden ileri olamaz.');
         const base=roundMoney(lines.reduce((sum,line)=>sum+line.base,0)),taxAmount=roundMoney(lines.reduce((sum,line)=>sum+line.taxAmount,0)),calculatedTotal=roundMoney(base+taxAmount);
         const totalMode=input.totalMode||'calculated';if(!['calculated','document'].includes(totalMode))throw Error('Alış toplamının nasıl belirleneceğini seçin.');
         const total=totalMode==='document'?parseSheetPurchaseDocumentTotal(input.documentTotal):calculatedTotal,totalAdjustment=roundMoney(total-calculatedTotal);

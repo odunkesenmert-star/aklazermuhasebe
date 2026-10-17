@@ -219,3 +219,12 @@ ANLAŞILIR KAYIT KODLARI (1.5.18)
 - Otomatik yedeklerde son 60 kayda ek olarak son 90 günün her günü ve son 24 ayın her ayı için bir yedek saklanır.
 - Stok kartı düzenlenirken bekleyen iş emirlerinin plaka/KG ayrımı yeni değerlerle kontrol edilir.
 - Hesap Kontrolü, iş emri cari etkisi ile yansıtma durumu uyuşmayan kayıtları listeler.
+
+1.5.23 — İkinci denetim düzeltmeleri
+- Çek/senet, aktif bir kasa/banka hesabı olmadan tahsil edildi/ödendi olarak kapatılamaz; cari ve kasa etkisi yazılamazsa kayıt eski haline döner. Hesap Kontrolü etkisiz kapanmış belgeleri listeler.
+- Pasif kasa/banka hesabına yeni hareket veya ters kayıt yazılmaz; gider, maaş, çek, vade, hızlı satış ve cari işlem akışları nedeni açıklayarak durur. Formlar önceki seçimden kalan pasif hesabı göstermez.
+- Maaş kaydı o dönemin baz ücretini saklar; bordro ve sonraki düzenlemeler sonradan yapılan zamdan etkilenmez.
+- Aynı personel için aynı döneme ikinci maaş kaydı düzenlemeyle de açılamaz.
+- İş emrine dönüşmüş teklifin durumu değiştirilemez; reddedilen teklif önce Revize edilmeden iş emrine çevrilemez.
+- Hızlı satış ve sac alımında ileri tarih engellenir.
+- Excel çıktısındaki tutarlar sayı olarak aktarılır ve toplanabilir.
