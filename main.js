@@ -174,8 +174,38 @@ function writeRotatingBackup(data, kind = 'auto') {
         .map(file => ({ file, mtime: fs.statSync(file).mtimeMs }))
         .sort((a, b) => b.mtime - a.mtime);
     // Keep safety snapshots separate from routine saves, including after restore/reset.
-    files.slice((safety ? 20 : 60) - 1).forEach(item => fs.rmSync(item.file, { force: true }));
+    const recent = files.slice(0, (safety ? 20 : 60) - 1);
+    const kept = new Set(recent.map(item => item.file));
+    if (!safety) selectHistoricalBackups(files.slice(recent.length), date, [{ mtime: date.getTime() }, ...recent]).forEach(file => kept.add(file));
+    files.filter(item => !kept.has(item.file)).forEach(item => fs.rmSync(item.file, { force: true }));
     return filePath;
+}
+
+// Routine saves happen on every change, so count-based retention alone can cover only a few hours.
+// Beyond the recent window keep the newest backup of each day (90 days) and of each month (24 months).
+function selectHistoricalBackups(olderFiles, now = new Date(), coveredFiles = []) {
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const pad = value => String(value).padStart(2, '0');
+    const keysOf = mtime => {
+        const stamp = new Date(mtime);
+        const monthKey = `${stamp.getFullYear()}-${pad(stamp.getMonth() + 1)}`;
+        return { monthKey, dayKey: `${monthKey}-${pad(stamp.getDate())}` };
+    };
+    // Days and months already represented by the recent window need no extra copy.
+    const dailyKeys = new Set(coveredFiles.map(item => keysOf(item.mtime).dayKey));
+    const monthlyKeys = new Set(), kept = [];
+    for (const item of olderFiles) {
+        const ageDays = (now.getTime() - item.mtime) / DAY_MS;
+        const { monthKey, dayKey } = keysOf(item.mtime);
+        if (ageDays <= 90 && !dailyKeys.has(dayKey)) {
+            dailyKeys.add(dayKey);
+            kept.push(item.file);
+        } else if (ageDays > 90 && monthlyKeys.size < 24 && !monthlyKeys.has(monthKey)) {
+            monthlyKeys.add(monthKey);
+            kept.push(item.file);
+        }
+    }
+    return kept;
 }
 
 function makeSafeFileName(value) {

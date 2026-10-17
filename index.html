@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;">
     <title>AK LAZER ERP - Lazer Kesim Yönetim Sistemi</title>
-    <link rel="stylesheet" href="style.css?v=1.5.21">
-    <link rel="stylesheet" href="node_modules/@fortawesome/fontawesome-free/css/all.min.css?v=1.5.21">
-    <script src="node_modules/chart.js/dist/chart.umd.min.js?v=1.5.21"></script>
-    <script src="app.js?v=1.5.21" defer></script>
+    <link rel="stylesheet" href="style.css?v=1.5.22">
+    <link rel="stylesheet" href="node_modules/@fortawesome/fontawesome-free/css/all.min.css?v=1.5.22">
+    <script src="node_modules/chart.js/dist/chart.umd.min.js?v=1.5.22"></script>
+    <script src="app.js?v=1.5.22" defer></script>
 </head>
 <body>
     <button type="button" class="workspace-menu-backdrop" aria-label="Menüyü kapat" onclick="toggleWorkspaceMenu(false)" hidden></button>
@@ -119,7 +119,7 @@
             </nav>
             <div class="sidebar-version" aria-label="Uygulama sürümü">
                 <span class="sidebar-version-label"><i class="fa-solid fa-desktop" aria-hidden="true"></i> AK LAZER ERP</span>
-                <strong id="app-version">v1.5.21</strong>
+                <strong id="app-version">v1.5.22</strong>
             </div>
         </aside>
 
@@ -2123,6 +2123,11 @@
                 <label>Açıklama (İsteğe Bağlı)</label>
                 <input type="text" id="input-islem-aciklama" class="form-control" placeholder="Örn: Mayıs ayı faturası">
             </div>
+            <div class="form-group" id="islem-tarih-container">
+                <label for="input-islem-tarih">İşlem Tarihi *</label>
+                <input type="date" id="input-islem-tarih" class="form-control account-date-input">
+                <span class="field-help">Ödeme veya alım hangi gün yapıldıysa o tarihi seçin; ekstre bu tarihe göre sıralanır.</span>
+            </div>
             <div class="form-group">
                 <label id="input-islem-tutar-label">Tutar (₺)</label>
                 <input type="number" id="input-islem-tutar" class="form-control" placeholder="Örn: 5000" oninput="handleCariAmountInput()">
@@ -2498,7 +2503,7 @@
                         <div class="update-status-card" id="update-status-card" data-state="idle" aria-live="polite">
                             <span class="update-status-icon" id="update-status-icon"><i class="fa-solid fa-circle-info" aria-hidden="true"></i></span>
                             <div class="update-status-copy">
-                                <span class="update-version-line">Yüklü sürüm <strong id="update-current-version">v1.5.21</strong><span id="update-latest-version" hidden></span></span>
+                                <span class="update-version-line">Yüklü sürüm <strong id="update-current-version">v1.5.22</strong><span id="update-latest-version" hidden></span></span>
                                 <strong id="update-status-title">Sürüm kontrolü hazır</strong>
                                 <small id="update-status-copy">Kontrol başlatıldığında yalnızca AK LAZER sürüm adresine bağlanılır.</small>
                             </div>

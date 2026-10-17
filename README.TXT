@@ -210,3 +210,12 @@ ANLAŞILIR KAYIT KODLARI (1.5.18)
 - Hızlı satışta malzeme bölümü açık gelir; malzeme seçilmezse özet "stok miktarı değişmeyecek" uyarısı gösterir, seçilirse düşülecek miktarı yazar.
 - Stok listesinde iş emirlerine ayrılan KG ve kullanılabilir KG görünür. Aynı satışın plaka ve KG hareketleri aynı tarihle kaydedilir.
 - Hesap Kontrolü, ilk girişi hareket geçmişinde olmayan eski stokları inceleme olarak listeler.
+
+1.5.22 — Denetim düzeltmeleri
+- Fatura silindiğinde, cari borcu faturayla işlenmiş iş emri yeniden "cariye yansıtılmadı" olur; tekrar faturada borç doğru işlenir, iptalde bakiye eksiye düşmez.
+- Çek/senet tahsilatı geri alındığında veya silindiğinde orijinal cari hareketi geri alınmış olarak işaretlenir; cari geçmişinden ikinci kez geri alınamaz.
+- Belge eklerinin arşiv yolu, kayıt sonrası değişen veri kopyasında da korunur (sac alımı ekleri dahil).
+- Yeni tahsilat, ödeme, mal alımı ve fatura kesme işlemlerinde işlem tarihi seçilebilir; ileri tarih engellenir. Düzeltmeler yapıldığı günün kaydı olarak kalır.
+- Otomatik yedeklerde son 60 kayda ek olarak son 90 günün her günü ve son 24 ayın her ayı için bir yedek saklanır.
+- Stok kartı düzenlenirken bekleyen iş emirlerinin plaka/KG ayrımı yeni değerlerle kontrol edilir.
+- Hesap Kontrolü, iş emri cari etkisi ile yansıtma durumu uyuşmayan kayıtları listeler.

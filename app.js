@@ -1157,28 +1157,35 @@ function isCashAccountActive(account) {
     return account?.isPasif !== true;
 }
 
+// Atomic saves replace db with a copy, so the archive result is applied to whatever live
+// records still carry this unarchived source path, not only to the object captured here.
+function getLiveAttachmentsForPath(sourcePath) {
+    return DB_ARRAY_KEYS.flatMap(key => getDBArray(key))
+        .map(record => record?.ek)
+        .filter(item => item && typeof item === 'object' && item.path === sourcePath && !item.archivedPath);
+}
 function scheduleAttachmentArchive(ek, category, ownerName) {
     if (!ek || ek.archivedPath || !ek.path || !window.electronAPI?.archiveAttachment) return;
+    const sourcePath = ek.path;
+    const apply = changes => {
+        const targets = new Set([ek, ...getLiveAttachmentsForPath(sourcePath)]);
+        targets.forEach(item => Object.assign(item, changes));
+        saveDB(true);
+    };
     window.electronAPI.archiveAttachment({
-        sourcePath: ek.path,
+        sourcePath,
         category: category || 'Belgeler',
         ownerName: ownerName || 'Genel',
         fileName: ek.name || 'belge'
     }).then(result => {
         if (result?.success && result.path) {
-            ek.archivedPath = result.path;
-            ek.archiveStatus = 'Arşivlendi';
-            saveDB(true);
+            apply({ archivedPath: result.path, archiveStatus: 'Arşivlendi' });
         } else {
-            ek.archiveStatus = 'Arşivlenemedi';
-            ek.archiveError = result?.error || 'Kaynak dosya bulunamadı.';
-            saveDB(true);
+            apply({ archiveStatus: 'Arşivlenemedi', archiveError: result?.error || 'Kaynak dosya bulunamadı.' });
             alert(`Belge eki arşivlenemedi: ${ek.name || 'Belge'}\n\n${ek.archiveError}`);
         }
     }).catch(error => {
-        ek.archiveStatus = 'Arşivlenemedi';
-        ek.archiveError = error?.message || String(error);
-        saveDB(true);
+        apply({ archiveStatus: 'Arşivlenemedi', archiveError: error?.message || String(error) });
         alert(`Belge eki arşivlenemedi: ${ek.name || 'Belge'}\n\n${ek.archiveError}`);
     });
 }
@@ -4531,6 +4538,8 @@ window.updateStok = function() {
         }
         const reservedKg = getReservedStockQuantity(stok.id, 'kg');
         if (kg < reservedKg) return alert(`Bu malzemeden ${reservedKg} KG aktif iş emirlerine rezerve edildi. Ağırlık rezervasyonun altına düşürülemez.`);
+        const reservationError = getStockEditReservationError(stok, { miktar, kg, en, boy, mm });
+        if (reservationError) return alert(reservationError);
         const eskiMiktar = Number(stok.miktar) || 0;
         const eskiKg = Number(stok.kg) || 0;
 
@@ -4951,6 +4960,7 @@ function resetIslemModalState(id, adi) {
     setValue('input-islem-fatura-no');
     setValue('input-islem-tutar');
     setValue('input-islem-kasa');
+    setValue('input-islem-tarih', toDateInputValue(new Date()));
     setValue('input-islem-ek-not');
     resetAttachmentInputs('input-islem-ek', 'input-islem-ek-not');
     resetSheetPurchaseForm();
@@ -5129,6 +5139,12 @@ function getCashMovementDelta(movement) {
     return movement.tip === 'cikis' ? -amount : amount;
 }
 
+// Back-dated entries keep the time of entry so same-day statement lines stay in recording order.
+function getIslemDateTime(value) {
+    const time = new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+    return `${toTRDateFromInput(value)} ${time}`;
+}
+
 function saveCorrectedCariMovement(options = {}) {
     const {
         original, cari, tip, tipText, tutar, bakiyeArtisi,
@@ -5260,6 +5276,7 @@ window.saveIslem = function() {
         const aciklama = document.getElementById('input-islem-aciklama')?.value || '';
         const faturaNo = document.getElementById('input-islem-fatura-no')?.value || '';
         const kasaId = document.getElementById('input-islem-kasa')?.value || '';
+        const tarihInput = document.getElementById('input-islem-tarih')?.value || toDateInputValue(new Date());
         const linkedOrderId = tip === 'fatura_kes' ? (document.getElementById('input-islem-order-id')?.value || '') : '';
         const linkedOrder = linkedOrderId ? getDBArray('isEmirleri').find(o => o.id == linkedOrderId) : null;
         const paymentOrderId = tip === 'tahsilat' ? (document.getElementById('input-islem-payment-order-id')?.value || '') : '';
@@ -5275,6 +5292,9 @@ window.saveIslem = function() {
             : (newAttachment || original?.ek || null);
 
         if (!Number.isFinite(tutar) || tutar <= 0) return alert("Geçerli bir tutar girin!");
+        if (!original && financeDay(tarihInput) === null) return alert('Geçerli bir işlem tarihi seçin.');
+        if (!original && financeDay(tarihInput) > financeDay(toDateInputValue(new Date()))) return alert('İşlem tarihi bugünden ileri olamaz. Gelecekteki ödemeler için Vade Planı kullanın.');
+        const islemTarihi = getIslemDateTime(tarihInput);
         if (original && tip === 'fatura_kes') return alert('Fatura hareketleri cari geçmişinden düzeltilemez. Faturalar bölümünü kullanın.');
         if (tip === 'fatura_kes' && !faturaNo.trim()) return alert("Fatura kesmek için Fatura No girmek zorunludur!");
         if (tip === 'fatura_kes' && hasDuplicateInvoiceNo(faturaNo, { tur: 'kesilen' })) return alert('Bu fatura numarası daha önce kullanılmış. Farklı bir fatura numarası girin.');
@@ -5363,7 +5383,8 @@ window.saveIslem = function() {
             orderNo: relatedOrder?.orderNo || '',
             isSuccess: isSuccess,
             isGelir: isGelir,
-            ek
+            ek,
+            tarih: islemTarihi
         });
         scheduleAttachmentArchive(ek, 'Cari Islemler', cari.adi);
 
@@ -5374,7 +5395,8 @@ window.saveIslem = function() {
                 tutar,
                 aciklama: `${cari.adi} - ${tipText}`,
                 kaynak: 'cari-islem',
-                refId: hareket?.id || null
+                refId: hareket?.id || null,
+                tarih: islemTarihi
             });
             if (!cashMovement) {
                 db.islemler = getDBArray('islemler').filter(item => String(item.id) !== String(hareket?.id));
@@ -5397,7 +5419,8 @@ window.saveIslem = function() {
                 firma: cari.adi,
                 aciklama: linkedOrder ? (aciklama || `${linkedOrder.orderNo} faturası`) : aciklama,
                 tutar: tutar,
-                tarih: new Date().toLocaleDateString('tr-TR'),
+                tarih: toTRDateFromInput(tarihInput),
+                faturaTarihi: toTRDateFromInput(tarihInput),
                 cariYansitildi: true,
                 cariBakiyeDegisimi: bakiyeArtisi,
                 cariIslemId: hareket?.id || null,
@@ -5414,7 +5437,7 @@ window.saveIslem = function() {
         if (linkedOrder) {
             linkedOrder.faturaKesildi = true;
             linkedOrder.faturaNo = faturaNo;
-            linkedOrder.faturaTarihi = new Date().toLocaleString('tr-TR');
+            linkedOrder.faturaTarihi = toTRDateFromInput(tarihInput);
             if (bakiyeArtisi !== 0) {
                 linkedOrder.bakiyeCariyeYansitildi = true;
             }
@@ -5804,6 +5827,8 @@ window.updateIslemTipiInfo = function() {
     const kasaContainer = document.getElementById('islem-kasa-container');
     if (!infoEl) return;
     const buying=tip==='sac_alimi';document.getElementById('sheet-purchase-fields').hidden=!buying;
+    // Corrections are booked on the day they are made so printed periods stay unchanged.
+    const dateContainer=document.getElementById('islem-tarih-container');if(dateContainer)dateContainer.hidden=buying||!!document.getElementById('input-islem-edit-id')?.value;
     const amountInput=document.getElementById('input-islem-tutar');if(!buying&&amountInput.dataset.turkishMoney==='true'){const amount=parseSheetPurchaseDocumentTotal(amountInput.value);amountInput.value=Number.isFinite(amount)?String(amount):'';}amountInput.readOnly=false;amountInput.type=buying?'text':'number';amountInput.inputMode=buying?'decimal':'';amountInput.dataset.turkishMoney=buying?'true':'false';document.getElementById('sheet-purchase-amount-help').hidden=!buying;
     document.getElementById('input-islem-tutar-label').textContent=buying?'Kaydedilecek toplam alış tutarı (₺)':'Tutar (₺)';
     if(buying)updateSheetPurchaseSummary();
@@ -6288,6 +6313,30 @@ function validateStockUsage(stock, field, quantity, excludeOrderId=null) {
     }
     return secondary;
 }
+// Plate/KG conversion depends on the card's count, weight and size, so an edit can turn a valid
+// KG reservation into more plates than exist. Every waiting order must remain deliverable.
+function getStockEditReservationError(stock, changes) {
+    const orders = getDBArray('isEmirleri').filter(order => orderReservesStock(order) && String(order.stokId) === String(stock.id));
+    if (!orders.length) return '';
+    const previous = { miktar: stock.miktar, kg: stock.kg, en: stock.en, boy: stock.boy, mm: stock.mm };
+    try {
+        Object.assign(stock, changes);
+        for (const field of ['miktar', 'kg']) {
+            const reserved = getReservedStockQuantity(stock.id, field);
+            if (reserved > (Number(stock[field]) || 0)) return `Aktif iş emirleri bu karttan ${reserved} ${field === 'kg' ? 'KG' : 'adet/plaka'} ayırıyor. Yeni değerlerle bu ayrım karşılanamıyor; önce iş emirlerini kontrol edin.`;
+        }
+        for (const order of orders) {
+            const usage = getOrderStockUsage(order);
+            if (!usage) continue;
+            try { validateStockUsage(stock, usage.field, usage.quantity, order.id); }
+            catch (error) { return `${order.orderNo || 'İş emri'} yeni stok değerleriyle teslim edilemez: ${error.message}`; }
+        }
+        return '';
+    } finally {
+        Object.assign(stock, previous);
+    }
+}
+
 function getReservedStockQuantity(stokId, field = 'miktar', excludeOrderId = null) {
     if (stokId === undefined || stokId === null || String(stokId) === '0') return 0;
     const stock=getDBArray('stoklar').find(s=>String(s.id)===String(stokId));
@@ -10132,15 +10181,19 @@ function syncCekSenetCariEffect(record, kasaId = '') {
         record.kasaHareketId = cashMovement?.id || null;
     } else if (!shouldReflect && alreadyReflected) {
         const oldDelta = typeof record.cariBakiyeDegisimi === 'number' ? record.cariBakiyeDegisimi : delta;
-        addCariMovement(cari, {
+        // Link the reversal so the settled movement cannot be undone a second time from the account history.
+        const original = getDBArray('islemler').find(item => String(item.id) === String(record.cariIslemId) && !item.reversedBy);
+        const reversal = addCariMovement(cari, {
             tip: `${getCekSenetTypeLabel(record.tip)} Geri Alındı`,
             aciklama: `${record.belgeNo || 'Belge'} durumu ${getCekSenetStatusLabel(record.durum)} yapıldı; cari etkisi geri alındı.`,
             tutar: record.tutar,
             bakiyeDegisimi: -oldDelta,
             isSuccess: false,
             isGelir: false,
+            reversalOf: original?.id || null,
             ek: record.ek || null
         });
+        if (original && reversal) original.reversedBy = reversal.id;
         record.cariYansitildi = false;
         record.cariBakiyeDegisimi = 0;
         record.cariIslemId = null;
@@ -11006,6 +11059,8 @@ window.deleteFatura = function(id) {
                 order.faturaKesildi = false;
                 order.faturaNo = '';
                 order.faturaTarihi = '';
+                // The invoice carried the order's receivable; reversing it returns the order to "not reflected".
+                if (fatura.cariYansitildi && roundMoney(originalBakiyeDegisimi) !== 0) order.bakiyeCariyeYansitildi = false;
             }
         }
 
@@ -11716,6 +11771,13 @@ function buildAccountCheckReport(database = db) {
             }
             if (row.reversedBy != null && String(reversalSource(map.get(String(row.reversedBy)))) !== String(row.id)) add('error',category,`Geri alınan işlem · ${row.id}`,'İşaretlenen ters kayıt bulunamıyor veya kaynak bağlantısı farklı.',target,targetId);
         }
+    }
+    for (const order of database.isEmirleri || []) {
+        if (order.customerId === 'internal') continue;
+        const charges = movements.filter(m => m.orderId != null && String(m.orderId) === String(order.id) && !isIncomeMovement(m));
+        const net = roundMoney(charges.reduce((n,m) => n + (Number(m.bakiyeDegisimi) || 0), 0));
+        const expected = order.bakiyeCariyeYansitildi === true ? roundMoney(order.total) : 0;
+        if ((charges.length || expected) && net !== expected) add('review','İş Emri',order.orderNo || 'İş emri',`İş emrinin cari borç etkisi ${formatCurrency(net)}, beklenen ${formatCurrency(expected)} (${order.bakiyeCariyeYansitildi ? 'cariye yansıtıldı' : 'cariye yansıtılmadı'}). Teslim, fatura ve iptal kayıtları kontrol edilmeli.`,'order',order.id);
     }
     for (const sale of database.hizliSatislar || []) {
         const issue = getQuickSaleLinkError(sale, database);
