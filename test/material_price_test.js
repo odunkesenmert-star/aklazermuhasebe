@@ -61,7 +61,27 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),{JSDOM}=require
 
  // Printed quote shows the material weight and KG price.
  w.printQuoteById(db().teklifler.find(q=>q.materialKgPrice===50).id);const printed=d.querySelector('.print-preview-frame').getAttribute('srcdoc');
- assert(printed.includes('₺50,00/KG')&&printed.includes(`${w.formatPrintQuantity(w.roundMoney(w.roundMoney(50*plateWeight)*2/50))} KG`));
+ const pdoc=new JSDOM(printed).window.document,materialRow=[...pdoc.querySelectorAll('.doc-lines tbody tr')].find(r=>r.textContent.includes('Sac Malzeme'));
+ assert(materialRow.querySelector('.line-qty').textContent.includes(w.formatPrintQuantity(w.roundMoney(plateWeight*2)))&&materialRow.querySelector('.line-qty').textContent.includes('KG'));assert(materialRow.textContent.includes('₺50,00')&&materialRow.textContent.includes('2 plakadan'));
+
+ // Material billed by the parts' weight, not by the whole plates; plates still reserve stock.
+ const kgInput=()=>d.getElementById('quote-material-kg');
+ choose('lazer',11,5);set('quote-material-qty',1);fire('quote-material-qty','input');assert.equal(kgInput().value,String(w.roundMoney(plateWeight)),'Full plate weight is shown until a weight is typed');
+ set('quote-material-qty',2);fire('quote-material-qty','input');assert.equal(kgInput().value,String(w.roundMoney(plateWeight*2)),'Shown weight follows the plate count');
+ set('quote-material-qty',1);fire('quote-material-qty','input');set('quote-minutes',60);set('quote-rate',30);set('quote-discount',0);set('quote-tax-rate',20);set('quote-description','Flanş');
+ set('quote-material-price',45);fire('quote-material-price','input');set('quote-material-kg',40);fire('quote-material-kg','input');
+ assert(hint().textContent.includes('40 KG × ₺45,00')&&hint().textContent.includes(`1 plaka = ${w.formatPrintQuantity(w.roundMoney(plateWeight))} KG`));
+ assert(d.getElementById('summary-mat').textContent.includes('1.800,00'));
+ set('quote-material-qty',2);fire('quote-material-qty','input');assert.equal(kgInput().value,'40','A typed weight is kept when the plate count changes');
+ set('quote-material-qty',1);let data=w.getQuoteData();assert.equal(data.materialKg,40);assert.equal(data.materialCost,1800);assert.equal(data.stokQty,1);
+ w.saveQuote();const kgQuote=db().teklifler.at(-1);assert.equal(kgQuote.materialCost,1800);
+ w.loadQuote(kgQuote.id);assert.equal(kgInput().value,'40');assert.equal(kgInput().dataset.manual,'true');assert.equal(w.getQuoteData().total,kgQuote.total);
+ w.printQuoteById(kgQuote.id);const kgRow=[...new JSDOM(d.querySelector('.print-preview-frame').getAttribute('srcdoc')).window.document.querySelectorAll('.doc-lines tbody tr')].find(r=>r.textContent.includes('Sac Malzeme'));
+ assert(kgRow.querySelector('.line-qty').textContent.replace(/\s/g,'')==='40KG');assert(kgRow.textContent.includes('₺45,00')&&kgRow.textContent.includes('₺1.800,00')&&kgRow.textContent.includes('1 plakadan'));
+ const reservedBefore=w.getReservedStockQuantity(5,'miktar');w.approveSavedQuoteAsOrder(kgQuote.id);assert.equal(w.getReservedStockQuantity(5,'miktar'),reservedBefore+1,'The plate is still reserved for the job');
+ // Changing the material clears a typed weight.
+ choose('lazer',11,6);assert.equal(kgInput().dataset.manual,'false');assert.equal(kgInput().value,String(w.roundMoney(529.875/5)));
+ set('quote-material-kg',-3);fire('quote-material-kg','input');alerts.length=0;laser();assert.equal(w.getQuoteData(),null);assert(alerts.at(-1).includes('Satılan malzeme ağırlığı'));
  // Material choices state that the listed price is cost.
  w.updateQuoteMaterials();assert([...d.getElementById('quote-material').options].some(o=>o.textContent.includes('Maliyet ₺37,50/KG')));
 

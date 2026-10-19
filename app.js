@@ -286,11 +286,11 @@ const DB_NUMERIC_FIELDS = {
     cariler: ['bakiye', 'ledgerOpeningBalance'],
     stoklar: ['miktar', 'kg', 'en', 'boy', 'maliyet', 'kritikSeviye'],
     islemler: ['tutar', 'bakiyeDegisimi'],
-    teklifler: ['minutes', 'rate', 'kgAmount', 'kgPrice', 'stokQty', 'operationCost', 'materialCost', 'subTotalBeforeDiscount', 'discountPercent', 'discountAmount', 'subTotal', 'taxRate', 'tax', 'total', 'materialKgPrice', 'materialCostKg'],
+    teklifler: ['minutes', 'rate', 'kgAmount', 'kgPrice', 'stokQty', 'operationCost', 'materialCost', 'subTotalBeforeDiscount', 'discountPercent', 'discountAmount', 'subTotal', 'taxRate', 'tax', 'total', 'materialKgPrice', 'materialCostKg', 'materialKg'],
     giderler: ['tutar', 'matrah', 'kdvOrani', 'kdvTutari'],
     faturalar: ['matrah', 'kdvOrani', 'kdvTutari', 'tutar', 'cariBakiyeDegisimi'],
     isEmirleri: [
-        'minutes', 'rate', 'kgAmount', 'kgPrice', 'stokQty', 'operationCost', 'materialCost', 'materialKgPrice', 'materialCostKg',
+        'minutes', 'rate', 'kgAmount', 'kgPrice', 'stokQty', 'operationCost', 'materialCost', 'materialKgPrice', 'materialCostKg', 'materialKg',
         'subTotalBeforeDiscount', 'discountPercent', 'discountAmount', 'subTotal', 'taxRate', 'tax', 'total',
         'profitNetRevenue', 'costMaterial', 'costMachineMinutes', 'costMachineRate', 'costMachine',
         'costLaborHours', 'costLaborRate', 'costLabor', 'costExternal', 'costShipping', 'costOther',
@@ -758,18 +758,21 @@ function calculateQuoteAmounts({
     kgPrice = 0,
     materialCostPerUnit = 0,
     stokQty = 0,
+    materialAmount = null,
     discountPercent = 0,
     taxRate = 0
 } = {}) {
     let rawOperationCost = 0;
     let rawMaterialCost = 0;
 
+    // Material is billed by weight (KG × KG price) when given; otherwise by whole plates.
+    const plateMaterialCost = Number.isFinite(Number(materialAmount)) && materialAmount !== null ? Number(materialAmount) : materialCostPerUnit * stokQty;
     if (islemTipi === 'lazer') {
         rawOperationCost = minutes * rate;
-        rawMaterialCost = materialCostPerUnit * stokQty;
+        rawMaterialCost = plateMaterialCost;
     } else if (isKgPricedOperation(islemTipi) && islemTipi !== 'hammadde') {
         rawOperationCost = kgAmount * kgPrice;
-        rawMaterialCost = materialCostPerUnit * stokQty;
+        rawMaterialCost = plateMaterialCost;
     } else if (islemTipi === 'hammadde') {
         rawMaterialCost = kgAmount * kgPrice;
     }
@@ -1503,8 +1506,14 @@ function getWorkLineItems(record, fallbackDescription = '', database = db) {
     if (record.islemTipi !== 'hammadde' && materialCost > 0) {
         const quantity = Number(record.stokQty) || 0;
         const kgPrice = Number(record.materialKgPrice);
-        const weightChips = kgPrice > 0 ? [`${formatPrintQuantity(roundMoney(materialCost / kgPrice))} KG`, `${formatCurrency(kgPrice)}/KG`] : [];
-        items.push({ title: 'Sac Malzeme', description: 'İşletme stoğundan temin edilir', chips: [...getStockPrintChips(stock), ...weightChips], quantity: quantity || null, unit: 'plaka', unitPrice: quantity ? roundMoney(materialCost / quantity) : null, amount: materialCost });
+        const billedKg = Number(record.materialKg);
+        if (kgPrice > 0 && billedKg > 0) {
+            // Weight-priced material: quantity is the billed KG, the plate count is only context.
+            items.push({ title: 'Sac Malzeme', description: 'İşletme stoğundan temin edilir', chips: [...getStockPrintChips(stock), quantity ? `${formatPrintQuantity(quantity)} plakadan` : ''].filter(Boolean), quantity: billedKg, unit: 'KG', unitPrice: kgPrice, amount: materialCost });
+        } else {
+            const weightChips = kgPrice > 0 ? [`${formatPrintQuantity(roundMoney(materialCost / kgPrice))} KG`, `${formatCurrency(kgPrice)}/KG`] : [];
+            items.push({ title: 'Sac Malzeme', description: 'İşletme stoğundan temin edilir', chips: [...getStockPrintChips(stock), ...weightChips], quantity: quantity || null, unit: 'plaka', unitPrice: quantity ? roundMoney(materialCost / quantity) : null, amount: materialCost });
+        }
     }
     const gross = roundMoney(record.subTotalBeforeDiscount ?? (Number(record.subTotal || 0) + Number(record.discountAmount || 0)));
     const sum = roundMoney(items.reduce((total, item) => total + item.amount, 0));
@@ -8348,6 +8357,38 @@ function getQuoteMaterialKgPrice(type, stock, customerId) {
     return getMaterialPriceSuggestion(customerId, stock, activeQuoteId)?.price ?? getStockCostPerKg(stock);
 }
 
+// Material weight typed by the user (usually the parts' weight); null means bill the whole plates.
+function getQuoteManualMaterialKg(type, stock) {
+    if (!stock || stock.sahibiTipi === 'musteri' || type === 'hammadde') return null;
+    const input = document.getElementById('quote-material-kg');
+    return input?.dataset.manual === 'true' && plainText(input.value) !== '' ? Number(input.value) : null;
+}
+
+function getQuoteFullPlateKg(stock) {
+    const plates = Math.max(0, Number(document.getElementById('quote-material-qty')?.value) || 0);
+    return roundMoney(getStockPlateWeight(stock) * plates);
+}
+
+function getQuoteMaterialKg(type, stock) {
+    if (!stock || stock.sahibiTipi === 'musteri' || type === 'hammadde') return null;
+    return getQuoteManualMaterialKg(type, stock) ?? getQuoteFullPlateKg(stock);
+}
+
+window.syncQuoteMaterialKg = function() {
+    const type = document.getElementById('quote-type')?.value || 'lazer';
+    const stock = getQuoteFormStock();
+    const input = document.getElementById('quote-material-kg');
+    if (!input || input.dataset.manual === 'true') return;
+    input.value = stock && stock.sahibiTipi !== 'musteri' && type !== 'hammadde' ? getQuoteFullPlateKg(stock) : '';
+};
+
+window.markQuoteMaterialKgManual = function() {
+    const input = document.getElementById('quote-material-kg');
+    if (input) input.dataset.manual = plainText(input.value) === '' ? 'false' : 'true';
+    if (input?.dataset.manual === 'false') syncQuoteMaterialKg();
+    markQuoteMaterialPriceManual(false);
+};
+
 function renderQuoteMaterialPriceHint(type, stock, suggestion) {
     const hint = document.getElementById(type === 'hammadde' ? 'quote-kg-price-hint' : 'quote-material-price-hint');
     const other = document.getElementById(type === 'hammadde' ? 'quote-material-price-hint' : 'quote-kg-price-hint');
@@ -8366,6 +8407,13 @@ function renderQuoteMaterialPriceHint(type, stock, suggestion) {
         ? `Öneri: ${plainText(customerName).replace(/\s*\(.*\)$/, '')} için son fiyat ${formatCurrency(suggestion.price)}/KG${suggestion.teklifNo ? ` (${suggestion.teklifNo}${suggestion.tarih ? `, ${suggestion.tarih}` : ''})` : ''}`
         : suggestion.source === 'cost' ? 'Firma içi iş: maliyet fiyatı' : `Öneri: maliyet + %${suggestion.margin.toLocaleString('tr-TR')} = ${formatCurrency(suggestion.price)}/KG`);
     if (belowCost) parts.push('Fiyat maliyetin altında');
+    const billedKg = getQuoteMaterialKg(type, stock);
+    if (billedKg !== null && Number.isFinite(billedKg) && Number.isFinite(price)) {
+        const plates = Math.max(0, Number(document.getElementById('quote-material-qty')?.value) || 0);
+        const fullKg = getQuoteFullPlateKg(stock);
+        parts.push(`Malzeme bedeli: ${formatPrintQuantity(billedKg)} KG × ${formatCurrency(price)}`);
+        parts.push(getQuoteManualMaterialKg(type, stock) === null ? 'Tam plaka ağırlığı faturalanıyor; parça ağırlığını KG alanına yazabilirsiniz' : `${formatPrintQuantity(plates)} plaka = ${formatPrintQuantity(fullKg)} KG`);
+    }
     hint.textContent = parts.join(' · ');
     hint.classList.toggle('is-warning', belowCost);
     hint.hidden = false;
@@ -8383,13 +8431,16 @@ window.updateQuoteMaterialPrice = function(reset = false) {
         input.value = suggestion.price;
         input.dataset.manual = 'false';
     }
+    const kgInput = document.getElementById('quote-material-kg');
+    if (kgInput && reset) kgInput.dataset.manual = 'false';
+    syncQuoteMaterialKg();
     renderQuoteMaterialPriceHint(type, stock, suggestion);
 };
 
-window.markQuoteMaterialPriceManual = function() {
+window.markQuoteMaterialPriceManual = function(markPrice = true) {
     const type = document.getElementById('quote-type')?.value || 'lazer';
     const input = getQuoteMaterialPriceInput(type);
-    if (input) input.dataset.manual = 'true';
+    if (input && markPrice !== false) input.dataset.manual = 'true';
     const stock = getQuoteFormStock();
     renderQuoteMaterialPriceHint(type, stock, stock && stock.sahibiTipi !== 'musteri' ? getMaterialPriceSuggestion(document.getElementById('quote-customer')?.value || '', stock, activeQuoteId) : null);
     calculateQuote();
@@ -8490,6 +8541,12 @@ function getQuoteData() {
     const materialCostPerUnit = materialKgPrice === null ? getStockPlateCost(stok) : roundMoney(materialKgPrice * getStockPlateWeight(stok));
     const ownMaterial = !!stok && stok.sahibiTipi !== 'musteri';
     const quotedKgPrice = ownMaterial ? (islemTipi === 'hammadde' ? kgPrice : materialKgPrice) : null;
+    const manualMaterialKg = getQuoteManualMaterialKg(islemTipi, stok);
+    if (manualMaterialKg !== null && (!Number.isFinite(manualMaterialKg) || manualMaterialKg < 0)) {
+        alert('Satılan malzeme ağırlığı (KG) sıfır veya daha büyük bir sayı olmalıdır.');
+        return null;
+    }
+    const materialKg = ownMaterial && islemTipi !== 'hammadde' ? (manualMaterialKg ?? roundMoney(getStockPlateWeight(stok) * stokQty)) : null;
     const amounts = calculateQuoteAmounts({
         islemTipi,
         minutes,
@@ -8498,6 +8555,7 @@ function getQuoteData() {
         kgPrice,
         materialCostPerUnit,
         stokQty,
+        materialAmount: manualMaterialKg !== null && materialKgPrice !== null ? roundMoney(manualMaterialKg * materialKgPrice) : null,
         discountPercent,
         taxRate
     });
@@ -8547,6 +8605,7 @@ function getQuoteData() {
         odemeSekli,
         gecerlilikGun,
         materialKgPrice: quotedKgPrice === null ? null : roundMoney(quotedKgPrice),
+        materialKg: materialKg === null ? null : roundMoney(materialKg),
         materialCostKg: ownMaterial ? getStockCostPerKg(stok) : null,
         materialKey: ownMaterial ? getMaterialPriceKey(stok) : ''
     };
@@ -8657,6 +8716,14 @@ window.loadQuote = function(id) {
         : (plateWeight > 0 && Number(quote.stokQty) > 0 ? roundMoney(Number(quote.materialCost || 0) / (plateWeight * Number(quote.stokQty))) : '');
     const materialPriceInput = document.getElementById('quote-material-price');
     if (materialPriceInput) { materialPriceInput.value = quote.islemTipi === 'hammadde' ? '' : savedKgPrice; materialPriceInput.dataset.manual = 'true'; }
+    // A saved weight different from the full plates means the quote was priced by parts' weight.
+    const materialKgInput = document.getElementById('quote-material-kg');
+    const fullPlateKg = roundMoney(plateWeight * (Number(quote.stokQty) || 0));
+    if (materialKgInput) {
+        const weightPriced = Number.isFinite(Number(quote.materialKg)) && quote.materialKg !== null && Math.abs(Number(quote.materialKg) - fullPlateKg) > 0.005;
+        materialKgInput.value = weightPriced ? quote.materialKg : fullPlateKg || '';
+        materialKgInput.dataset.manual = weightPriced ? 'true' : 'false';
+    }
     document.getElementById('quote-kg-price').dataset.manual = 'true';
     document.getElementById('quote-discount').value = quote.discountPercent ?? 0;
     document.getElementById('quote-tax-rate').value = quote.taxRate ?? 20;
@@ -10609,6 +10676,7 @@ window.calculateQuote = function() {
     const materialQty = readPreviewNumber(inputMaterialQty);
     const discountPercent = readPreviewNumber(inputDiscount);
     const taxRatePercent = readPreviewNumber(selectTax, 20);
+    const previewManualKg = getQuoteManualMaterialKg(type, stok);
     const amounts = calculateQuoteAmounts({
         islemTipi: type,
         minutes: readPreviewNumber(inputMinutes),
@@ -10617,6 +10685,7 @@ window.calculateQuote = function() {
         kgPrice: readPreviewNumber(inputKgPrice),
         materialCostPerUnit,
         stokQty: materialQty,
+        materialAmount: previewManualKg !== null && Number.isFinite(previewManualKg) && Number.isFinite(previewKgPrice) && previewKgPrice !== null ? roundMoney(Math.max(0, previewManualKg) * Math.max(0, previewKgPrice)) : null,
         discountPercent,
         taxRate: taxRatePercent
     });

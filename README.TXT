@@ -241,3 +241,8 @@ ANLAŞILIR KAYIT KODLARI (1.5.18)
 - Öneri: aynı müşteriye aynı malzeme (cins + kalınlık) için verilen son teklif fiyatı; yoksa alış maliyeti + Ayarlar'daki "Malzeme Kâr Oranı (%)". Firma içi işlerde maliyet önerilir.
 - Alanın altında maliyet, kâr oranı ve önerinin kaynağı gösterilir; maliyetin altındaki fiyat uyarı verir. Hammadde satışında KG fiyatı da aynı şekilde önerilir.
 - İş emri kârlılığı malzemeyi gerçek alış maliyetinden hesaplamaya devam eder. Yazdırılan teklifte malzeme KG'si ve KG fiyatı görünür.
+
+1.5.26 — Malzemeyi KG ile fiyatlandırma
+- Teklifte "Kullanılacak Plaka (Stoktan)" yalnızca stok ayırır; malzeme bedeli "Satılan Malzeme (KG)" × "Malzeme Satış Fiyatı (₺/KG)" ile hesaplanır.
+- KG alanı seçilen plakaların tam ağırlığıyla dolu gelir; parça ağırlığı yazıldığında o kullanılır ve plaka adedi değişse de korunur. Malzeme değişince tam ağırlığa döner.
+- Bilgi satırı KG × fiyat hesabını ve plaka ağırlığını gösterir; yazdırılan teklifte malzeme satırı KG ve KG fiyatıyla basılır. Eski teklifler aynı tutarla yüklenir.
